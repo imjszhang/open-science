@@ -24,7 +24,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useSettingsStore } from '@/stores/settings-store'
+import { selectAnyInstalling, useSettingsStore } from '@/stores/settings-store'
 import { ModelFrameworkCompatibilityAlert } from './ModelFrameworkCompatibilityAlert'
 import { ClaudeInstallCard } from './ClaudeInstallCard'
 import { ClaudeStatusCard } from './ClaudeStatusCard'
@@ -44,8 +44,10 @@ import { ActiveModelSelect } from './ActiveModelSelect'
 import { ProviderForm } from './ProviderForm'
 import {
   createEmptyProviderFormValue,
+  defaultProviderKindKey,
   getProviderFormErrors,
   hasProviderFormErrors,
+  providerKindPatch,
   type ProviderFormValue
 } from './provider-form-value'
 import { ProviderList } from './ProviderList'
@@ -168,10 +170,12 @@ const SettingsPage = ({ open, onClose }: SettingsPageProps): React.JSX.Element =
   const isDetectingCodex = useSettingsStore((state) => state.isDetectingCodex)
   const detectCodex = useSettingsStore((state) => state.detectCodex)
   const installCodex = useSettingsStore((state) => state.installCodex)
-  const isInstalling = useSettingsStore((state) => state.isInstalling)
-  const installLogs = useSettingsStore((state) => state.installLogs)
-  const installProgress = useSettingsStore((state) => state.installProgress)
-  const installError = useSettingsStore((state) => state.installError)
+  // Per-runtime install slices: each card renders only its own progress/logs/error (issue #278).
+  const claudeInstall = useSettingsStore((state) => state.installStates['claude-code'])
+  const opencodeInstall = useSettingsStore((state) => state.installStates.opencode)
+  const codexInstall = useSettingsStore((state) => state.installStates.codex)
+  // Any install running locks the framework selector and every card's uninstall button.
+  const anyInstalling = useSettingsStore(selectAnyInstalling)
   const npmAvailable = useSettingsStore((state) => state.npmAvailable)
   const encryptionAvailable = useSettingsStore((state) => state.encryptionAvailable)
   const claudeManaged = useSettingsStore((state) => state.claudeManaged)
@@ -418,13 +422,16 @@ const SettingsPage = ({ open, onClose }: SettingsPageProps): React.JSX.Element =
 
   // Seed the form value when entering a create/edit sub-view (adjust-state-during-render, keyed on the
   // sub-view so typing isn't clobbered by background store updates; edit guards until the provider
-  // loads). Also clears any stale status message on entry.
+  // loads). A create pre-selects the official vendor matching the active agent framework. Also
+  // clears any stale status message on entry.
   const modelViewKey = modelView.kind === 'edit' ? `edit:${modelView.providerId}` : modelView.kind
   const [seededModelView, setSeededModelView] = useState(modelViewKey)
   if (modelViewKey !== seededModelView) {
     setSeededModelView(modelViewKey)
     if (modelView.kind === 'create') {
-      setFormValue(createEmptyProviderFormValue())
+      setFormValue(
+        createEmptyProviderFormValue(providerKindPatch(defaultProviderKindKey(agentFrameworkId)))
+      )
     } else if (modelView.kind === 'edit') {
       const provider = providers.find((entry) => entry.id === modelView.providerId)
       if (provider) setFormValue(toFormValue(provider))
@@ -862,18 +869,19 @@ const SettingsPage = ({ open, onClose }: SettingsPageProps): React.JSX.Element =
                           onDetect={() => void detectClaude()}
                           active={agentFrameworkId === 'claude-code'}
                           onSelect={() => requestSwitch('claude-code')}
-                          selectDisabled={isInstalling || isUninstalling}
+                          selectDisabled={anyInstalling || isUninstalling}
                           managed={claudeManaged}
                           isUninstalling={isUninstalling && pendingUninstall === 'claude'}
-                          isInstalling={isInstalling}
+                          isInstalling={anyInstalling}
                           onUninstall={() => setPendingUninstall('claude')}
                         />
                         {!preflight.claudeReady ? (
                           <ClaudeInstallCard
-                            isInstalling={isInstalling}
-                            installLogs={installLogs}
-                            installProgress={installProgress}
-                            installError={installError}
+                            isInstalling={claudeInstall.isInstalling}
+                            installLogs={claudeInstall.installLogs}
+                            installProgress={claudeInstall.installProgress}
+                            installError={claudeInstall.installError}
+                            installBusy={anyInstalling}
                             npmAvailable={npmAvailable}
                             onInstall={(source) => void installClaude(source)}
                           />
@@ -883,15 +891,16 @@ const SettingsPage = ({ open, onClose }: SettingsPageProps): React.JSX.Element =
                           opencodeReady={preflight.opencodeReady}
                           isDetecting={isDetectingOpencode}
                           onDetect={() => void detectOpencode()}
-                          isInstalling={isInstalling}
-                          installLogs={installLogs}
-                          installProgress={installProgress}
-                          installError={installError}
+                          isInstalling={opencodeInstall.isInstalling}
+                          installLogs={opencodeInstall.installLogs}
+                          installProgress={opencodeInstall.installProgress}
+                          installError={opencodeInstall.installError}
+                          installBusy={anyInstalling}
                           npmAvailable={npmAvailable}
                           onInstall={(source) => void installOpencode(source)}
                           active={agentFrameworkId === 'opencode'}
                           onSelect={() => requestSwitch('opencode')}
-                          selectDisabled={isInstalling || isUninstalling}
+                          selectDisabled={anyInstalling || isUninstalling}
                           managed={opencodeManaged}
                           isUninstalling={isUninstalling && pendingUninstall === 'opencode'}
                           onUninstall={() => setPendingUninstall('opencode')}
@@ -901,15 +910,16 @@ const SettingsPage = ({ open, onClose }: SettingsPageProps): React.JSX.Element =
                           codexReady={preflight.codexReady}
                           isDetecting={isDetectingCodex}
                           onDetect={() => void detectCodex()}
-                          isInstalling={isInstalling}
-                          installLogs={installLogs}
-                          installProgress={installProgress}
-                          installError={installError}
+                          isInstalling={codexInstall.isInstalling}
+                          installLogs={codexInstall.installLogs}
+                          installProgress={codexInstall.installProgress}
+                          installError={codexInstall.installError}
+                          installBusy={anyInstalling}
                           npmAvailable={npmAvailable}
                           onInstall={(source) => void installCodex(source)}
                           active={agentFrameworkId === 'codex'}
                           onSelect={() => requestSwitch('codex')}
-                          selectDisabled={isInstalling || isUninstalling}
+                          selectDisabled={anyInstalling || isUninstalling}
                           managed={codexManaged}
                           isUninstalling={isUninstalling && pendingUninstall === 'codex'}
                           onUninstall={() => setPendingUninstall('codex')}

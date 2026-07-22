@@ -100,6 +100,47 @@ describe('codexFramework', () => {
     expect(config.env?.CODEX_CONFIG).not.toContain('upstream-secret')
   })
 
+  it('drives a native-Responses vendor directly on its OpenAI /v1 base, ignoring the bridge', () => {
+    const framework = createCodexFramework()
+    // A dual-endpoint vendor (e.g. MiniMax) advertises openai + responses and keeps its Anthropic
+    // route in baseUrl and its OpenAI/Responses /v1 root in openaiBaseUrl. Even if a bridge object
+    // is present, native Responses must post to the vendor's own /v1 base with the vendor key.
+    const config = framework.prepareModelConfig(
+      {
+        type: 'custom',
+        apiEndpoints: ['anthropic', 'openai', 'responses'],
+        baseUrl: 'https://api.minimaxi.com/anthropic',
+        openaiBaseUrl: 'https://api.minimaxi.com/v1',
+        model: 'MiniMax-M3',
+        key: 'mm-secret'
+      },
+      {
+        storageRoot: '/data',
+        executablePath: '/runtime/codex-acp',
+        responsesBridge: { baseUrl: 'http://127.0.0.1:43123/v1', token: 'local-token' }
+      }
+    )
+
+    expect(JSON.parse(config.env?.CODEX_CONFIG ?? '')).toMatchObject({
+      model: 'MiniMax-M3',
+      model_providers: {
+        'open-science': {
+          base_url: 'https://api.minimaxi.com/v1',
+          requires_openai_auth: true,
+          wire_api: 'responses'
+        }
+      }
+    })
+    // Direct native path: vendor key auth, no bridge provider-configuration, no bridge model.
+    expect(config.authentication).toEqual({
+      methodId: 'api-key',
+      _meta: { 'api-key': { apiKey: 'mm-secret' } }
+    })
+    expect(config.providerConfiguration).toBeUndefined()
+    expect(config.sessionModel).toBeUndefined()
+    expect(config.env?.CODEX_CONFIG).not.toContain('127.0.0.1:43123')
+  })
+
   it('reuses the normal Codex profile for a shared subscription without overriding it', () => {
     const framework = createCodexFramework()
     const config = framework.prepareModelConfig(
@@ -118,6 +159,81 @@ describe('codexFramework', () => {
     )
 
     expect(config).toEqual({ env: { CODEX_HOME: join('/data', 'codex-subscription') } })
+  })
+
+  it('seeds the selected model into CODEX_CONFIG for an isolated Codex subscription', () => {
+    // Without a model here, codex-acp falls back to its account default and we have to switch the
+    // model via session/set_config_option after session creation. The late switch makes the first
+    // prompt of every new session wait ~2 min for the new model to come online (issue #277).
+    const framework = createCodexFramework()
+    const config = framework.prepareModelConfig(
+      {
+        type: 'codex-isolated',
+        apiEndpoints: ['responses'],
+        model: 'gpt-5.6-terra'
+      },
+      { storageRoot: '/data', executablePath: '/runtime/codex-acp' }
+    )
+
+    expect(config.env?.CODEX_HOME).toBe(join('/data', 'codex-subscription'))
+    expect(JSON.parse(config.env?.CODEX_CONFIG ?? '')).toEqual({ model: 'gpt-5.6-terra' })
+  })
+
+  it('seeds reasoning effort alongside the model for an isolated Codex subscription', () => {
+    const framework = createCodexFramework()
+    const config = framework.prepareModelConfig(
+      {
+        type: 'codex-isolated',
+        apiEndpoints: ['responses'],
+        model: 'gpt-5.6-terra'
+      },
+      {
+        storageRoot: '/data',
+        executablePath: '/runtime/codex-acp',
+        reasoningEffort: 'high'
+      }
+    )
+
+    expect(JSON.parse(config.env?.CODEX_CONFIG ?? '')).toEqual({
+      model: 'gpt-5.6-terra',
+      model_reasoning_effort: 'high'
+    })
+  })
+
+  it('seeds reasoning effort without a model for an isolated Codex subscription', () => {
+    // No model picked but the user set an effort: still worth seeding so codex-acp does not have
+    // to apply it via session/set_config_option (issue #277, same root cause as the model case).
+    const framework = createCodexFramework()
+    const config = framework.prepareModelConfig(
+      { type: 'codex-isolated', apiEndpoints: ['responses'] },
+      {
+        storageRoot: '/data',
+        executablePath: '/runtime/codex-acp',
+        reasoningEffort: 'high'
+      }
+    )
+
+    expect(JSON.parse(config.env?.CODEX_CONFIG ?? '')).toEqual({
+      model_reasoning_effort: 'high'
+    })
+  })
+
+  it('does not add a custom model_provider for an isolated Codex subscription', () => {
+    // The ChatGPT subscription is codex-acp's default provider; layering an open-science custom
+    // provider on top would route the request through a gateway the user did not configure.
+    const framework = createCodexFramework()
+    const config = framework.prepareModelConfig(
+      {
+        type: 'codex-isolated',
+        apiEndpoints: ['responses'],
+        model: 'gpt-5.6-terra'
+      },
+      { storageRoot: '/data', executablePath: '/runtime/codex-acp' }
+    )
+
+    const parsed = JSON.parse(config.env?.CODEX_CONFIG ?? '{}')
+    expect(parsed).not.toHaveProperty('model_provider')
+    expect(parsed).not.toHaveProperty('model_providers')
   })
 
   it.each([

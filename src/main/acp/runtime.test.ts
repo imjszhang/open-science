@@ -115,6 +115,15 @@ const startFakeAgent = (
     // When true, the resume handler rejects with a generic "Internal error" (-32603) — what some
     // agents return instead of a clean not-found after their process was replaced by an app restart.
     resumeInternalError?: boolean
+    // A plain handler error is serialized by the ACP SDK as -32603 with the original message in
+    // data.details. This mirrors agents that do not translate their resume failure to resourceNotFound.
+    resumeInternalErrorDetails?: string
+    // Some agents preserve a machine-readable reason in the Internal error data instead of relying on
+    // the human-facing detail string.
+    resumeInternalErrorData?: unknown
+    // opencode rejects a lost session with an Internal error tagged by the failing service and a
+    // descriptive message suffix (e.g. `{ service: 'session' }` + "OpenCode service failure").
+    resumeServiceFailure?: { service: string; message: string }
     // When true, the agent does NOT advertise session/close capability, so the runtime must fall back to
     // the session/cancel notification on delete instead of a close request.
     supportsClose?: boolean
@@ -198,6 +207,21 @@ const startFakeAgent = (
 
       if (options.resumeInternalError) {
         throw acp.RequestError.internalError()
+      }
+
+      if (options.resumeInternalErrorDetails) {
+        throw new Error(options.resumeInternalErrorDetails)
+      }
+
+      if (options.resumeInternalErrorData !== undefined) {
+        throw acp.RequestError.internalError(options.resumeInternalErrorData)
+      }
+
+      if (options.resumeServiceFailure) {
+        throw acp.RequestError.internalError(
+          { service: options.resumeServiceFailure.service },
+          options.resumeServiceFailure.message
+        )
       }
 
       resumedSessions.push({
@@ -524,6 +548,55 @@ describe('ACP runtime migration write-gate', () => {
     await expect(runtime.createSession({ cwd: '/workspace' })).rejects.toThrow(
       'The selected model "gpt-subscription" could not be applied'
     )
+  })
+
+  it('skips set_config_option when a required subscription model already matches currentValue', async () => {
+    // codex-acp reloads on every session/set_config_option call, which would stall the first prompt
+    // of a new session for ~2 min when the model was already seeded via CODEX_CONFIG (issue #277).
+    // When the agent reflects that seeded model as its option's currentValue, applySessionModel must
+    // treat it as a successful no-op instead of (a) re-applying the same value or (b) collapsing it
+    // into the required-model "not available" failure path. Verified end-to-end here.
+    const process = new FakeAgentProcess()
+    const configOptions = [
+      {
+        type: 'select',
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        currentValue: 'gpt-5.6-terra',
+        options: [
+          { value: 'gpt-5', name: 'GPT-5' },
+          { value: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }
+        ]
+      } as SessionConfigOption
+    ]
+    const fakeAgent = startFakeAgent(process, ['subscription-session'], {
+      modes: {
+        currentModeId: 'agent',
+        availableModes: ['read-only', 'agent', 'agent-full-access'].map((id) => ({ id, name: id }))
+      },
+      configOptions
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      resolveBackend: () => ({
+        framework: { ...codexFramework, spawn: () => asAgentProcess(process) },
+        executablePath: '/bin/codex-acp',
+        env: {},
+        sessionModel: 'gpt-5.6-terra',
+        sessionModelRequired: true
+      }),
+      framework: codexFramework
+    })
+
+    // createSession must succeed: the model is required, but it is already current — the runtime
+    // must not mistake that for an unavailable model.
+    const created = await runtime.createSession({ cwd: '/workspace' })
+    expect(created.sessionId).toBe('subscription-session')
+    // And it must NOT re-send set_config_option: that is exactly the round-trip we are trying to
+    // avoid for codex-isolated subscriptions whose model is already seeded via CODEX_CONFIG.
+    expect(fakeAgent.configChanges).toEqual([])
   })
 
   it('rejects sendPrompt while a data-root migration is pending, then resumes once cleared', async () => {
@@ -3184,6 +3257,143 @@ describe('ACP runtime session management', () => {
     )
   })
 
+  it('adopts a fresh session when the ACP agent wraps a resume failure in Internal error details', async () => {
+    infoLogSpy.mockClear()
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, ['adopted-session-1'], {
+      resumeInternalErrorDetails: 'Failed to restore the previous conversation'
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    const resumed = await runtime.resumeSession({
+      sessionId: 'restarted-session',
+      cwd: '/workspace'
+    })
+    expect(resumed).toMatchObject({
+      sessionId: 'restarted-session',
+      contextReset: true
+    })
+    expect(
+      infoLogSpy.mock.calls.find(
+        ([message]) => message === 'resumed session adopted after unrecoverable resume error'
+      )?.[1]
+    ).toMatchObject({
+      sessionId: 'restarted-session',
+      error: 'Internal error',
+      code: -32603,
+      data: { details: 'Failed to restore the previous conversation' }
+    })
+
+    await runtime.sendPrompt({ sessionId: 'restarted-session', text: 'keep going' })
+
+    expect(fakeAgent.prompts).toEqual([{ sessionId: 'adopted-session-1', text: 'keep going' }])
+  })
+
+  it('adopts a fresh session from a language-independent session-loss reason', async () => {
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, ['adopted-session-1'], {
+      resumeInternalErrorData: {
+        errorKind: 'session-not-found',
+        details: 'The agent supplied a localized diagnostic'
+      }
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    await expect(
+      runtime.resumeSession({ sessionId: 'restarted-session', cwd: '/workspace' })
+    ).resolves.toMatchObject({ sessionId: 'restarted-session', contextReset: true })
+    expect(fakeAgent.newSessions).toHaveLength(1)
+  })
+
+  it.each([
+    'Authentication failed while configuring the provider',
+    'Failed to load session provider credentials',
+    'Unable to load Model Context Protocol server for this session',
+    'Unknown model context for this conversation'
+  ])('keeps unrelated Internal error details visible: %s', async (details) => {
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, [], { resumeInternalErrorDetails: details })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    await expect(
+      runtime.resumeSession({ sessionId: 'restarted-session', cwd: '/workspace' })
+    ).rejects.toMatchObject({
+      code: -32603,
+      message: 'Internal error',
+      data: { details }
+    })
+    expect(fakeAgent.newSessions).toEqual([])
+  })
+
+  it('trusts an unrelated structured reason over a session-like detail', async () => {
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, [], {
+      resumeInternalErrorData: {
+        errorKind: 'provider-error',
+        details: 'Failed to restore the previous conversation'
+      }
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    await expect(
+      runtime.resumeSession({ sessionId: 'restarted-session', cwd: '/workspace' })
+    ).rejects.toMatchObject({ code: -32603, data: { errorKind: 'provider-error' } })
+    expect(fakeAgent.newSessions).toEqual([])
+  })
+
+  it('adopts a fresh session when opencode tags a lost session with its failing service', async () => {
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, ['adopted-session-1'], {
+      resumeServiceFailure: { service: 'session', message: 'OpenCode service failure' }
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    await expect(
+      runtime.resumeSession({ sessionId: 'restarted-session', cwd: '/workspace' })
+    ).resolves.toMatchObject({ sessionId: 'restarted-session', contextReset: true })
+    expect(fakeAgent.newSessions).toHaveLength(1)
+
+    await runtime.sendPrompt({ sessionId: 'restarted-session', text: 'keep going' })
+    expect(fakeAgent.prompts).toEqual([{ sessionId: 'adopted-session-1', text: 'keep going' }])
+  })
+
+  it('keeps an Internal error from a non-session service visible', async () => {
+    const process = new FakeAgentProcess()
+    const fakeAgent = startFakeAgent(process, [], {
+      resumeServiceFailure: { service: 'provider', message: 'OpenCode service failure' }
+    })
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process)
+    })
+
+    await expect(
+      runtime.resumeSession({ sessionId: 'restarted-session', cwd: '/workspace' })
+    ).rejects.toMatchObject({ code: -32603, data: { service: 'provider' } })
+    expect(fakeAgent.newSessions).toEqual([])
+  })
+
   it('skips resume entirely for a session that last ran under a different framework', async () => {
     // A session created under Claude, then continued after switching to opencode: resume can never
     // succeed (each framework has its own session store), so the runtime must NOT send session/resume
@@ -5364,5 +5574,42 @@ describe('ACP runtime — failure-path robustness (errorMessage coercion + sync-
     } finally {
       warnLogSpy.mockReset()
     }
+  })
+})
+
+describe('prompt streaming after a context reset', () => {
+  it('streams the assistant reply as events for a prompt sent right after the reset', async () => {
+    const process = new FakeAgentProcess()
+    const events: Array<{ kind: string; sessionId?: string; role?: string; text?: string }> = []
+    // A second agent session id backs the fresh adoption the reset performs.
+    startFakeAgent(process, ['remote-session-1', 'remote-session-2'])
+    const runtime = new AcpRuntime({
+      appVersion: '0.1.0',
+      defaultCwd: '/workspace',
+      spawnAgent: () => asAgentProcess(process),
+      callbacks: { onEvent: (event) => events.push(event) }
+    })
+
+    const session = await runtime.createSession({ cwd: '/workspace' })
+    await runtime.sendPrompt({ sessionId: session.sessionId, text: 'first turn' })
+    await runtime.resetSessionContext({ sessionId: session.sessionId, cwd: '/workspace' })
+
+    events.length = 0
+    await runtime.sendPrompt({
+      sessionId: session.sessionId,
+      text: 'edited turn',
+      historyPreamble: 'first turn\n\nreply for first turn'
+    })
+
+    // The fresh agent session's reply streams through the same event channel, labelled with the
+    // app-facing session id so the renderer grows the truncated conversation.
+    const assistantChunks = events.filter(
+      (event) => event.kind === 'message' && event.role === 'assistant'
+    )
+    expect(assistantChunks.length).toBeGreaterThan(0)
+    expect(assistantChunks[0]).toMatchObject({
+      sessionId: session.sessionId,
+      text: 'reply for remote-session-2'
+    })
   })
 })

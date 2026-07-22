@@ -620,6 +620,90 @@ describe('SettingsService: validation', () => {
     expect(stored.lastValidationFailure?.at).toBeGreaterThan(0)
   })
 
+  it('reports incompatible (no network probe) when the provider cannot drive the active framework', async () => {
+    const service = createService()
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200 })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Default framework is Claude Code (Anthropic /v1/messages only); an OpenAI-only gateway can't drive
+    // it, so testing must fail with the pairing reason rather than firing a misleading /v1/messages probe.
+    const created = (
+      await service.upsertProvider({
+        type: 'custom',
+        name: 'G',
+        baseUrl: 'https://g',
+        model: 'm',
+        key: 'k',
+        apiEndpoints: ['openai']
+      })
+    ).providers[0]
+
+    const result = await service.validateProvider({ providerId: created.id })
+
+    expect(result).toMatchObject({ ok: false, category: 'incompatible', applied: true })
+    expect(result.message).toContain('/v1/chat/completions')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const stored = (await repository.getSettings()).providers.find((p) => p.id === created.id)
+    expect(stored?.lastValidatedAt).toBeUndefined()
+    expect(stored?.lastValidationFailure).toMatchObject({ category: 'incompatible' })
+  })
+
+  it('probes normally once the active framework can drive the provider', async () => {
+    const service = createService()
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200 })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const created = (
+      await service.upsertProvider({
+        type: 'custom',
+        name: 'G',
+        baseUrl: 'https://g',
+        model: 'm',
+        key: 'k',
+        apiEndpoints: ['openai']
+      })
+    ).providers[0]
+
+    // OpenCode accepts /v1/chat/completions, so the same provider now validates over the network.
+    await service.setAgentFramework('opencode')
+    const result = await service.validateProvider({ providerId: created.id })
+
+    expect(result).toMatchObject({ ok: true, category: 'ok' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0][0]).toContain('/v1/chat/completions')
+  })
+
+  it('probes the route the active framework drives for a multi-route provider', async () => {
+    const service = createService()
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200 })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // A provider that speaks both routes. preferredEndpoint would pick OpenAI globally, but Claude Code
+    // runs /v1/messages — so the probe must hit that, or a passing test wouldn't prove the real route.
+    const created = (
+      await service.upsertProvider({
+        type: 'custom',
+        name: 'G',
+        baseUrl: 'https://g',
+        model: 'm',
+        key: 'k',
+        apiEndpoints: ['anthropic', 'openai']
+      })
+    ).providers[0]
+
+    // Default framework is Claude Code (Anthropic only).
+    await service.validateProvider({ providerId: created.id })
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0][0]).toContain('/v1/messages')
+
+    // The same provider under OpenCode should instead be probed on the OpenAI route it will run.
+    await service.setAgentFramework('opencode')
+    await service.validateProvider({ providerId: created.id })
+    expect(fetchMock.mock.calls[1][0]).toContain('/v1/chat/completions')
+  })
+
   it('clears a recorded failure once a later validation succeeds', async () => {
     const service = createService()
     const fetchMock = vi.fn().mockResolvedValue({ status: 401 })
@@ -1123,8 +1207,16 @@ describe('SettingsService: preflight & spawn config', () => {
     expect(backend.authentication).toBeUndefined()
     expect(backend.providerConfiguration).toBeUndefined()
     expect(backend.env.CODEX_API_KEY).toBeUndefined()
-    expect(backend.env.CODEX_CONFIG).toBeUndefined()
-    expect(backend.env.MODEL_PROVIDER).toBeUndefined()
+    if (type === 'codex-isolated') {
+      // Seed the selected model into CODEX_CONFIG so codex-acp uses it from session start and the
+      // first prompt doesn't wait for the late session/set_config_option model switch (issue #277).
+      // The ChatGPT subscription is codex-acp's default provider, so no model_provider override.
+      expect(JSON.parse(backend.env.CODEX_CONFIG ?? '{}')).toEqual({ model: 'gpt-5.6-terra' })
+      expect(backend.env.MODEL_PROVIDER).toBeUndefined()
+    } else {
+      expect(backend.env.CODEX_CONFIG).toBeUndefined()
+      expect(backend.env.MODEL_PROVIDER).toBeUndefined()
+    }
     expect(backend.env.NO_BROWSER).toBeUndefined()
     expect(backend.env.CODEX_PATH).toBe('/data/codex-managed/native/codex')
     expect(backend.env.CODEX_HOME).toBe(
@@ -1306,6 +1398,52 @@ describe('SettingsService: preflight & spawn config', () => {
       'utf8'
     )
     expect(pubmedSkill).toContain('host.mcp')
+  })
+
+  it('drives a native-Responses official vendor directly, without starting the bridge', async () => {
+    // MiniMax advertises anthropic + openai + responses. Codex must drive native Responses on the
+    // vendor's own OpenAI /v1 base with the vendor key — NOT spin up the Chat Completions bridge and
+    // post to its local URL (which would authenticate with the vendor key instead of the bridge token).
+    const adapterPath = join(storageRoot, 'bin', 'codex-acp')
+    await mkdir(dirname(adapterPath), { recursive: true })
+    await writeFile(adapterPath, '', 'utf8')
+    const service = createService(undefined, {
+      codexDetected: { path: adapterPath, version: 'codex-acp 1.1.4' }
+    })
+    await repository.setCodexInfo({ resolvedPath: adapterPath, version: '1.1.4' })
+    await repository.setAgentFramework('codex')
+    const provider = (
+      await service.upsertProvider({
+        type: 'official',
+        name: 'MiniMax',
+        vendorId: 'minimax',
+        region: 'global',
+        key: 'mm-secret'
+      })
+    ).providers[0]
+    const storedProvider = (await repository.getSettings()).providers[0]
+    await repository.upsertProvider({ ...storedProvider, lastValidatedAt: Date.now() })
+    await service.setActiveProvider(provider.id)
+
+    vi.stubEnv('OPEN_SCIENCE_AGENT_FRAMEWORK', 'codex')
+    const backend = await service.resolveActiveAgentBackend()
+
+    // No bridge: no local provider-configuration, no bridge session model.
+    expect(backend.providerConfiguration).toBeUndefined()
+    expect(backend.sessionModel).toBe('MiniMax-M3')
+    // Codex posts native Responses to the vendor's own /v1 base with the vendor key.
+    const codexConfig = JSON.parse(backend.env.CODEX_CONFIG ?? '{}')
+    expect(codexConfig.model_providers['open-science']).toMatchObject({
+      base_url: 'https://api.minimax.io/v1',
+      wire_api: 'responses',
+      requires_openai_auth: true
+    })
+    expect(backend.authentication).toEqual({
+      methodId: 'api-key',
+      _meta: { 'api-key': { apiKey: 'mm-secret' } }
+    })
+    expect(backend.env.CODEX_CONFIG).not.toContain('127.0.0.1')
+    expect(backend.env.CODEX_CONFIG).not.toContain('mm-secret')
   })
 
   it('builds spawn env from the active provider with the decrypted key', async () => {
@@ -1558,6 +1696,9 @@ describe('SettingsService: official vendors', () => {
     const fetchMock = vi.fn().mockResolvedValue({ status: 200 })
     vi.stubGlobal('fetch', fetchMock)
 
+    // OpenCode drives DeepSeek's OpenAI route, so the probe hits /v1/chat/completions — but as a plain
+    // non-streaming ping (the bridge streaming function-tool probe is Codex-only).
+    await service.setAgentFramework('opencode')
     const result = await service.validateProvider({
       draft: { type: 'official', vendorId: 'deepseek', key: 'sk-ds' }
     })
