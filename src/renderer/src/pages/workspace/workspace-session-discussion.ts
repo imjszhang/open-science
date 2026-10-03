@@ -39,6 +39,22 @@ export const useWorkspaceSessionDiscussion = ({
   editable: boolean
 }): void => {
   const { t } = useTranslation()
+  const draftSource = composer.view.annotations.map(replayAnnotationTarget).filter(Boolean).at(-1)
+  const draftProjectId = draftSource?.projectId
+  const draftSourceId = draftSource?.sourceSessionId
+  useEffect(() => {
+    if (!editable || !draftProjectId || !draftSourceId) return
+    const draftDiscussion = {
+      projectId: draftProjectId,
+      sourceSessionId: draftSourceId,
+      draftKey
+    }
+    useSessionReplayStore.setState({ draftDiscussion })
+    return () => {
+      if (useSessionReplayStore.getState().draftDiscussion === draftDiscussion)
+        useSessionReplayStore.setState({ draftDiscussion: undefined })
+    }
+  }, [editable, draftKey, draftProjectId, draftSourceId])
   const pending = useSessionReplayStore((state) => state.pendingDiscussion)
   const destination = useSessionReplayStore((state) => state.discussionDestination)
   const targetSession = useSessionStore((state) =>

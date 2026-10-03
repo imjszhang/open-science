@@ -15,6 +15,7 @@ import { createPreviewFileItem } from './preview-file-item'
 import { SessionReplayProgressWriter } from './session-replay-progress-writer'
 import { SessionReplayEvidence } from './SessionReplayEvidence'
 import { SessionDiscussionDialog } from './SessionDiscussionDialog'
+import { openResearchDiscussion } from './workspace-discussion-navigation'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -30,6 +31,10 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const [activated, setActivated] = useState(isActive)
   if (isActive && !activated) setActivated(true)
   const projectId = item.replaySourceProjectId ?? item.projectId ?? ''
+  const discussionRequest = useRef<AbortController | undefined>(undefined)
+  const [discussionError, setDiscussionError] = useState<string>()
+  const [discussionPending, setDiscussionPending] = useState(false)
+  useEffect(() => () => discussionRequest.current?.abort(), [])
   const [discussionCapture, setDiscussionCapture] = useState<SessionDiscussionCapture>()
   const sourceSessionId = item.replaySourceSessionId ?? item.sessionId
   const expanded = usePreviewWorkbenchStore((state) => state.expandedToolItemId === item.id)
@@ -140,7 +145,25 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
 
   const askStep = (context: SessionDiscussionCapture): void => {
     if (sourceUnavailable) return
-    setDiscussionCapture(context)
+    if (discussionRequest.current) return
+    const abort = new AbortController()
+    discussionRequest.current = abort
+    setDiscussionPending(true)
+    setDiscussionError(undefined)
+    void openResearchDiscussion(context, abort.signal)
+      .then((accepted) => {
+        if (!accepted) throw new Error('Discussion unavailable')
+      })
+      .catch(() => {
+        if (!abort.signal.aborted)
+          setDiscussionError(t('Could not open the research discussion. Please retry.'))
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) {
+          discussionRequest.current = undefined
+          setDiscussionPending(false)
+        }
+      })
   }
 
   const openEvidence = (resource: ReplayResource | undefined, step: ReplayStep): void => {
@@ -239,6 +262,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           onClose={() => setDiscussionCapture(undefined)}
         />
       ) : null}
+      {discussionError ? <ErrorNotice inline tone="amber" description={discussionError} /> : null}
       {saveError ? (
         <ErrorNotice
           tone="amber"
@@ -259,6 +283,8 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           active={isActive && !evidenceStep}
           onViewChange={notebookUnavailable ? undefined : loaded.writer.enqueue}
           onAskStep={askStep}
+          discussionPending={discussionPending}
+          onChooseConversation={setDiscussionCapture}
           onOpenEvidence={openEvidence}
         />
       </div>

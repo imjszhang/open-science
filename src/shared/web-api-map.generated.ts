@@ -213,6 +213,7 @@ export const WEB_INVOKE_CHANNELS = {
   saveManagedFile: 'file:save-managed',
   saveProjectArtifacts: 'file:save-project-artifacts',
   saveSessionArtifacts: 'file:save-session-artifacts',
+  'sessionReplay.findDiscussion': 'session-replay:find-discussion',
   'sessionReplay.get': 'session-replay:get',
   'sessionReplay.getSelectionSnapshot': 'session-replay:get-selection-snapshot',
   'sessionReplay.list': 'session-replay:list',

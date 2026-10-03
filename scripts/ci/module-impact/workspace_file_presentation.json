@@ -328,7 +328,8 @@
       "src/renderer/src/pages/literature/detail/LiteratureFullTextLookup.render.test.tsx",
       "src/renderer/src/pages/literature/collections/SmartCollectionPanel.test.tsx",
       "src/renderer/src/pages/literature/literature-localization.render.test.tsx",
-      "src/renderer/src/pages/workspace/NotebookFolderAccessNotice.interaction.test.tsx"
+      "src/renderer/src/pages/workspace/NotebookFolderAccessNotice.interaction.test.tsx",
+      "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts"
     ]
   },
   "capabilityOverlays": [],

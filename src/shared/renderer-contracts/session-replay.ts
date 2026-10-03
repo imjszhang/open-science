@@ -1,6 +1,7 @@
 import type {
   UnlinkSessionReadingRequest,
   SessionReplayRequest,
+  SessionDiscussionMatch,
   SessionReplayListRequest,
   SessionReplaySnapshot,
   SaveSessionReplayProgressRequest,
@@ -12,6 +13,15 @@ import type {
 import { callable, WEB, RUNTIME_VALIDATED } from './definition'
 
 export const contracts = {
+  'sessionReplay.findDiscussion': callable<
+    (request: SessionReplayRequest) => Promise<SessionDiscussionMatch>
+  >()('session-replay', [
+    'session-replay:find-discussion',
+    WEB,
+    undefined,
+    undefined,
+    RUNTIME_VALIDATED
+  ]),
   'sessionReplay.unlinkSession': callable<
     (request: UnlinkSessionReadingRequest) => Promise<void>
   >()('session-replay', [

@@ -51,7 +51,9 @@
     "src/renderer/src/pages/workspace/SessionDiscussionButton.tsx",
     "src/renderer/src/pages/workspace/discussion-send-context.ts",
     "src/renderer/src/pages/workspace/discussion-send-context.test.ts",
-    "src/renderer/src/pages/workspace/replay/ReplayFilePreview.tsx"
+    "src/renderer/src/pages/workspace/replay/ReplayFilePreview.tsx",
+    "src/renderer/src/pages/workspace/workspace-discussion-navigation.ts",
+    "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts"
   ],
   "interfacePaths": [
     "src/renderer/src/lib/replay/index.ts",
@@ -81,7 +83,8 @@
     "src/renderer/src/pages/workspace/workspace-session-discussion.ts",
     "src/renderer/src/pages/workspace/workspace-session-actions.ts",
     "src/renderer/src/stores/session-replay-store.ts",
-    "src/renderer/src/pages/workspace/discussion-send-context.ts"
+    "src/renderer/src/pages/workspace/discussion-send-context.ts",
+    "src/renderer/src/pages/workspace/workspace-discussion-navigation.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -104,7 +107,8 @@
       "src/renderer/src/pages/workspace/workspace-session-actions.test.tsx",
       "src/renderer/src/stores/session-replay-store.test.ts",
       "src/renderer/src/pages/workspace/replay/replay-navigation.test.ts",
-      "src/renderer/src/pages/workspace/discussion-send-context.test.ts"
+      "src/renderer/src/pages/workspace/discussion-send-context.test.ts",
+      "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts"
     ],
     "contract": [],
     "consumer": [

@@ -14,6 +14,8 @@ export type SessionDiscussionDestination = {
 }
 
 type SessionReplayStore = {
+  // Projection of the currently editable draft, cleared when its composer leaves or unlinks.
+  draftDiscussion?: { projectId: string; sourceSessionId: string; draftKey: string }
   playhead?: {
     projectId: string
     sourceSessionId: string

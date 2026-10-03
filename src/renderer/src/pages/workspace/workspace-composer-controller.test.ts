@@ -31,7 +31,10 @@ import {
 } from './composer/composer-doc'
 import { WorkspaceComposerDraftsProvider } from './workspace-composer-drafts'
 import { useWorkspaceComposerController } from './workspace-composer-controller'
-import { createSessionDiscussionAnnotation } from './session-discussion-annotation'
+import {
+  createSessionDiscussionAnnotation,
+  replayAnnotationTarget
+} from './session-discussion-annotation'
 import type { ComposerHistoryEntry } from './composer/composer-history'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -241,56 +244,85 @@ describe('workspace composer controller', () => {
     expect(hook.result.current.view.annotations).toEqual([annotation(), first, second])
   })
 
-  it('captures the linked replay only at Send without changing the draft or an earlier snapshot', () => {
+  it.each(['step', 'session'] as const)(
+    'sends the selected %s scope unchanged after the replay advances',
+    (scope) => {
+      const hook = renderController()
+      mounted.push(hook)
+      const context: SessionDiscussionCapture = {
+        scope,
+        projectId: 'project',
+        sourceSessionId: 'source',
+        sourceTitle: 'Study',
+        fingerprint: 'fp',
+        branchId: 'main',
+        stepId: 'one',
+        stepNumber: scope === 'step' ? 1 : undefined,
+        stepOffsetMs: 50,
+        excerpt: 'Selected evidence',
+        evidence: [{ kind: 'message', id: 'one', projectId: 'project', sessionId: 'source' }]
+      }
+      const selected = createSessionDiscussionAnnotation(context, 'selected')!
+      const capture = vi.fn(() => context)
+      act(() => {
+        hook.result.current.actions.changeDoc(textDoc('Explain this research.'))
+        hook.result.current.actions.addAnnotation(selected)
+        useSessionReplayStore.setState({ playhead: { ...context, capture } })
+      })
+      context.stepId = 'two'
+      context.stepNumber = 2
+      const sent = hook.result.current.lifecycle.captureSend()
+      context.stepId = 'three'
+      context.stepNumber = 3
+      expect(sent.discussionFocus).toBeUndefined()
+      expect(sent.annotations).toEqual([selected])
+      expect(replayAnnotationTarget(sent.annotations[0])).toMatchObject({
+        contextId: 'selected',
+        scope,
+        stepId: 'one',
+        stepOffsetMs: 50
+      })
+      expect(hook.result.current.lifecycle.captureSend().annotations).toEqual([selected])
+      expect(hook.result.current.view.annotations).toEqual([selected])
+      expect(docToText(hook.result.current.view.doc)).toBe('Explain this research.')
+      expect(capture).not.toHaveBeenCalled()
+    }
+  )
+
+  it('keeps ordinary follow-ups on their durable research binding without attaching the playhead', () => {
     const hook = renderController()
     mounted.push(hook)
-    const context: SessionDiscussionCapture = {
+    const binding = {
       projectId: 'project',
-      sourceSessionId: 'source',
-      sourceTitle: 'Study',
-      fingerprint: 'fp',
+      sessionId: 'source',
+      contextId: 'previous-selection',
+      title: 'Study',
+      scope: 'session' as const,
       branchId: 'main',
-      stepId: 'one',
-      stepNumber: 1,
-      stepOffsetMs: 0,
-      excerpt: '',
-      evidence: [{ kind: 'message', id: 'one', projectId: 'project', sessionId: 'source' }]
+      promptMessageId: 'previous'
     }
-    const capture = vi.fn(() => context)
+    const capture = vi.fn()
+    const session = {
+      id: 'session-a',
+      projectId: 'project',
+      runtimeContext: {
+        revision: 1,
+        sessionContext: { version: 1 as const, bindings: [binding] }
+      }
+    }
+    const originalContext = structuredClone(session.runtimeContext.sessionContext)
     act(() => {
-      hook.selectSession({
-        id: 'session-a',
-        projectId: 'project',
-        runtimeContext: {
-          revision: 1,
-          sessionContext: {
-            version: 1,
-            bindings: [
-              {
-                projectId: 'project',
-                sessionId: 'source',
-                contextId: 'old',
-                title: 'Study',
-                branchId: 'main',
-                promptMessageId: 'previous'
-              }
-            ]
-          }
-        }
+      hook.selectSession(session)
+      hook.result.current.actions.changeDoc(textDoc('What are its limitations?'))
+      useSessionReplayStore.setState({
+        playhead: { projectId: 'project', sourceSessionId: 'source', capture }
       })
-      hook.result.current.actions.changeDoc(textDoc('Explain this step.'))
-      useSessionReplayStore.setState({ playhead: { ...context, capture } })
     })
-    context.stepId = 'two'
-    context.stepNumber = 2
-    expect(capture).not.toHaveBeenCalled()
     const sent = hook.result.current.lifecycle.captureSend()
-    context.stepId = 'three'
-    context.stepNumber = 3
-    expect(sent.discussionFocus).toMatchObject({ stepId: 'two', stepNumber: 2 })
-    expect(hook.result.current.view.annotations).toEqual([])
-    expect(docToText(hook.result.current.view.doc)).toBe('Explain this step.')
-    expect(hook.result.current.lifecycle.captureSend().discussionFocus?.stepId).toBe('three')
+    expect(sent.discussionFocus).toBeUndefined()
+    expect(sent.annotations).toEqual([])
+    expect(session.runtimeContext.sessionContext).toEqual(originalContext)
+    expect(capture).not.toHaveBeenCalled()
     expect(hook.result.current.lifecycle.captureSend(false).discussionFocus).toBeUndefined()
   })
 
