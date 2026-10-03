@@ -290,6 +290,7 @@ describe('application command composition', () => {
       'projects:retry-deletion-cleanup',
       'projects:update',
       'projects:update-archive',
+      'session-replay:find-discussion',
       'session-replay:get',
       'session-replay:get-selection-snapshot',
       'session-replay:list',

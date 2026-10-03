@@ -3,7 +3,7 @@ import {
   unlinkSessionReadingRequestSchema,
   type UnlinkSessionReadingRequest
 } from '../../shared/session-replay'
-import type { PersistedChatSession } from '../../shared/session-persistence'
+import type { PersistedChatSession, SessionSummary } from '../../shared/session-persistence'
 import {
   sessionReplayRequestSchema,
   sessionReplayListRequestSchema,
@@ -16,6 +16,7 @@ import {
   type SessionReplayRequest,
   type SessionReplayListRequest,
   type SessionReplaySnapshot,
+  type SessionDiscussionMatch,
   type SaveSessionReplayProgressRequest,
   type SaveSessionReplayProgressResult
 } from '../../shared/session-replay'
@@ -25,6 +26,8 @@ type SessionRead =
   { status: 'found'; session: PersistedChatSession } | { status: 'missing' | 'unreadable' }
 export type SessionReplaySessions = {
   read(projectId: string, sessionId: string): Promise<SessionRead>
+  list(): Promise<ReadonlyArray<Pick<SessionSummary, 'id' | 'projectId' | 'updatedAt'>>>
+  readCurrent(projectId: string, sessionId: string): Promise<PersistedChatSession | undefined>
 }
 type DataRootAdmission = <T>(operation: () => Promise<T>) => Promise<T>
 
@@ -63,6 +66,35 @@ export class SessionReplayService {
       ...(source.status === 'found' ? { sourceTitle: source.session.title } : {}),
       ...(replayViewSnapshot(row) ? { view: replayViewSnapshot(row) } : {})
     }
+  }
+
+  async findDiscussion(input: SessionReplayRequest): Promise<SessionDiscussionMatch> {
+    const request = sessionReplayRequestSchema.parse(input)
+    const source = await this.get(request)
+    if (source.sourceStatus !== 'available') return null
+
+    // The lightweight startup projection identifies candidates only. The association belongs to
+    // the receiving Session's current durable context, never to a cached transcript or replay row.
+    const candidates = (await this.sessions.list())
+      .filter(
+        ({ projectId, id }) => projectId === request.projectId && id !== request.sourceSessionId
+      )
+      .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+    for (const candidate of candidates) {
+      const session = await this.sessions.readCurrent(request.projectId, candidate.id)
+      if (
+        !session ||
+        session.id !== candidate.id ||
+        session.projectId !== request.projectId ||
+        session.packageOrigin ||
+        session.archivedAt !== undefined
+      )
+        continue
+      const binding = session.runtimeContext?.sessionContext?.bindings.at(-1)
+      if (binding?.projectId === request.projectId && binding.sessionId === request.sourceSessionId)
+        return { sessionId: session.id }
+    }
+    return null
   }
 
   async list(input: SessionReplayListRequest): Promise<SessionReplaySnapshot[]> {

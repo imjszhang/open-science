@@ -1,8 +1,7 @@
 import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { createSessionReplayItem, loadSessionDiscussionContext } from './workspace-session-actions'
-import { SessionDiscussionDialog } from './SessionDiscussionDialog'
-import type { SessionDiscussionCapture } from './replay/replay-context'
+import { openResearchDiscussion } from './workspace-discussion-navigation'
 import { SessionPackageImportMenu } from '@/components/SessionPackageImportMenu'
 import {
   BookOpen,
@@ -1315,7 +1314,6 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
 
 const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.JSX.Element => {
   const { t } = useTranslation()
-  const [discussionCapture, setDiscussionCapture] = useState<SessionDiscussionCapture>()
   const mounted = useRef(true)
   useEffect(() => {
     mounted.current = true
@@ -1346,7 +1344,8 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
       )
         return
       if (!context) throw new Error(t('No recorded steps are available.'))
-      setDiscussionCapture(context)
+      if (!(await openResearchDiscussion(context)))
+        throw new Error(t('Could not open the research discussion. Please retry.'))
     }
   }
   const latestCallbacks = useRef(callbacks)
@@ -1386,12 +1385,6 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
   return (
     <>
       <WorkspaceSidebarView {...props} rowActions={rowActions} />
-      {discussionCapture ? (
-        <SessionDiscussionDialog
-          context={discussionCapture}
-          onClose={() => setDiscussionCapture(undefined)}
-        />
-      ) : null}
     </>
   )
 }

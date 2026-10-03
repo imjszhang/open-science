@@ -1,4 +1,3 @@
-import { captureDiscussionSendContext } from './discussion-send-context'
 import type { SessionDiscussionCapture } from './replay/replay-context'
 import type { SessionReadingContext } from '../../../../shared/session-reading'
 import { replayAnnotationTarget } from '../../../../shared/replay-reference'
@@ -1231,13 +1230,6 @@ const useWorkspaceComposerController = ({
         version: versionsRef.current[activeDraftKeyRef.current] ?? 0,
         doc: docRef.current,
         annotations: [...annotationsRef.current],
-        discussionFocus: captureDiscussionSendContext(
-          annotationsRef.current,
-          includeReadingContext
-            ? activeSession?.runtimeContext?.sessionContext?.bindings.at(-1)
-            : undefined,
-          activeSession?.id
-        ),
         attachments,
         queuedEdit: queuedEditRef.current,
         automaticReadingEnabled: automaticReadingEnabledRef.current,
@@ -1278,7 +1270,6 @@ const useWorkspaceComposerController = ({
     },
     [
       attachments,
-      activeSession,
       activeReadingBinding,
       activePendingReading,
       automaticStagedReadingContexts,

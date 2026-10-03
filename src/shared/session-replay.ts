@@ -14,6 +14,8 @@ export const sessionReplayRequestSchema = z
   })
   .strict()
 export type SessionReplayRequest = z.infer<typeof sessionReplayRequestSchema>
+const sessionDiscussionMatchSchema = z.object({ sessionId: identity }).strict().nullable()
+export type SessionDiscussionMatch = z.infer<typeof sessionDiscussionMatchSchema>
 export const sessionReplayListRequestSchema = z.object({ projectId: identity }).strict()
 export type SessionReplayListRequest = z.infer<typeof sessionReplayListRequestSchema>
 export const replayViewStateSchema = z
@@ -196,6 +198,10 @@ export const unlinkSessionReadingRequestSchema = z
 export type UnlinkSessionReadingRequest = z.infer<typeof unlinkSessionReadingRequestSchema>
 
 export const sessionReplayCommandContracts = {
+  findDiscussion: defineApplicationCommandContract(
+    validationCodec(z.tuple([sessionReplayRequestSchema])),
+    validationCodec(sessionDiscussionMatchSchema)
+  ),
   unlinkSession: defineApplicationCommandContract(
     validationCodec(z.tuple([unlinkSessionReadingRequestSchema])),
     validationCodec(z.void())

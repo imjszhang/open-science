@@ -108,7 +108,7 @@ test('replaces the discussion Session without replacing the draft or changing so
       .getByRole('region', { name: 'Imported research history', exact: true })
       .getByRole('button', { name: 'View replay', exact: true })
       .click()
-    await replay.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
     const chooser = page.getByRole('dialog', { name: 'Ask in a conversation' })
     if (source.id === sourceA.id) {
       await expect(chooser.getByRole('combobox')).toBeFocused()
@@ -152,10 +152,10 @@ test('replaces the discussion Session without replacing the draft or changing so
     await expect(chooser.getByRole('option').filter({ hasText: sourceB.title })).toHaveCount(0)
     await chooser.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(chooser).not.toBeVisible()
-    await replay.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
     await chooser.getByRole('combobox').press('Escape')
     await expect(chooser).not.toBeVisible()
-    await replay.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
     await chooser.getByRole('combobox').fill(target.title)
     await chooser.getByRole('option').filter({ hasText: target.title }).click()
     await expect(sessionRow(page, target.title)).toHaveAttribute('aria-current', 'page')
@@ -165,15 +165,15 @@ test('replaces the discussion Session without replacing the draft or changing so
     await expect(stepChip).toContainText(source.title)
     await expect(stepChip.locator('.lucide-messages-square')).toBeVisible()
     await expect(page.locator('[data-session-discussion-source]')).toHaveCount(1)
-    await expect(page.getByRole('button', { name: 'Discuss', exact: true })).toBeVisible()
-    await expect(stepChip).not.toContainText('Discuss')
+    await expect(page.getByRole('button', { name: 'Question scope', exact: true })).toBeVisible()
+    await expect(stepChip).not.toContainText('Question scope')
     const discussion = page.getByTestId('session-discussion-draft')
     for (const width of [240, 320, 480]) {
       await discussion.evaluate((node, width) => {
         ;(node as HTMLElement).style.width = `${width}px`
       }, width)
       const actionBox = await discussion
-        .getByRole('button', { name: 'Discuss', exact: true })
+        .getByRole('button', { name: 'Question scope', exact: true })
         .boundingBox()
       const sourceBox = await stepChip.boundingBox()
       expect(sourceBox!.x).toBeGreaterThan(actionBox!.x + actionBox!.width)

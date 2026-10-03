@@ -7544,6 +7544,7 @@ describe('session store public contract', () => {
       'src/renderer/src/pages/workspace/workspace-conversation-controller.ts',
       'src/renderer/src/pages/workspace/workspace-conversation-items.ts',
       'src/renderer/src/pages/workspace/workspace-conversation-timeline.ts',
+      'src/renderer/src/pages/workspace/workspace-discussion-navigation.ts',
       'src/renderer/src/pages/workspace/workspace-message-queue-admission.ts',
       'src/renderer/src/pages/workspace/workspace-message-queue-controller.ts',
       'src/renderer/src/pages/workspace/workspace-message-queue-owner.ts',

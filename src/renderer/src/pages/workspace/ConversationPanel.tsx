@@ -558,6 +558,24 @@ const ConversationPanel = ({
       dismissAutomaticReading
     }
   } = composer
+  const discussionAnnotation = annotations
+    .filter((annotation) => replayAnnotationTarget(annotation))
+    .at(-1)
+  const discussionTarget = discussionAnnotation && replayAnnotationTarget(discussionAnnotation)
+  const discussionTitle = useSessionStore((state) =>
+    discussionTarget
+      ? (state.sessions.find(
+          (row) =>
+            row.projectId === discussionTarget.projectId &&
+            row.id === discussionTarget.sourceSessionId
+        )?.title ??
+        (discussionAnnotation?.kind === 'text'
+          ? discussionAnnotation.quote
+              .match(/^(?:Session|Research): ([^\r\n]*)/)?.[1]
+              ?.slice(0, 240)
+          : undefined))
+      : activeSession?.runtimeContext?.sessionContext?.bindings.at(-1)?.title
+  )
   // Stable identities across re-renders: the transcript memo compares these callbacks, so an
   // inline closure would re-render every message on each composer state change.
   const annotationSourceId = `main:${activeSession?.projectId}:${activeSession?.id}:${composerFocusKey ?? 'composer'}`
@@ -1474,6 +1492,7 @@ const ConversationPanel = ({
             <WorkspaceMessageScroller
               activeSession={activeSession}
               sessionImport={sessionImport}
+              researchTitle={discussionTitle}
               onStartResearch={
                 canEditDraft &&
                 !draftDoc.nodes.some((node) => node.type !== 'text' || node.text.trim())
@@ -1954,7 +1973,7 @@ const ConversationPanel = ({
                         </p>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
                           {t(
-                            'Read-only. Browse the conversation, files and recorded results. Code execution and continuation are disabled.'
+                            'The original research is read-only. Discuss it alongside the replay, or create a copy to run experiments.'
                           )}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1967,7 +1986,7 @@ const ConversationPanel = ({
                               }}
                             >
                               <GitBranch className="size-4" aria-hidden="true" />
-                              {t('Fork to continue')}
+                              {t('Fork to run experiments')}
                             </Button>
                           ) : null}
                           <Button
