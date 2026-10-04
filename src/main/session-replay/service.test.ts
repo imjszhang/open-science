@@ -90,7 +90,16 @@ describe('local research workspace ownership', () => {
           : { status: 'missing' as const }
     )
     list = vi.fn(async () =>
-      [...sessions.values()].map(({ id, projectId, updatedAt }) => ({ id, projectId, updatedAt }))
+      [...sessions.values()].map(
+        ({ id, projectId, updatedAt, researchMembership, archivedAt, packageOrigin }) => ({
+          id,
+          projectId,
+          updatedAt,
+          researchMembership,
+          archivedAt,
+          importedResearch: packageOrigin ? { importId: packageOrigin.importId } : undefined
+        })
+      )
     )
     readCurrent = vi.fn(async (_projectId, sessionId) =>
       unreadable.has(sessionId) ? undefined : structuredClone(sessions.get(sessionId))
@@ -123,6 +132,12 @@ describe('local research workspace ownership', () => {
       id,
       updatedAt,
       packageOrigin: undefined,
+      researchMembership: {
+        sourceProjectId: identity.projectId,
+        sourceSessionId: identity.sourceSessionId,
+        sourceImportId: 'original',
+        sourceTitle: 'Original research'
+      },
       runtimeContext: {
         version: 1,
         revision: 1,
@@ -162,33 +177,39 @@ describe('local research workspace ownership', () => {
     expect(readCurrent).not.toHaveBeenCalledWith(identity.projectId, 'other-project')
   })
 
-  it('uses only the current authoritative binding, so unlinking or switching sources takes effect immediately', async () => {
+  it('keeps explicit membership when reading focus is removed or switched, and revalidates stale membership', async () => {
     const linked = addDiscussion('discussion', 5)
-    const stale = structuredClone(linked)
-    expect(await service.findDiscussion(identity)).toEqual({ sessionId: linked.id })
     linked.runtimeContext = {
       version: 1,
       revision: 2,
       sessionContext: { version: 1, bindings: [] }
     }
-    // A previously loaded transcript still appears linked, while the owner reads current authority.
-    reads = vi.fn<SessionReplaySessions['read']>(async (_projectId, sessionId) => ({
-      status: 'found',
-      session: sessionId === linked.id ? stale : sourceSession()
-    }))
-    expect(await makeService().findDiscussion(identity)).toBeNull()
-    linked.runtimeContext = {
-      version: 1,
-      revision: 3,
-      sessionContext: { version: 1, bindings: [binding(), binding('other-source')] }
-    }
-    expect(await makeService().findDiscussion(identity)).toBeNull()
-    linked.runtimeContext = {
-      version: 1,
-      revision: 4,
-      sessionContext: { version: 1, bindings: [{ ...binding(), projectId: 'other' }] }
-    }
-    expect(await makeService().findDiscussion(identity)).toBeNull()
+    expect(await service.findDiscussion(identity)).toEqual({ sessionId: linked.id })
+    linked.runtimeContext.sessionContext!.bindings = [binding('other-source')]
+    expect(await service.findDiscussion(identity)).toEqual({ sessionId: linked.id })
+    const stale = await list()
+    list.mockResolvedValue(stale)
+    linked.researchMembership = undefined
+    expect(await service.findDiscussion(identity)).toBeNull()
+  })
+
+  it('never scans ordinary sessions or infers membership from legacy reading links', async () => {
+    for (let index = 0; index < 100; index += 1)
+      addDiscussion(`ordinary-${index}`, index).researchMembership = undefined
+    expect(await service.findDiscussion(identity)).toBeNull()
+    expect(readCurrent).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes repeated imports and rejects sources replaced while opening a candidate', async () => {
+    const discussion = addDiscussion('discussion', 3)
+    discussion.researchMembership!.sourceImportId = 'other-import'
+    expect(await service.findDiscussion(identity)).toBeNull()
+    discussion.researchMembership!.sourceImportId = 'original'
+    readCurrent.mockImplementation(async () => {
+      sessions.get(identity.sourceSessionId)!.packageOrigin!.importId = 'replacement'
+      return discussion
+    })
+    expect(await service.findDiscussion(identity)).toBeNull()
   })
 
   it.each(['missing', 'unreadable', 'archived', 'deleted-project', 'archived-project'])(
@@ -214,6 +235,27 @@ describe('local research workspace ownership', () => {
     expect(await service.findDiscussion(identity)).toBeNull()
     expect(save).not.toHaveBeenCalled()
     expect(readCurrent).not.toHaveBeenCalled()
+  })
+
+  it('routes explicit grouping through the Main owner and refuses archived projects before mutation', async () => {
+    const discussion = addDiscussion('discussion', 2)
+    const setResearchMembership = vi.fn(async () => discussion)
+    const mutate = new SessionReplayService(repository, {
+      read: reads,
+      list,
+      readCurrent,
+      setResearchMembership
+    })
+    const request = { projectId: identity.projectId, sessionId: discussion.id, expectedRevision: 0 }
+    expect(await mutate.setResearchMembership(request)).toEqual(discussion)
+    expect(setResearchMembership).toHaveBeenCalledWith(request)
+    setResearchMembership.mockClear()
+    await client.project.update({
+      where: { id: identity.projectId },
+      data: { archivedAt: new Date() }
+    })
+    await expect(mutate.setResearchMembership(request)).rejects.toThrow('Project is unavailable')
+    expect(setResearchMembership).not.toHaveBeenCalled()
   })
 
   it('browses and saves playback checkpoints without creating or mutating any Session', async () => {
@@ -257,11 +299,18 @@ describe('local research workspace ownership', () => {
   it('admits local replay writes before reading or writing any data-root-owned state', async () => {
     const gated = new SessionReplayService(
       repository,
-      { read: reads, list, readCurrent },
+      { read: reads, list, readCurrent, setResearchMembership: vi.fn() },
       async () => {
         throw new Error('Data root changing')
       }
     )
+    await expect(
+      gated.setResearchMembership({
+        projectId: identity.projectId,
+        sessionId: 'discussion',
+        expectedRevision: 0
+      })
+    ).rejects.toThrow('Data root changing')
     await expect(gated.saveView({ ...identity, state: view, expectedRevision: 0 })).rejects.toThrow(
       'Data root changing'
     )

@@ -82,6 +82,7 @@ const validatedChannels = [
   'session-replay:list-selection-snapshots',
   'session-replay:save-selection-snapshot',
   'session-replay:save-view',
+  'session-replay:set-research-membership',
   'session-replay:unlink-session',
   'sessions:cancel-diagnostics',
   'sessions:delete-session',

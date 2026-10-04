@@ -133,6 +133,8 @@ export function composeCommandDependencies({
           preserveRuntimeState: true
         }),
       list: () => sessionFoundation.sessionRepository.loadSessionSummaries(),
+      setResearchMembership: (request) =>
+        sessionAuthority.sessionPersistenceCoordinator.setResearchMembership(request),
       readCurrent: (projectId, sessionId) =>
         sessionAuthority.sessionPersistenceCoordinator.readSessionSnapshot(projectId, sessionId)
     },

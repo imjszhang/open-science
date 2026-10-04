@@ -558,6 +558,7 @@ describe('preload bridge — public surface inventory', () => {
       'sessionReplay.listSelectionSnapshots',
       'sessionReplay.saveSelectionSnapshot',
       'sessionReplay.saveView',
+      'sessionReplay.setResearchMembership',
       'sessionReplay.unlinkSession',
       'sessions.cancelDiagnostics',
       'sessions.deleteSession',

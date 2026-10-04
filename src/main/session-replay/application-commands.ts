@@ -9,6 +9,7 @@ import type { SessionReplayService } from './service'
 
 export type SessionReplayCommandOwner = Pick<
   SessionReplayService,
+  | 'setResearchMembership'
   | 'findDiscussion'
   | 'unlinkSession'
   | 'get'
@@ -19,6 +20,10 @@ export type SessionReplayCommandOwner = Pick<
   | 'listSelectionSnapshots'
 >
 export const sessionReplayCommands = {
+  setResearchMembership: defineApplicationCommand(
+    'session-replay:set-research-membership',
+    sessionReplayCommandContracts.setResearchMembership
+  ),
   findDiscussion: defineApplicationCommand(
     'session-replay:find-discussion',
     sessionReplayCommandContracts.findDiscussion
@@ -57,6 +62,7 @@ export const registerSessionReplayCommands = (
   const scope = registrar.createScope()
   try {
     scope.registerGroup(sessionReplayCommandGroup, {
+      'session-replay:set-research-membership': ({ args }) => owner.setResearchMembership(args[0]),
       'session-replay:find-discussion': ({ args }) => owner.findDiscussion(args[0]),
       'session-replay:unlink-session': ({ args }) => owner.unlinkSession(args[0]),
       'session-replay:get': ({ args }) => owner.get(args[0]),

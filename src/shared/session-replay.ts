@@ -1,3 +1,4 @@
+import { persistedChatSessionCodec } from './session-persistence/file-codec'
 import { z } from 'zod'
 import { defineApplicationCommandContract, validationCodec } from './application-command-contract'
 
@@ -197,7 +198,21 @@ export const unlinkSessionReadingRequestSchema = z
   .strict()
 export type UnlinkSessionReadingRequest = z.infer<typeof unlinkSessionReadingRequestSchema>
 
+export const setResearchMembershipRequestSchema = z
+  .object({
+    projectId: identity,
+    sessionId: identity,
+    expectedRevision: z.number().int().nonnegative(),
+    source: sessionReplayRequestSchema.extend({ importId: identity }).strict().optional()
+  })
+  .strict()
+export type SetResearchMembershipRequest = z.infer<typeof setResearchMembershipRequestSchema>
+
 export const sessionReplayCommandContracts = {
+  setResearchMembership: defineApplicationCommandContract(
+    validationCodec(z.tuple([setResearchMembershipRequestSchema])),
+    persistedChatSessionCodec
+  ),
   findDiscussion: defineApplicationCommandContract(
     validationCodec(z.tuple([sessionReplayRequestSchema])),
     validationCodec(sessionDiscussionMatchSchema)

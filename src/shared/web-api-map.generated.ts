@@ -222,6 +222,7 @@ export const WEB_INVOKE_CHANNELS = {
   'sessionReplay.listSelectionSnapshots': 'session-replay:list-selection-snapshots',
   'sessionReplay.saveSelectionSnapshot': 'session-replay:save-selection-snapshot',
   'sessionReplay.saveView': 'session-replay:save-view',
+  'sessionReplay.setResearchMembership': 'session-replay:set-research-membership',
   'sessionReplay.unlinkSession': 'session-replay:unlink-session',
   'sessions.cancelDiagnostics': 'sessions:cancel-diagnostics',
   'sessions.deleteSession': 'sessions:delete-session',
