@@ -1,4 +1,4 @@
-import { persistedChatSessionCodec } from './session-persistence/file-codec'
+import { persistedChatSessionCodec } from './session-persistence'
 import { z } from 'zod'
 import { defineApplicationCommandContract, validationCodec } from './application-command-contract'
 

@@ -757,6 +757,7 @@ describe('WorkspaceSidebar accessible render', () => {
   })
 
   it('closes the Session preview when its actions menu opens', async () => {
+    vi.useFakeTimers()
     const { WorkspaceSidebar } = await import('./WorkspaceSidebar')
     const session = createSession({ id: 'menu-session', title: 'Menu Session' })
     const container = document.createElement('div')
@@ -798,6 +799,13 @@ describe('WorkspaceSidebar accessible render', () => {
         '[aria-label="Open actions for Menu Session"]'
       )
       if (!actionsTrigger) throw new Error('Session actions trigger did not render')
+      // jsdom does not model pointer/keyboard modality consistently across tests. Model the
+      // pointer-opened menu's programmatic focus return separately from a later keyboard focus.
+      let keyboardFocus = false
+      const matches = actionsTrigger.matches.bind(actionsTrigger)
+      vi.spyOn(actionsTrigger, 'matches').mockImplementation((selector) =>
+        selector === ':focus-visible' ? keyboardFocus : matches(selector)
+      )
       const pointerOver = new MouseEvent('pointerover', { bubbles: true })
       Object.defineProperty(pointerOver, 'pointerType', { value: 'mouse' })
 
@@ -819,8 +827,10 @@ describe('WorkspaceSidebar accessible render', () => {
       await act(async () =>
         actionsMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       )
+      await act(async () => vi.runOnlyPendingTimersAsync())
 
       expect(document.body.querySelector('[data-slot="dropdown-menu-content"]')).toBeNull()
+      expect(document.activeElement).toBe(actionsTrigger)
       expect(document.body.querySelector('[data-slot="session-hover-preview"]')).toBeNull()
       await act(async () =>
         actionsTrigger.dispatchEvent(
@@ -828,9 +838,16 @@ describe('WorkspaceSidebar accessible render', () => {
         )
       )
       expect(document.body.querySelector('[data-slot="session-hover-preview"]')).toBeNull()
+
+      keyboardFocus = true
+      await act(async () =>
+        actionsTrigger.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+      )
+      expect(document.body.querySelector('[data-slot="session-hover-preview"]')).not.toBeNull()
     } finally {
       act(() => root.unmount())
       container.remove()
+      vi.useRealTimers()
     }
   })
 
