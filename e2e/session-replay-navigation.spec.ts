@@ -91,23 +91,14 @@ test('replaces the discussion Session without replacing the draft or changing so
   const baseline = await app.readFakeAgentPrompts()
   for (const source of [sourceA, sourceB]) {
     await sessionRow(page, source.title).click()
-    await expect(replayTab(page, source.id)).toHaveCount(0)
-    await page
-      .getByRole('region', { name: 'Imported research history', exact: true })
-      .getByRole('button', { name: 'View replay', exact: true })
-      .click()
     await expect(replay).toBeVisible()
-    await replayTab(page, source.id).click()
+    await expect(replayTab(page, source.id)).toBeVisible()
     await page
       .getByRole('button', { name: `Close preview of ${source.title}`, exact: true })
       .click()
     await sessionRow(page, target.title).click()
     await sessionRow(page, source.title).click()
-    await expect(replayTab(page, source.id)).toHaveCount(0)
-    await page
-      .getByRole('region', { name: 'Imported research history', exact: true })
-      .getByRole('button', { name: 'View replay', exact: true })
-      .click()
+    await expect(replayTab(page, source.id)).toBeVisible()
     await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
     const chooser = page.getByRole('dialog', { name: 'Ask in a conversation' })
     if (source.id === sourceA.id) {
@@ -217,6 +208,7 @@ test('replaces the discussion Session without replacing the draft or changing so
   const user = saved!.messages.find((message) => message.role === 'user')!
   expect(user.parts?.some((part) => part.type === 'session')).toBe(false)
   expect(user.annotations).toHaveLength(1)
+  expect(saved!.researchMembership).toBeUndefined()
   expect(saved!.runtimeContext!.sessionContext!.bindings).toHaveLength(1)
   expect(saved!.runtimeContext!.sessionContext!.bindings[0].sessionId).toBe(sourceB.id)
   expect(
@@ -238,4 +230,173 @@ test('replaces the discussion Session without replacing the draft or changing so
   await page.screenshot({
     path: testInfo.outputPath('discussion-session-replaced.png')
   })
+})
+
+test('keeps ordinary and two research drafts independent, persists research ownership and restores child navigation', async ({
+  app
+}, testInfo) => {
+  test.setTimeout(180_000)
+  await app.completeOnboarding()
+  let page = await app.configureFakeAgent()
+  const projectName = 'Research workspace isolation'
+  const projectId = await createProject(page, projectName)
+  const sourceA = sourceFixture(projectId, 'a')
+  const sourceB = sourceFixture(projectId, 'b')
+  page = await app.restartWithSessionFixture(sourceA)
+  page = await app.restartWithSessionFixture(sourceB)
+  const openProject = async (): Promise<void> => {
+    await page
+      .getByRole('region', { name: 'Projects', exact: true })
+      .getByRole('button', { name: projectName, exact: true })
+      .click()
+  }
+  await openProject()
+  const editor = (): Locator => page.getByRole('textbox', { name: 'Ask anything', exact: true })
+  const header = (): Locator => page.getByTestId('research-workspace-header')
+  const research = (source: PersistedChatSession): Locator =>
+    page.locator(`[data-research-id="${source.id}"]`)
+  const openResearch = async (source: PersistedChatSession): Promise<void> => {
+    await research(source).locator('[data-slot="session-open-button"]').first().click()
+    await expect(header()).toContainText(source.title)
+    await expect(replayTab(page, source.id)).toHaveAttribute('aria-selected', 'true')
+  }
+  const savedSessions = async (): Promise<PersistedChatSession[]> =>
+    page.evaluate(
+      async (projectId) =>
+        (await window.api.sessions.loadAll()).sessions.filter(
+          (session) => session.projectId === projectId
+        ),
+      projectId
+    )
+  const freshOrdinary = (): Locator =>
+    page
+      .getByRole('navigation', { name: 'Sessions', exact: true })
+      .getByRole('button', { name: 'New', exact: true })
+
+  await freshOrdinary().click()
+  await editor().fill('Ordinary project notes remain here.')
+  await openResearch(sourceA)
+  await expect(page.getByTestId('session-discussion-draft')).toContainText(sourceA.title)
+  await editor().fill('Draft question for study A.')
+  await openResearch(sourceB)
+  await expect(editor()).toBeEmpty()
+  await expect(page.getByTestId('session-discussion-draft')).toContainText(sourceB.title)
+  await editor().fill('Draft question for study B.')
+  await freshOrdinary().click()
+  await expect(header()).toHaveCount(0)
+  await expect(editor()).toContainText('Ordinary project notes remain here.')
+  await expect(page.getByTestId('session-discussion-draft')).toHaveCount(0)
+  expect((await savedSessions()).map((session) => session.id).sort()).toEqual(
+    [sourceA.id, sourceB.id].sort()
+  )
+
+  await openResearch(sourceA)
+  await expect(editor()).toContainText('Draft question for study A.')
+  const separator = page.getByRole('separator', { name: 'Resize right panel', exact: true })
+  const replay = page.locator('[data-testid="replay-panel"]:visible')
+  // Opening a project preview restores its saved size with a short transition. Drag only after
+  // the pane has settled, otherwise the restore can legitimately override an in-flight gesture.
+  let previousWidth = 0
+  let settledSamples = 0
+  await expect
+    .poll(
+      async () => {
+        const width = (await replay.boundingBox())!.width
+        settledSamples = Math.abs(width - previousWidth) < 0.5 ? settledSamples + 1 : 0
+        previousWidth = width
+        return settledSamples
+      },
+      { intervals: [100, 100, 100] }
+    )
+    .toBeGreaterThanOrEqual(3)
+  const beforeWidth = (await replay.boundingBox())!.width
+  const handle = (await separator.boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 80, handle.y + handle.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(async () => (await replay.boundingBox())!.width).toBeLessThan(beforeWidth - 20)
+  await expect(editor()).toContainText('Draft question for study A.')
+  const materials = page.locator('[role="group"][aria-label="Research materials"]:visible')
+  await materials.getByRole('button', { name: 'Original records', exact: true }).click()
+  const records = page.getByRole('region', { name: 'Original records', exact: true })
+  await expect(records).toContainText('Research A retained its own recorded result.')
+  await expect(records.getByRole('textbox')).toHaveCount(0)
+  await materials.getByRole('button', { name: 'Source files', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Source files', exact: true })).toBeVisible()
+  await expect(header()).toContainText(sourceA.title)
+  await materials.getByRole('button', { name: 'Replay', exact: true }).click()
+  await page.screenshot({ path: testInfo.outputPath('research-workspace-draft-isolation.png') })
+
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'Deterministic reply:'
+  )
+  await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0)
+  const discussionA = (await savedSessions()).find(
+    (session) => session.researchMembership?.sourceSessionId === sourceA.id
+  )!
+  expect(discussionA.researchMembership).toEqual({
+    sourceProjectId: projectId,
+    sourceSessionId: sourceA.id,
+    sourceImportId: sourceA.packageOrigin!.importId,
+    sourceTitle: sourceA.title
+  })
+  await expect(research(sourceA).locator(`[data-session-id="${discussionA.id}"]`)).toBeVisible()
+  await openResearch(sourceB)
+  await expect(editor()).toContainText('Draft question for study B.')
+  await openResearch(sourceA)
+  await expect(
+    research(sourceA).locator(
+      `[data-session-id="${discussionA.id}"] [data-slot="session-open-button"]`
+    )
+  ).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'Draft question for study A.'
+  )
+
+  // Watching B from A does not change ownership; Ask explicitly enters B's pending draft.
+  await replayTab(page, sourceB.id).click()
+  await page
+    .getByTestId('replay-panel')
+    .getByRole('button', { name: 'Ask about this step', exact: true })
+    .click()
+  await expect(header()).toContainText(sourceB.title)
+  await expect(editor()).toContainText('Draft question for study B.')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'Deterministic reply:'
+  )
+  await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0)
+  const discussionB = (await savedSessions()).find(
+    (session) => session.researchMembership?.sourceSessionId === sourceB.id
+  )!
+  expect(discussionB.id).not.toBe(discussionA.id)
+  expect((await savedSessions()).filter((session) => !session.packageOrigin)).toHaveLength(2)
+  await freshOrdinary().click()
+  await expect(editor()).toContainText('Ordinary project notes remain here.')
+  await page.screenshot({ path: testInfo.outputPath('research-sidebar-with-discussions.png') })
+
+  page = await app.restart()
+  await openProject()
+  await openResearch(sourceA)
+  await expect(
+    research(sourceA).locator(
+      `[data-session-id="${discussionA.id}"] [data-slot="session-open-button"]`
+    )
+  ).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'Draft question for study A.'
+  )
+  await openResearch(sourceB)
+  await expect(
+    research(sourceB).locator(
+      `[data-session-id="${discussionB.id}"] [data-slot="session-open-button"]`
+    )
+  ).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'Draft question for study B.'
+  )
+  expect((await savedSessions()).filter((session) => !session.packageOrigin)).toHaveLength(2)
+  await page.screenshot({ path: testInfo.outputPath('research-workspace-restored-membership.png') })
 })
