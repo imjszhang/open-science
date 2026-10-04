@@ -549,6 +549,7 @@ describe('preload bridge — public surface inventory', () => {
       'saveManagedFile',
       'saveProjectArtifacts',
       'saveSessionArtifacts',
+      'sessionReplay.findDiscussion',
       'sessionReplay.get',
       'sessionReplay.getSelectionSnapshot',
       'sessionReplay.list',
