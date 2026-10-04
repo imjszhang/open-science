@@ -16,6 +16,8 @@ import { SessionReplayProgressWriter } from './session-replay-progress-writer'
 import { SessionReplayEvidence } from './SessionReplayEvidence'
 import { SessionDiscussionDialog } from './SessionDiscussionDialog'
 import { openResearchDiscussion } from './workspace-discussion-navigation'
+import { ResearchMaterialsPanel } from './ResearchMaterialsPanel'
+import { Button } from '@/components/ui/button'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -44,20 +46,25 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const [saveError, setSaveError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const [evidenceStep, setEvidenceStep] = useState<ReplayStep>()
+  const [materialsMode, setMaterialsMode] = useState<'replay' | 'records' | 'files'>('replay')
   const surface = useRef<HTMLDivElement>(null)
+  const lastRecordId = useRef<string | undefined>(undefined)
   const returningFromEvidence = useRef(false)
   useEffect(() => {
     if (!isActive || (!evidenceStep && !returningFromEvidence.current)) return
     returningFromEvidence.current = Boolean(evidenceStep)
     const frame = requestAnimationFrame(() => {
-      surface.current
-        ?.querySelector<HTMLElement>(
-          evidenceStep ? '[data-replay-evidence-back]' : '[data-replay-browse-steps]'
-        )
-        ?.focus({ preventScroll: true })
+      const target = evidenceStep
+        ? surface.current?.querySelector<HTMLElement>('[data-replay-evidence-back]')
+        : materialsMode === 'records'
+          ? [
+              ...(surface.current?.querySelectorAll<HTMLElement>('[data-research-record]') ?? [])
+            ].find((element) => element.dataset.researchRecord === lastRecordId.current)
+          : surface.current?.querySelector<HTMLElement>('[data-replay-browse-steps]')
+      target?.focus({ preventScroll: true })
     })
     return () => cancelAnimationFrame(frame)
-  }, [evidenceStep, isActive])
+  }, [evidenceStep, isActive, materialsMode])
   const loadAbort = useRef<AbortController | undefined>(undefined)
   const activeWriter = useRef<SessionReplayProgressWriter | undefined>(undefined)
   const sourceStatus = useSessionReplayStore(
@@ -166,7 +173,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       })
   }
 
-  const openEvidence = (resource: ReplayResource | undefined, step: ReplayStep): void => {
+  const openEvidence = (resource: ReplayResource | undefined, step?: ReplayStep): void => {
     if (sourceUnavailable) return
     if (!resource) {
       setEvidenceStep(step)
@@ -248,6 +255,37 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   )
   return (
     <div ref={surface} className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border-200 px-3 py-2">
+        {materialsMode !== 'replay' ? (
+          <p
+            className="truncate text-xs font-medium text-text-300"
+            title={loaded.document.source.title}
+          >
+            {loaded.document.source.title}
+          </p>
+        ) : null}
+        <div role="group" aria-label={t('Research materials')} className="flex flex-wrap gap-1">
+          {(['replay', 'records', 'files'] as const).map((mode) => (
+            <Button
+              key={mode}
+              variant={materialsMode === mode ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2 text-xs"
+              aria-pressed={materialsMode === mode}
+              onClick={() => {
+                setEvidenceStep(undefined)
+                setMaterialsMode(mode)
+              }}
+            >
+              {mode === 'replay'
+                ? t('Replay')
+                : mode === 'records'
+                  ? t('Original records')
+                  : t('Source files')}
+            </Button>
+          ))}
+        </div>
+      </div>
       {notebookUnavailable ? (
         <ErrorNotice
           inline
@@ -272,7 +310,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           }
         />
       ) : null}
-      <div className={evidenceStep ? 'hidden' : 'min-h-0 flex-1'}>
+      <div className={evidenceStep || materialsMode !== 'replay' ? 'hidden' : 'min-h-0 flex-1'}>
         <ReplayPanel
           expanded={expanded}
           onToggleExpanded={() =>
@@ -280,7 +318,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           }
           document={loaded.document}
           initialView={loaded.view}
-          active={isActive && !evidenceStep}
+          active={isActive && !evidenceStep && materialsMode === 'replay'}
           onViewChange={notebookUnavailable ? undefined : loaded.writer.enqueue}
           onAskStep={askStep}
           discussionPending={discussionPending}
@@ -288,12 +326,27 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           onOpenEvidence={openEvidence}
         />
       </div>
+      {materialsMode !== 'replay' ? (
+        <div className={evidenceStep ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
+          <ResearchMaterialsPanel
+            key={materialsMode}
+            document={loaded.document}
+            mode={materialsMode}
+            onOpenRecord={(step) => {
+              lastRecordId.current = step.id
+              setEvidenceStep(step)
+            }}
+            onOpenFile={(resource) => openEvidence(resource)}
+          />
+        </div>
+      ) : null}
       {evidenceStep ? (
         <SessionReplayEvidence
           source={loaded.document.source}
           step={evidenceStep}
           resources={loaded.document.resources}
           onBack={() => setEvidenceStep(undefined)}
+          backLabel={materialsMode === 'records' ? t('Back to original records') : undefined}
           onOpenResource={(resource) => openEvidence(resource, evidenceStep)}
         />
       ) : null}

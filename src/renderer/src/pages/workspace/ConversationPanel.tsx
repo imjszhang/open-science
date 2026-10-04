@@ -1,6 +1,9 @@
 import { replayAnnotationTarget } from '../../../../shared/replay-reference'
 import { SessionDiscussionSource } from './SessionDiscussionSource'
 import { SessionDiscussionButton } from './SessionDiscussionButton'
+import { ResearchWorkspaceHeader } from './ResearchWorkspaceHeader'
+import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
+import { researchSourceFromSession } from './workspace-discussion-navigation'
 import { createSessionReplayItem } from './workspace-session-actions'
 import { forkSession, sessionForkAvailable } from '@/lib/session-fork'
 import { sideChatBlock, sideChatBlockMessage } from './side-chat-availability'
@@ -517,6 +520,19 @@ const ConversationPanel = ({
     sideChatDisabledReason,
     sessionImport
   } = view
+  const draftResearch = useResearchWorkspaceStore(
+    (state) => state.draftResearchByProject[sessionImport?.projectId ?? '']
+  )
+  const research = activeSession
+    ? (activeSession.researchMembership ?? researchSourceFromSession(activeSession))
+    : draftResearch
+  const researchTitle = useSessionStore((state) =>
+    research
+      ? (state.sessions.find(
+          (row) => row.id === research.sourceSessionId && row.projectId === research.sourceProjectId
+        )?.title ?? research.sourceTitle)
+      : undefined
+  )
   const sourceSession = useSessionStore((state) =>
     state.sessions.find((session) => session.id === activeSession?.branchSource?.sessionId)
   )
@@ -1423,20 +1439,48 @@ const ConversationPanel = ({
           >
             <Menu className="size-5" strokeWidth={2} aria-hidden="true" />
           </button>
-          <h1 className="min-w-0 flex-1 text-[13px] font-semibold text-text-000">
-            {activeSession ? (
-              <SessionInfoPopover
-                key={activeSession.id}
-                session={activeSession}
-                sourceSession={sourceSession}
-                onOpenSession={sessionTools.openSession}
-                onEdit={sessionTools.editSession}
-                onTogglePin={sessionTools.togglePin}
-              />
-            ) : (
-              <span className="block truncate">{t('New conversation')}</span>
-            )}
-          </h1>
+          {research ? (
+            <ResearchWorkspaceHeader
+              key={JSON.stringify([
+                research.sourceProjectId,
+                research.sourceSessionId,
+                research.sourceImportId
+              ])}
+              source={research}
+              historical={Boolean(activeSession?.packageOrigin ?? activeSession?.importedResearch)}
+              onShowPreview={() => {
+                if (isPreviewPanelCollapsed) onTogglePreviewPanel()
+              }}
+            >
+              {activeSession ? (
+                <SessionInfoPopover
+                  key={activeSession.id}
+                  session={activeSession}
+                  sourceSession={sourceSession}
+                  onOpenSession={sessionTools.openSession}
+                  onEdit={sessionTools.editSession}
+                  onTogglePin={sessionTools.togglePin}
+                />
+              ) : (
+                <span>{t('New discussion')}</span>
+              )}
+            </ResearchWorkspaceHeader>
+          ) : (
+            <h1 className="min-w-0 flex-1 text-[13px] font-semibold text-text-000">
+              {activeSession ? (
+                <SessionInfoPopover
+                  key={activeSession.id}
+                  session={activeSession}
+                  sourceSession={sourceSession}
+                  onOpenSession={sessionTools.openSession}
+                  onEdit={sessionTools.editSession}
+                  onTogglePin={sessionTools.togglePin}
+                />
+              ) : (
+                <span className="block truncate">{t('New conversation')}</span>
+              )}
+            </h1>
+          )}
           {activeSession && sessionTools.exportDiagnostics && (
             <TooltipProvider>
               <Tooltip>
@@ -1507,7 +1551,7 @@ const ConversationPanel = ({
             <WorkspaceMessageScroller
               activeSession={activeSession}
               sessionImport={sessionImport}
-              researchTitle={discussionTitle}
+              researchTitle={researchTitle ?? discussionTitle}
               onStartResearch={
                 canEditDraft &&
                 !draftDoc.nodes.some((node) => node.type !== 'text' || node.text.trim())

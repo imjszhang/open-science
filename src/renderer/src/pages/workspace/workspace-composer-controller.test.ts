@@ -1,3 +1,5 @@
+import type { ResearchMembership } from '../../../../shared/session-persistence'
+import { researchDraftKey } from './research-draft-identity'
 import { useSessionReplayStore } from '@/stores/session-replay-store'
 import type { SessionDiscussionCapture } from './replay/replay-context'
 // @vitest-environment jsdom
@@ -90,6 +92,7 @@ const uploads = (
 type ControllerHook = {
   result: { current: ReturnType<typeof useWorkspaceComposerController> }
   selectDraft: (draftKey: string) => void
+  selectResearch: (source: ResearchMembership | undefined) => void
   selectSession: (
     session: Parameters<typeof useWorkspaceComposerController>[0]['activeSession']
   ) => void
@@ -118,6 +121,7 @@ const renderController = (
   strictMode = false
 ): ControllerHook => {
   let currentDraftKey = 'session-a'
+  let researchMembership: ResearchMembership | undefined
   let selectedActiveSession = activeSession ?? undefined
   let pendingCustomizePrefill: CustomizePrefillIntent | undefined
   let pendingWslSupportPrefill: WslSupportPrefillIntent | undefined
@@ -129,6 +133,7 @@ const renderController = (
   const Harness = (): null => {
     result.current = useWorkspaceComposerController({
       currentDraftKey,
+      researchMembership,
       newConversationDraftKey: 'new:project',
       activeProjectId: 'project',
       pendingCustomizePrefill,
@@ -170,6 +175,12 @@ const renderController = (
       currentDraftKey = draftKey
       render()
     },
+    selectResearch: (source): void => {
+      researchMembership = source
+      selectedActiveSession = undefined
+      currentDraftKey = source ? researchDraftKey(source) : 'new:project'
+      render()
+    },
     selectSession: (session): void => {
       selectedActiveSession = session
       currentDraftKey = session?.id ?? 'new:project'
@@ -209,6 +220,80 @@ afterEach(() => {
 })
 
 describe('workspace composer controller', () => {
+  it('isolates ordinary and per-research text, annotations and attachments while switching drafts', async () => {
+    const source = {
+      sourceProjectId: 'project',
+      sourceSessionId: 'source-a',
+      sourceImportId: 'import-a',
+      sourceTitle: 'Study A'
+    }
+    const second = { ...source, sourceSessionId: 'source-b', sourceImportId: 'import-b' }
+    const attachment: UploadedAttachment = {
+      id: 'upload-a',
+      sessionId: researchDraftKey(source),
+      name: 'evidence.txt',
+      originalName: 'evidence.txt',
+      path: '/tmp/evidence.txt',
+      mimeType: 'text/plain',
+      size: 5
+    }
+    const hook = renderController(
+      uploads(vi.fn().mockResolvedValue(attachment)),
+      undefined,
+      [],
+      null
+    )
+    mounted.push(hook)
+    hook.selectResearch(undefined)
+    act(() => hook.result.current.actions.changeDoc(textDoc('Ordinary scratch')))
+    hook.selectResearch(source)
+    act(() => {
+      hook.result.current.actions.changeDoc(textDoc('Study A question'))
+      hook.result.current.actions.addAnnotation(annotation('source-a'))
+      hook.result.current.actions.stageFiles([
+        new File(['proof'], 'evidence.txt', { type: 'text/plain' })
+      ])
+    })
+    await flushAsyncWork()
+    const captured = hook.result.current.lifecycle.captureSend()
+    hook.selectResearch(second)
+    act(() => hook.result.current.actions.changeDoc(textDoc('Study B question')))
+    expect(hook.result.current.view.annotations).toEqual([])
+    expect(hook.result.current.view.attachments).toEqual([])
+    expect(hook.result.current.lifecycle.captureSend().researchMembership).toEqual(second)
+    expect(captured.researchMembership).toEqual(source)
+    hook.selectResearch(source)
+    expect(docToText(hook.result.current.view.doc)).toBe('Study A question')
+    expect(hook.result.current.view.annotations).toEqual([annotation('source-a')])
+    expect(hook.result.current.lifecycle.captureSend().attachments).toEqual([attachment])
+    hook.selectResearch(undefined)
+    expect(docToText(hook.result.current.view.doc)).toBe('Ordinary scratch')
+    expect(hook.result.current.lifecycle.captureSend().researchMembership).toBeUndefined()
+  })
+
+  it('restores a rejected research send to its own draft after switching to another research', () => {
+    const source = {
+      sourceProjectId: 'project',
+      sourceSessionId: 'source-a',
+      sourceImportId: 'import-a',
+      sourceTitle: 'Study A'
+    }
+    const second = { ...source, sourceSessionId: 'source-b' }
+    const hook = renderController(uploads(), undefined, [], null)
+    mounted.push(hook)
+    hook.selectResearch(source)
+    act(() => hook.result.current.actions.changeDoc(textDoc('First study question')))
+    const snapshot = hook.result.current.lifecycle.captureSend()
+    act(() => hook.result.current.lifecycle.clearDraft(snapshot.draftKey, snapshot.version))
+    hook.selectResearch(second)
+    act(() => hook.result.current.actions.changeDoc(textDoc('Other study question')))
+    act(() => hook.result.current.lifecycle.restoreFailedSend(snapshot, true))
+    expect(docToText(hook.result.current.view.doc)).toBe('Other study question')
+    hook.selectResearch(source)
+    expect(docToText(hook.result.current.view.doc)).toBe('First study question')
+    expect(hook.result.current.lifecycle.captureSend().researchMembership).toEqual(source)
+  })
+
   it('replaces a discussion source atomically, preserves ordinary annotations, and allows undo', () => {
     const hook = renderController(uploads(), undefined, [], null)
     mounted.push(hook)

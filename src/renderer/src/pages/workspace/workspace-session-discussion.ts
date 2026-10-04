@@ -83,7 +83,8 @@ export const useWorkspaceSessionDiscussion = ({
       targetSession?.contentLoaded === false
     )
       return
-    const targetKey = destination.sessionId ?? `new:${destination.projectId}`
+    const targetKey =
+      destination.sessionId ?? destination.draftKey ?? `new:${destination.projectId}`
     if (draftKey !== targetKey) return
     const selectedFrame = (): string => {
       const graph = useSessionStore
@@ -115,6 +116,19 @@ export const useWorkspaceSessionDiscussion = ({
       )
     }
     if (!destinationCurrent()) {
+      useSessionReplayStore.getState().ask(undefined)
+      return
+    }
+    if (
+      destination.onlyIfUnlinked &&
+      composer.view.annotations.some((annotation) => {
+        const source = replayAnnotationTarget(annotation)
+        return (
+          source?.projectId === pending.projectId &&
+          source.sourceSessionId === pending.sourceSessionId
+        )
+      })
+    ) {
       useSessionReplayStore.getState().ask(undefined)
       return
     }
@@ -171,6 +185,7 @@ export const useWorkspaceSessionDiscussion = ({
       })
   }, [
     composer.actions,
+    composer.view.annotations,
     composer.view.doc,
     draftKey,
     editable,

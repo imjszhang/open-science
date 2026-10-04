@@ -8,6 +8,8 @@ export const sessionReplayKey = (projectId: string, sourceSessionId: string): st
 export type SessionDiscussionDestination = {
   projectId: string
   sessionId?: string
+  draftKey?: string
+  onlyIfUnlinked?: boolean
   frameId?: string
   branchId?: string
   navigationRevision: number

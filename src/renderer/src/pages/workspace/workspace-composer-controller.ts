@@ -30,6 +30,7 @@ import {
   isSessionSizeLimitError,
   MAX_SESSION_PDF_CONTEXTS,
   type LiteratureReference,
+  type ResearchMembership,
   type MessagePdfContextSnapshot,
   type PdfReadingPosition,
   type SessionPdfBinding,
@@ -111,6 +112,7 @@ export type ComposerSendSnapshot = {
   doc: ComposerDoc
   annotations: Annotation[]
   discussionFocus?: SessionDiscussionCapture
+  researchMembership?: ResearchMembership
   attachments: UploadedAttachment[]
   automaticReadingEnabled?: boolean
   pdfContext?: MessagePdfContextSnapshot
@@ -126,6 +128,7 @@ export type ComposerSendSnapshot = {
 
 type WorkspaceComposerControllerInput = {
   currentDraftKey: string
+  researchMembership?: ResearchMembership
   newConversationDraftKey: string
   activeProjectId: string | undefined
   pendingCustomizePrefill: CustomizePrefillIntent | undefined
@@ -247,6 +250,7 @@ const blank = (): ComposerDraft => ({
 
 const useWorkspaceComposerController = ({
   currentDraftKey,
+  researchMembership,
   newConversationDraftKey,
   activeProjectId,
   pendingCustomizePrefill,
@@ -1226,6 +1230,7 @@ const useWorkspaceComposerController = ({
       return {
         retrySessionOwner: retrySessionOwnerRef.current,
         setupSessionToken: setupSessionTokenRef.current,
+        ...(researchMembership ? { researchMembership: { ...researchMembership } } : {}),
         draftKey: activeDraftKeyRef.current,
         version: versionsRef.current[activeDraftKeyRef.current] ?? 0,
         doc: docRef.current,
@@ -1270,6 +1275,7 @@ const useWorkspaceComposerController = ({
     },
     [
       attachments,
+      researchMembership,
       activeReadingBinding,
       activePendingReading,
       automaticStagedReadingContexts,

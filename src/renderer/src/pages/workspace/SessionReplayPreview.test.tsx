@@ -116,6 +116,23 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('SessionReplayPreview lifecycle', () => {
+  it('browses original records and source files without changing conversation or restarting replay', async () => {
+    render(<SessionReplayPreview item={item()} />)
+    await screen.findByTestId('replay-panel')
+    const selected = useSessionStore.getState().selectedSessionId
+    fireEvent.click(screen.getByRole('button', { name: 'Original records' }))
+    expect(props().active).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: /Complete original recorded question/ }))
+    expect(await screen.findByRole('region', { name: 'Original recorded evidence' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to original records' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Source files' }))
+    expect(screen.getByText('No source files are available.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Replay' }))
+    expect(props().active).toBe(true)
+    expect(mocks.load).toHaveBeenCalledTimes(1)
+    expect(useSessionStore.getState().selectedSessionId).toBe(selected)
+  })
+
   it('defers restored background archives until activation and retains them across tab switches', async () => {
     const mounted = render(<SessionReplayPreview item={item()} isActive={false} />)
     await act(async () => {})
