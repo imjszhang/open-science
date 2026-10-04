@@ -64,7 +64,6 @@ import {
   GitBranch,
   Loader2,
   LockKeyhole,
-  Link2,
   ListChecks,
   Menu,
   MessageCircleMore,
@@ -2140,7 +2139,7 @@ const ConversationPanel = ({
                                     composerInteractiveTransitionClassName
                                   )}
                                 >
-                                  <Link2
+                                  <BookOpen
                                     className="size-4 shrink-0 text-primary"
                                     strokeWidth={2}
                                     aria-hidden="true"
@@ -2155,7 +2154,7 @@ const ConversationPanel = ({
                               </ReadingContextPicker>
                             ) : (
                               <>
-                                <Link2
+                                <BookOpen
                                   className="size-4 shrink-0 text-primary"
                                   strokeWidth={2}
                                   aria-hidden="true"
@@ -2247,7 +2246,7 @@ const ConversationPanel = ({
                               pdfContext.bindings.length === 0 && '-mt-2 rounded-t-2xl'
                             )}
                           >
-                            <Link2
+                            <BookOpen
                               className="size-4 shrink-0 text-primary"
                               strokeWidth={2}
                               aria-hidden="true"
