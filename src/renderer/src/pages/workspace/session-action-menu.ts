@@ -87,9 +87,9 @@ type SessionActionOptions = {
   canArchiveSession?: (session: ChatSession) => boolean
   onTogglePin: (session: ChatSession) => void
   onRenameSession: (session: ChatSession) => void
-  onDownloadArtifacts: (session: ChatSession) => void
+  onDownloadArtifacts?: (session: ChatSession) => void
   onCheckArtifacts?: (session: ChatSession) => void
-  onViewNotebook: (session: ChatSession) => void
+  onViewNotebook?: (session: ChatSession) => void
   onViewReplay?: (session: ChatSession) => void
   onDiscussSession?: (session: ChatSession) => Promise<void>
   onExportSession?: (session: ChatSession) => void
@@ -98,7 +98,7 @@ type SessionActionOptions = {
   onExportDiagnostics?: (session: ChatSession) => void
   packageBusy?: boolean
   onArchiveSession?: (session: ChatSession) => void
-  onDeleteSession: (session: ChatSession) => void
+  onDeleteSession?: (session: ChatSession) => void
 }
 
 const hasTransferActivity = ({ session, presentedStatus }: SessionActionInvocation): boolean =>
@@ -109,9 +109,16 @@ const hasTransferActivity = ({ session, presentedStatus }: SessionActionInvocati
   session.runtimeContext?.permission?.state === 'pending' ||
   session.runtimeContext?.plan?.approval === 'pending'
 
+// Imported runtime fields are evidence; transient renderer work still blocks a transfer.
+// Fork keeps the stricter admission below because its destination is writable.
+const hasExportActivity = (invocation: SessionActionInvocation): boolean =>
+  invocation.session.packageOrigin
+    ? Boolean(invocation.session.compacting || invocation.session.agentPromptInFlight)
+    : hasTransferActivity(invocation)
+
 const isExportDisabled = (invocation: SessionActionInvocation): boolean =>
   (invocation.session.activeMessageCount ?? invocation.session.messages.length) === 0 ||
-  hasTransferActivity(invocation)
+  hasExportActivity(invocation)
 
 const forkDisabledDescription = (
   options: SessionActionOptions,
@@ -140,8 +147,8 @@ export const createSessionActionBindings = (
     disabled: !options.canMutateConversations
   },
   'download-artifacts': {
-    execute: ({ session }) => options.onDownloadArtifacts(session),
-    hidden: !options.canDownloadArtifacts
+    execute: ({ session }) => options.onDownloadArtifacts?.(session),
+    hidden: !options.canDownloadArtifacts || !options.onDownloadArtifacts
   },
   'check-artifacts': {
     execute: ({ session }) => options.onCheckArtifacts?.(session),
@@ -149,7 +156,8 @@ export const createSessionActionBindings = (
     disabled: !options.canMutateConversations
   },
   'view-notebook': {
-    execute: ({ session }) => options.onViewNotebook(session)
+    execute: ({ session }) => options.onViewNotebook?.(session),
+    hidden: !options.onViewNotebook
   },
   'view-replay': {
     execute: ({ session }) => options.onViewReplay?.(session),
@@ -172,7 +180,7 @@ export const createSessionActionBindings = (
     disabled: (invocation) =>
       !options.canMutateConversations ||
       Boolean(options.packageBusy) ||
-      hasTransferActivity(invocation)
+      hasExportActivity(invocation)
   },
   'export-diagnostics': {
     execute: ({ session }) => options.onExportDiagnostics?.(session),
@@ -189,7 +197,8 @@ export const createSessionActionBindings = (
     disabled: ({ session }) => !options.canArchiveSession?.(session)
   },
   delete: {
-    execute: ({ session }) => options.onDeleteSession(session),
+    execute: ({ session }) => options.onDeleteSession?.(session),
+    hidden: !options.onDeleteSession,
     disabled: !options.canDeleteConversations
   }
 })

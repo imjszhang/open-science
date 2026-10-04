@@ -512,6 +512,11 @@ describe('post-merge Windows validation', () => {
     const names = job.steps?.map(({ name }) => name) ?? []
     const prepareMacSigning = findStep(job, 'Prepare macOS signing keychain')
     const azureLogin = findStep(job, 'Sign in to Azure for Windows code signing')
+    const preinstallTrustedSigning = findStep(job, 'Pre-install Azure Trusted Signing module')
+    const verifyTrustedSigning = findStep(
+      job,
+      'Verify Azure Trusted Signing module in packaging environment'
+    )
     const packageStep = findStep(job, 'Build & package')
     const verifyWindows = findStep(job, 'Verify signed Windows package')
     const cleanupMacSigning = findStep(job, 'Clean up macOS signing keychain')
@@ -529,6 +534,22 @@ describe('post-merge Windows validation', () => {
         'subscription-id': '${{ vars.AZURE_SUBSCRIPTION_ID }}'
       }
     })
+    expect(preinstallTrustedSigning).toMatchObject({
+      if: "${{ matrix.platform == 'win' && inputs.sign_windows }}",
+      shell: 'pwsh'
+    })
+    expect(preinstallTrustedSigning.run).toContain(
+      '"PSModulePath=$env:PSModulePath" >> $env:GITHUB_ENV'
+    )
+    expect(preinstallTrustedSigning.run).toContain("$pathEntries = @($env:PSModulePath -split ';'")
+    expect(preinstallTrustedSigning.run).not.toContain('[Environment]::SetEnvironmentVariable')
+    expect(verifyTrustedSigning).toMatchObject({
+      if: "${{ matrix.platform == 'win' && inputs.sign_windows }}",
+      shell: 'bash'
+    })
+    expect(verifyTrustedSigning.run).toContain(
+      "pwsh -NoProfile -NonInteractive -Command 'Get-Command Invoke-TrustedSigning"
+    )
     expect(prepareMacSigning).toMatchObject({
       id: 'mac_signing',
       if: "${{ matrix.platform == 'mac' && !inputs.nightly }}"
@@ -1045,6 +1066,10 @@ if ($artifactSaveBase -eq $artifactSaveCommit) {
       permissions: { contents: 'read' },
       'runs-on': 'ubuntu-latest'
     })
+    expect(preflight.outputs).toEqual({
+      windows_runtime_source_changed: '${{ steps.runtime_change.outputs.source_changed }}',
+      windows_runtime_catalog_changed: '${{ steps.runtime_change.outputs.catalog_changed }}'
+    })
     expect(checkout).toMatchObject({
       uses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
       with: { 'fetch-depth': 0 }
@@ -1056,7 +1081,26 @@ if ($artifactSaveBase -eq $artifactSaveCommit) {
       if: stableTagCondition,
       run: 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main'
     })
+    const runtimeChange = findStep(preflight, 'Detect Windows runtime changes')
+    expect(runtimeChange).toMatchObject({ id: 'runtime_change', shell: 'bash' })
+    expect(runtimeChange.run).toContain("git describe --tags --match 'v*'")
+    expect(runtimeChange.run).toContain('src/main/notebook/windows-runtime-catalog.json')
+    expect(runtimeChange.run).toContain('Runtime source changed without a catalog update')
+    expect(runtimeChange.run).toContain("'.github/workflows/windows-notebook-runtime.yml'")
+    const verifyRuntime = findStep(preflight, 'Verify reviewed Windows runtime CDN objects')
+    expect(verifyRuntime).toMatchObject({
+      if: "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')",
+      run: 'node scripts/windows-runtime-cdn.mjs check --verify-bytes',
+      env: {
+        CDN_BASE_URL: '${{ vars.CDN_BASE_URL }}',
+        S3_PREFIX: '${{ vars.S3_PREFIX }}'
+      }
+    })
+    expect(release.jobs['windows-notebook-runtime']).toBeUndefined()
+    expect(release.jobs['windows-runtime-sign']).toBeUndefined()
+    expect(release.jobs['windows-runtime-cdn']).toBeUndefined()
     expect(release.jobs.build.needs).toBe('release-preflight')
+    expect(release.jobs.build.if).toBeUndefined()
     expect(release.jobs.build.with?.sign_windows).toBe(
       "${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}"
     )

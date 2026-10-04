@@ -16,7 +16,10 @@ import {
   requestAnnotationReveal,
   requestPdfAnnotationReveal
 } from '../../annotations/annotation-reveal'
-import type { PdfAnnotation as SavedPdfAnnotation } from '../../../../../../shared/pdf-annotations'
+import type {
+  PdfAnnotation as SavedPdfAnnotation,
+  PdfAnnotationListResult
+} from '../../../../../../shared/pdf-annotations'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { PdfAnnotationsProvider } from '../../pdf-annotations/PdfAnnotationsProvider'
 import { useSessionStore } from '@/stores/session-store'
@@ -900,6 +903,161 @@ describe('PdfPreviewContent', () => {
     expect(window.api.previewResources.release).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['upload', false],
+    ['artifact', false],
+    ['upload', true],
+    ['artifact', true]
+  ] as const)(
+    'shows package %s PDF snapshots without live notes or mutation controls (receipt only: %s)',
+    async (sourceKind, receiptOnly) => {
+      const setValue = vi.fn()
+      vi.mocked(createManagedPdfLoadingTask).mockReturnValue({
+        promise: Promise.resolve({
+          numPages: 1,
+          getPage,
+          destroy: destroyDocument,
+          annotationStorage: { setValue }
+        }),
+        destroy: vi.fn().mockResolvedValue(undefined)
+      } as never)
+      const annotation: SavedPdfAnnotation = {
+        id: 'package-note',
+        projectId: 'project-1',
+        version: 1,
+        origin: 'user',
+        kind: 'page-note',
+        tagIds: [],
+        note: 'Packaged evidence',
+        createdAt: '2026-09-19T00:00:00.000Z',
+        updatedAt: '2026-09-19T00:00:00.000Z',
+        target: {
+          source: {
+            kind: sourceKind === 'upload' ? 'upload-version' : 'artifact-version',
+            projectId: 'project-1',
+            sessionId: 'package-session',
+            sourceFileId: 'file-1',
+            versionId: 'version-1',
+            name: 'paper.pdf',
+            path: `${sourceKind}-version:version-1`,
+            checksum: 'a'.repeat(64)
+          },
+          selector: { kind: 'page-note', pageNumber: 1, pageRotation: 0, coordinateVersion: 1 }
+        }
+      }
+      let resolveNotes!: (value: PdfAnnotationListResult) => void
+      const list = vi.fn<Window['api']['pdfAnnotations']['list']>(
+        () =>
+          new Promise((resolve) => {
+            resolveNotes = resolve
+          })
+      )
+      const resolvePdfSource = vi.fn()
+      window.api = {
+        ...window.api,
+        pdfAnnotations: { list },
+        bookmarks: { resolvePdfSource },
+        tags: { snapshot: vi.fn().mockResolvedValue({ revision: 0, tags: [], assignments: [] }) }
+      } as unknown as Window['api']
+      useSessionStore.setState({
+        selectedSessionId: 'package-session',
+        sessions: [{ id: 'package-session', projectId: 'project-1', packageOrigin: {} }] as never
+      })
+      await act(async () => {
+        root.render(
+          <TooltipProvider>
+            <PdfAnnotationsProvider writable={false} loadAnnotations={false}>
+              <PdfPreviewRenderer
+                item={{
+                  id: 'file-1',
+                  projectId: 'project-1',
+                  sessionId: 'package-session',
+                  title: 'paper.pdf',
+                  name: 'paper.pdf',
+                  type: 'file',
+                  format: 'pdf',
+                  source: sourceKind,
+                  path: annotation.target.source.path,
+                  managedFileId: 'file-1',
+                  selectedVersionId: 'version-1'
+                }}
+              />
+            </PdfAnnotationsProvider>
+          </TooltipProvider>
+        )
+        await flush()
+      })
+      expect(list).toHaveBeenCalledTimes(1)
+      expect(list).toHaveBeenCalledWith({
+        projectId: 'project-1',
+        sessionId: 'package-session',
+        sourceFileId: 'file-1',
+        versionId: 'version-1',
+        limit: 100,
+        cursor: undefined
+      })
+      const expectReadOnly = (): void => {
+        expect(
+          screen
+            .getByRole('button', { name: 'Annotate selected text' })
+            .getAttribute('aria-disabled')
+        ).toBe('true')
+        expect(screen.queryByRole('button', { name: 'Select area to annotate' })).toBeNull()
+      }
+      expectReadOnly()
+      await act(async () => {
+        const result: PdfAnnotationListResult = {
+          items: receiptOnly ? [] : [annotation],
+          total: receiptOnly ? 0 : 1,
+          readOnly: true,
+          readonlyIds: receiptOnly ? [] : [annotation.id],
+          source: annotation.target.source,
+          nativeImport: {
+            nativeRefs: [{ id: '12R', pageNumber: 1 }],
+            pageCount: 1,
+            unsupportedCount: 0,
+            truncated: false
+          }
+        }
+        list.mockResolvedValue(result)
+        resolveNotes(result)
+        await flush()
+      })
+      expectReadOnly()
+      await act(async () =>
+        fireEvent.mouseDown(screen.getByRole('tab', { name: 'Notes & Annotations' }), {
+          button: 0,
+          ctrlKey: false
+        })
+      )
+      expect(setValue).toHaveBeenCalledWith('12R', { noView: true })
+      if (!receiptOnly) {
+        expect(container.querySelector('[data-pdf-notebook-view]')?.textContent).toContain(
+          'Packaged evidence'
+        )
+        expect(
+          screen.getByRole('button', { name: 'Edit annotation note' }).hasAttribute('disabled')
+        ).toBe(true)
+        expect(
+          screen.getByRole('button', { name: 'Delete annotation' }).hasAttribute('disabled')
+        ).toBe(true)
+      } else {
+        expect(screen.queryByRole('button', { name: 'Edit annotation note' })).toBeNull()
+      }
+      expect(container.textContent).not.toContain(
+        'PDF annotations are unavailable for this source.'
+      )
+      expect(resolvePdfSource).not.toHaveBeenCalled()
+      for (const [request] of list.mock.calls)
+        expect(request).toMatchObject({
+          projectId: 'project-1',
+          sessionId: 'package-session',
+          sourceFileId: 'file-1',
+          versionId: 'version-1'
+        })
+    }
+  )
+
   it.each([undefined, 'artifact'] as const)(
     'opens read-only replay PDF versions without writable annotation/bookmark access (source: %s)',
     async (source) => {
@@ -1325,47 +1483,74 @@ describe('PdfPreviewContent', () => {
     }
   )
 
-  it('resolves an exact bookmark source without a PDF Agent-context binding', async () => {
-    const resolvePdfSource = vi.fn().mockResolvedValue({ ok: false, reason: 'source-unavailable' })
-    window.api = {
-      ...window.api,
-      bookmarks: { resolvePdfSource }
-    } as unknown as Window['api']
-    useSessionStore.setState({
-      selectedSessionId: 'session-owner',
-      sessions: [{ id: 'session-owner', projectId: 'project-1' }]
-    } as never)
-
-    await act(async () => {
-      root.render(
-        <PdfPreviewRenderer
-          item={{
-            id: 'artifact-1',
+  it.each([false, true])(
+    'keeps unavailable annotations quiet only for imported history (imported: %s)',
+    async (imported) => {
+      const resolvePdfSource = vi
+        .fn()
+        .mockResolvedValue({ ok: false, reason: 'source-unavailable' })
+      window.api = {
+        ...window.api,
+        bookmarks: { resolvePdfSource }
+      } as unknown as Window['api']
+      useSessionStore.setState({
+        selectedSessionId: 'session-owner',
+        sessions: [
+          {
+            id: 'session-owner',
             projectId: 'project-1',
-            sessionId: 'source-session',
-            title: 'report.pdf',
-            type: 'file',
-            source: 'artifact',
-            path: 'artifact-version:stale-projection',
-            name: 'report.pdf',
-            format: 'pdf',
-            managedFileId: 'artifact-1',
-            selectedVersionId: 'artifact-v2'
-          }}
-        />
-      )
-    })
+            ...(imported
+              ? {
+                  packageOrigin: {
+                    importId: 'import-1',
+                    sourceProjectId: 'source-project',
+                    sourceSessionId: 'source-session',
+                    importedAt: 1,
+                    manifestChecksum: 'a'.repeat(64)
+                  }
+                }
+              : {})
+          }
+        ]
+      } as never)
 
-    await vi.waitFor(() =>
-      expect(resolvePdfSource).toHaveBeenCalledWith({
-        projectId: 'project-1',
-        sessionId: 'session-owner',
-        sourceKind: 'artifact-version',
-        sourceFileId: 'artifact-1',
-        versionId: 'artifact-v2'
+      await act(async () => {
+        root.render(
+          <PdfPreviewRenderer
+            item={{
+              id: 'artifact-1',
+              projectId: 'project-1',
+              sessionId: 'source-session',
+              title: 'report.pdf',
+              type: 'file',
+              source: 'artifact',
+              path: 'artifact-version:stale-projection',
+              name: 'report.pdf',
+              format: 'pdf',
+              managedFileId: 'artifact-1',
+              selectedVersionId: 'artifact-v2'
+            }}
+          />
+        )
       })
-    )
-  })
+
+      await vi.waitFor(() =>
+        expect(resolvePdfSource).toHaveBeenCalledWith({
+          projectId: 'project-1',
+          sessionId: 'session-owner',
+          sourceKind: 'artifact-version',
+          sourceFileId: 'artifact-1',
+          versionId: 'artifact-v2'
+        })
+      )
+      await vi.waitFor(() =>
+        expect(
+          container.textContent?.includes('PDF annotations are unavailable for this source.')
+        ).toBe(!imported)
+      )
+      expect(container.querySelector('[aria-label="report.pdf scrollable preview"]')).not.toBeNull()
+    }
+  )
 
   it.each(['upload', 'artifact'] as const)(
     'opens Figures & Tables for a finalized %s without Agent context',

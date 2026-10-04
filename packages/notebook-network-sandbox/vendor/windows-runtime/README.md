@@ -7,8 +7,9 @@ AppContainer remains the execution boundary. It requires these runtime repairs:
   AppContainer child stdio pipes must use the `LOCAL` namespace. The previous
   libuv implementation can block synchronously before the child timeout starts.
 - Node package-scope traversal: stop CommonJS and ESM ancestor searches when a
-  package config cannot be read and its directory cannot be listed inside
-  AppContainer. A readable package config remains authoritative, including its
+  package config cannot be read and its directory metadata cannot be queried
+  inside AppContainer. Ancestor grants intentionally allow traversal and
+  metadata reads without directory listing. A readable package config remains authoritative, including its
   `type`, `imports` and `exports`. An unreadable config inside a readable directory,
   or malformed JSON, still fails. Direct package reads keep upstream error handling.
   This repair does not grant ancestor ACLs, create workspace package files, or
@@ -76,6 +77,21 @@ $env:S3_PREFIX = '<configured release prefix>'
 node scripts/stage-windows-notebook-components.mjs <signed-runtime-root> <output>
 node scripts/windows-runtime-cdn.mjs verify <output>
 ```
+
+To create the signed input without signing an application installer, dispatch
+**Sign Windows Notebook runtime** from `main` with the successful `Prepare Windows Notebook runtime`
+run and its exact artifact ID. The runtime path uses the separate protected
+`windows-runtime-signing` environment, verifies every runtime PE file and timestamp, and uploads a
+short-lived signed runtime artifact. It never writes to the CDN; pass that artifact to
+**Stage Windows Notebook CDN components** with `dry_run=true` first. Keep the application
+`windows-signing` environment restricted to version-tag releases. The runtime environment must have
+the same Azure signing variables. Restrict its deployment branch policy to the `main` branch (not a
+tag). With the repository's default OIDC subject format, add an Azure federated credential with
+issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`, and
+subject `repo:aipoch/open-science:environment:windows-runtime-signing`. An environment job uses the
+environment subject, not `ref:refs/heads/main`; GitHub's deployment policy enforces the branch.
+See the [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc).
+This is a one-time GitHub/Azure configuration requirement, not a runtime catalog or data migration.
 
 Use the existing repository `CDN_BASE_URL` and `S3_PREFIX` values. The runtime
 namespace uses the application root (the first segment of `S3_PREFIX`), matching
@@ -215,8 +231,10 @@ directory are exercised. It also covers CommonJS and ESM package imports through
 eval, explicit module eval, print and stdin with inaccessible CommonJS and ESM
 ancestor scopes, rejects malformed and unreadable configs inside readable
 directories, and preserves readable workspace `type`, `imports` and `exports`.
-Windows core runs all 17 cases inside the native lifecycle smoke's
-owned test installation; setup and final removal remain owned by that smoke.
+The PR Gate Windows core lane runs the package-scope and protected workspace execution cases
+inside the native lifecycle smoke's owned test installation. Setup and final removal remain owned
+by that smoke. The shared-tool matrix remains available through the full integration test
+invocation for scheduled or manual validation.
 This does not certify arbitrary native addons, online
 registry access, or a clean installed application.
 

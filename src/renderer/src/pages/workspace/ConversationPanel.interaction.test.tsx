@@ -1070,6 +1070,100 @@ describe('ConversationPanel header spacing', () => {
     expect(exportDiagnostics).toHaveBeenCalledWith(expect.objectContaining({ id: session.id }))
   })
 
+  it('opens an empty side chat from the persistent header menu without sending the main draft', async () => {
+    const createDraft = vi.fn(() => 'empty-side-chat')
+    const start = vi.fn()
+    const changeDoc = vi.fn()
+    renderPanel({
+      view: {
+        activeSession: {
+          id: 'header-session',
+          projectId: 'project-a',
+          title: 'Research',
+          cwd: '/workspace',
+          status: 'running',
+          messages: planOriginMessages(),
+          createdAt: 1,
+          updatedAt: 2
+        }
+      },
+      composer: {
+        view: { doc: docFromText('Keep this draft') },
+        actions: { changeDoc }
+      },
+      sideChat: { createDraft },
+      conversation: { actions: { sideChat: { start } } },
+      sessionTools: { exportDiagnostics: vi.fn() }
+    })
+    const header = getConversationHeader()
+    const trigger = header.querySelector<HTMLButtonElement>('[aria-label="Session actions"]')!
+    const diagnostics = header.querySelector('[aria-label="Export diagnostics…"]')!
+    expect(
+      diagnostics.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(trigger.className).not.toMatch(/opacity-0|invisible|hidden/)
+    await act(async () => trigger.click())
+    await act(async () =>
+      document.querySelector<HTMLElement>('[data-action-id="new-side-chat"]')!.click()
+    )
+    expect(createDraft).toHaveBeenCalledExactlyOnceWith()
+    expect(start).not.toHaveBeenCalled()
+    expect(changeDoc).not.toHaveBeenCalled()
+    expect(getComposerEditor().textContent).toContain('Keep this draft')
+  })
+
+  it('passes pending credential state to the header menu availability projection', async () => {
+    const activeSession: ChatSession = {
+      id: 'credential-header',
+      projectId: 'project-a',
+      title: 'Research',
+      cwd: '/workspace',
+      status: 'idle',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const execute = vi.fn()
+    const disabled = vi.fn(({ presentedStatus }: { presentedStatus: string }) =>
+      presentedStatus.startsWith('waiting-')
+    )
+    renderPanel({
+      view: { activeSession },
+      permissions: {
+        ...createPanelDefaults().permissions,
+        credentialRequests: [
+          {
+            id: 'credential-1',
+            credentialId: 'openalex',
+            connector: 'literature',
+            method: 'openalex_search_works',
+            sessionId: activeSession.id
+          }
+        ]
+      },
+      sessionTools: {
+        menuBindings: {
+          fork: {
+            execute,
+            disabled
+          }
+        }
+      }
+    })
+    await act(async () =>
+      getConversationHeader()
+        .querySelector<HTMLButtonElement>('[aria-label="Session actions"]')!
+        .click()
+    )
+    const fork = document.querySelector<HTMLButtonElement>('[data-action-id="fork"]')!
+    expect(disabled).toHaveBeenLastCalledWith(
+      expect.objectContaining({ presentedStatus: 'waiting-for-user' })
+    )
+    expect(fork.disabled).toBe(true)
+    await act(async () => fork.click())
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it('opens Session information and routes editing through the owner', () => {
     const session: ChatSession = {
       id: 'info-session',
@@ -1176,75 +1270,88 @@ describe('ConversationPanel composer errors', () => {
     expect(alert?.className).not.toContain('bg-red-50')
   })
 
-  it('offers an immediate retry when Artifact publication fails', () => {
-    const request = vi.fn()
-    const pendingPath = '/data/artifacts/project-a/artifact-session-1/.pending/run-1/report.md'
-    const activeSession: ChatSession = {
-      id: 'session-artifact-retry',
-      projectId: 'project-a',
-      title: 'Artifact retry',
-      cwd: '/workspace',
-      status: 'error',
-      error: 'Generated file finalization failed: disk temporarily unavailable',
-      errorReportable: true,
-      messages: [
-        {
-          ...planOriginMessages()[0],
-          turnOutcome: {
-            kind: 'failed',
-            settledAt: 2,
-            error: 'Generated file finalization failed: disk temporarily unavailable',
-            errorReportable: true,
-            recovery: 'retry-artifact-publication'
+  it.each([false, true])(
+    'gates Artifact publication retry for imported history (%s)',
+    (imported) => {
+      const request = vi.fn()
+      const pendingPath = '/data/artifacts/project-a/artifact-session-1/.pending/run-1/report.md'
+      const activeSession: ChatSession = {
+        id: 'session-artifact-retry',
+        projectId: 'project-a',
+        title: 'Artifact retry',
+        cwd: '/workspace',
+        status: 'error',
+        error: 'Generated file finalization failed: disk temporarily unavailable',
+        errorReportable: true,
+        messages: [
+          {
+            ...planOriginMessages()[0],
+            turnOutcome: {
+              kind: 'failed',
+              settledAt: 2,
+              error: 'Generated file finalization failed: disk temporarily unavailable',
+              errorReportable: true,
+              recovery: 'retry-artifact-publication'
+            }
+          },
+          {
+            id: 'message-1',
+            role: 'agent',
+            responseToMessageId: 'plan-origin',
+            content: 'Created the report.',
+            status: 'complete',
+            eventIds: ['artifact-event-1'],
+            artifactIds: ['artifact-session-1:run-1:report.md'],
+            createdAt: 1,
+            updatedAt: 1
           }
-        },
-        {
-          id: 'message-1',
-          role: 'agent',
-          responseToMessageId: 'plan-origin',
-          content: 'Created the report.',
-          status: 'complete',
-          eventIds: ['artifact-event-1'],
-          artifactIds: ['artifact-session-1:run-1:report.md'],
-          createdAt: 1,
-          updatedAt: 1
+        ],
+        artifacts: [
+          {
+            id: 'artifact-session-1:run-1:report.md',
+            kind: 'managed-file',
+            name: 'report.md',
+            path: pendingPath,
+            fileUrl: `file://${pendingPath}`,
+            size: 10,
+            mtimeMs: 1
+          }
+        ],
+        createdAt: 1,
+        updatedAt: 2
+      }
+
+      if (imported)
+        activeSession.packageOrigin = {
+          importId: 'import-1',
+          sourceProjectId: 'source-project',
+          sourceSessionId: 'source-session',
+          importedAt: 1,
+          manifestChecksum: 'a'.repeat(64)
         }
-      ],
-      artifacts: [
-        {
-          id: 'artifact-session-1:run-1:report.md',
-          kind: 'managed-file',
-          name: 'report.md',
-          path: pendingPath,
-          fileUrl: `file://${pendingPath}`,
-          size: 10,
-          mtimeMs: 1
-        }
-      ],
-      createdAt: 1,
-      updatedAt: 2
+      renderPanel({
+        view: { activeSession },
+        workflows: { artifactFinalization: { request } }
+      })
+
+      const retry = container.querySelector<HTMLButtonElement>(
+        '[aria-label="Retry Artifact publication"]'
+      )
+      const report = container.querySelector<HTMLButtonElement>('[aria-label="Report this error"]')
+      const error = Array.from(container.querySelectorAll('span')).find(
+        (element) => element.textContent === activeSession.error
+      )
+      expect(retry).not.toBeNull()
+      expect(report).not.toBeNull()
+      expect(error?.parentElement?.classList.contains('flex-col')).toBe(true)
+      expect(retry?.parentElement?.classList.contains('flex-wrap')).toBe(true)
+      expect(container.querySelector('[data-slot="turn-outcome-notice"]')).not.toBeNull()
+      act(() => retry?.click())
+      expect(retry?.disabled).toBe(imported)
+      if (imported) expect(request).not.toHaveBeenCalled()
+      else expect(request).toHaveBeenCalledExactlyOnceWith('session-artifact-retry', 'plan-origin')
     }
-
-    renderPanel({
-      view: { activeSession },
-      workflows: { artifactFinalization: { request } }
-    })
-
-    const retry = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Retry Artifact publication"]'
-    )
-    const report = container.querySelector<HTMLButtonElement>('[aria-label="Report this error"]')
-    const error = Array.from(container.querySelectorAll('span')).find(
-      (element) => element.textContent === activeSession.error
-    )
-    expect(retry).not.toBeNull()
-    expect(report).not.toBeNull()
-    expect(error?.parentElement?.classList.contains('flex-col')).toBe(true)
-    expect(retry?.parentElement?.classList.contains('flex-wrap')).toBe(true)
-    expect(container.querySelector('[data-slot="turn-outcome-notice"]')).not.toBeNull()
-    act(() => retry?.click())
-    expect(request).toHaveBeenCalledExactlyOnceWith('session-artifact-retry', 'plan-origin')
-  })
+  )
 
   it('keeps Turn Outcome actions stable across draft edits but never calls stale handlers', () => {
     const firstRequest = vi.fn()
@@ -8374,3 +8481,69 @@ it('shows the branch source chat number and opens that source session', () => {
   act(() => sourceLink!.click())
   expect(openSession).toHaveBeenCalledWith('branch-source')
 })
+
+it.each(['question', 'delegated question', 'plan', 'permission', 'delegated permission'] as const)(
+  'does not reactivate an imported historical %s',
+  (kind) => {
+    const activeSession: ChatSession = {
+      ...delegatedQuestionSession(),
+      packageOrigin: {
+        importId: 'import-operation',
+        sourceProjectId: 'source-project',
+        sourceSessionId: 'source-session',
+        importedAt: 1,
+        manifestChecksum: 'a'.repeat(64)
+      }
+    }
+    if (kind === 'question') {
+      activeSession.activities = [
+        {
+          id: 'historical-question',
+          kind: 'tool',
+          title: 'Choose an approach',
+          status: 'failed',
+          eventIds: [],
+          sortIndex: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          elicitation: {
+            message: 'Choose an approach',
+            fields: [],
+            state: 'pending',
+            durable: { kind: 'agent-user-choice', requestId: 'historical-choice' }
+          }
+        }
+      ]
+    }
+    if (kind === 'plan') {
+      activeSession.status = 'waiting-plan-approval'
+      activeSession.messages = planOriginMessages()
+      activeSession.activePlanProjection = {
+        ...completedPlanProjection,
+        approval: 'pending',
+        lifecycle: 'awaiting_approval'
+      }
+    }
+    if (kind.endsWith('permission')) activeSession.status = 'waiting-permission'
+    renderPanel({
+      view: { activeSession },
+      permissions: {
+        requests: kind.endsWith('permission')
+          ? [
+              {
+                sessionId: activeSession.id,
+                ...(kind === 'delegated permission'
+                  ? { delegated: { frameId: 'child', attemptId: 'attempt' } }
+                  : {})
+              } as never
+            ]
+          : []
+      }
+    })
+    expect(container.querySelector('[data-testid="permission-approval-controls"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Imported research history"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="blocking-composer-overlay"]')).toBeNull()
+    expect(container.textContent).not.toContain('Asked by Researcher')
+    expect(container.querySelector('[data-testid="ordinary-composer-form"]')).toBeNull()
+  }
+)
