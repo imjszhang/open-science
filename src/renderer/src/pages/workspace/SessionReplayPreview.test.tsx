@@ -116,6 +116,58 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('SessionReplayPreview lifecycle', () => {
+  it.each(['Source files', 'Original records', 'evidence'])(
+    'reveals the existing player from %s without reloading or stealing focus',
+    async (mode) => {
+      const mounted = render(<SessionReplayPreview item={item()} />)
+      const player = await screen.findByTestId('replay-panel')
+      const initialView = props().initialView
+      fireEvent.click(
+        screen.getByRole('button', { name: mode === 'evidence' ? 'Original records' : mode })
+      )
+      if (mode === 'evidence') {
+        fireEvent.click(screen.getByRole('button', { name: /Complete original recorded question/ }))
+        await waitFor(() =>
+          expect(document.activeElement).toBe(
+            screen.getByRole('button', { name: 'Back to original records' })
+          )
+        )
+      }
+      expect(props().active).toBe(false)
+      // An ordinary tab round-trip must retain the selected materials view.
+      mounted.rerender(<SessionReplayPreview item={item()} isActive={false} />)
+      mounted.rerender(<SessionReplayPreview item={item()} isActive />)
+      expect(props().active).toBe(false)
+      // The invoking control remains focused when explicit navigation exits evidence.
+      const invokingControl = screen.getByRole('button', { name: 'Replay' })
+      invokingControl.focus()
+      mounted.rerender(
+        <SessionReplayPreview item={{ ...item(), replayRevealRequest: 1 }} isActive />
+      )
+      expect(props().active).toBe(true)
+      expect(screen.getByTestId('replay-panel')).toBe(player)
+      expect(props().initialView).toBe(initialView)
+      expect(screen.queryByRole('region', { name: 'Original recorded evidence' })).toBeNull()
+      await act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+      })
+      expect(document.activeElement).toBe(invokingControl)
+      expect(mocks.load).toHaveBeenCalledTimes(1)
+      expect(mocks.get).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Source files' }))
+      mounted.rerender(
+        <SessionReplayPreview item={{ ...item(), replayRevealRequest: 1 }} isActive />
+      )
+      expect(props().active).toBe(false)
+      mounted.rerender(
+        <SessionReplayPreview item={{ ...item(), replayRevealRequest: 2 }} isActive />
+      )
+      expect(props().active).toBe(true)
+      expect(screen.getByTestId('replay-panel')).toBe(player)
+    }
+  )
+
   it('browses original records and source files without changing conversation or restarting replay', async () => {
     render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')

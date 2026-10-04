@@ -4,7 +4,7 @@ import { SessionDiscussionButton } from './SessionDiscussionButton'
 import { ResearchWorkspaceHeader } from './ResearchWorkspaceHeader'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { researchSourceFromSession } from './workspace-discussion-navigation'
-import { createSessionReplayItem } from './workspace-session-actions'
+import { showSessionReplay } from './workspace-session-actions'
 import { forkSession, sessionForkAvailable } from '@/lib/session-fork'
 import { sideChatBlock, sideChatBlockMessage } from './side-chat-availability'
 import {
@@ -1448,9 +1448,6 @@ const ConversationPanel = ({
               ])}
               source={research}
               historical={Boolean(activeSession?.packageOrigin ?? activeSession?.importedResearch)}
-              onShowPreview={() => {
-                if (isPreviewPanelCollapsed) onTogglePreviewPanel()
-              }}
             >
               {activeSession ? (
                 <SessionInfoPopover
@@ -2053,15 +2050,11 @@ const ConversationPanel = ({
                             size="sm"
                             aria-controls="right-panel"
                             onClick={() => {
-                              usePreviewWorkbenchStore
-                                .getState()
-                                .upsertAndActivateItem(
-                                  createSessionReplayItem(
-                                    activeSession.projectId,
-                                    activeSession.id,
-                                    activeSession.title
-                                  )
-                                )
+                              showSessionReplay(
+                                activeSession.projectId,
+                                activeSession.id,
+                                activeSession.title
+                              )
                             }}
                           >
                             <Play className="size-4" aria-hidden="true" />

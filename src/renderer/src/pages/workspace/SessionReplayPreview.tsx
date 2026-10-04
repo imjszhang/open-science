@@ -50,7 +50,20 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const surface = useRef<HTMLDivElement>(null)
   const lastRecordId = useRef<string | undefined>(undefined)
   const returningFromEvidence = useRef(false)
+  const lastRevealRequest = useRef(item.replayRevealRequest)
   useEffect(() => {
+    if (
+      item.replayRevealRequest !== undefined &&
+      item.replayRevealRequest !== lastRevealRequest.current
+    ) {
+      lastRevealRequest.current = item.replayRevealRequest
+      // Navigation from the conversation reveals the existing player without moving keyboard
+      // focus into the evidence pane or resetting the playhead, speed, or discussion draft.
+      returningFromEvidence.current = false
+      setEvidenceStep(undefined)
+      setMaterialsMode('replay')
+      return
+    }
     if (!isActive || (!evidenceStep && !returningFromEvidence.current)) return
     returningFromEvidence.current = Boolean(evidenceStep)
     const frame = requestAnimationFrame(() => {
@@ -64,7 +77,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       target?.focus({ preventScroll: true })
     })
     return () => cancelAnimationFrame(frame)
-  }, [evidenceStep, isActive, materialsMode])
+  }, [evidenceStep, isActive, materialsMode, item.replayRevealRequest])
   const loadAbort = useRef<AbortController | undefined>(undefined)
   const activeWriter = useRef<SessionReplayProgressWriter | undefined>(undefined)
   const sourceStatus = useSessionReplayStore(

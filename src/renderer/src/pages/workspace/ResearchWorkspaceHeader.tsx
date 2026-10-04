@@ -5,22 +5,19 @@ import type { ResearchMembership } from '../../../../shared/session-persistence'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
 import { useSessionStore } from '@/stores/session-store'
-import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import { openResearchWorkspace } from './workspace-discussion-navigation'
-import { createSessionReplayItem } from './workspace-session-actions'
+import { showSessionReplay } from './workspace-session-actions'
 
 // A narrow presentation layer over ordinary conversations and the existing preview workbench.
 // Membership determines this breadcrumb; changing a reading reference never changes its parent.
 export const ResearchWorkspaceHeader = ({
   source,
   historical,
-  children,
-  onShowPreview
+  children
 }: {
   source: ResearchMembership
   historical: boolean
   children: React.ReactNode
-  onShowPreview: () => void
 }): React.JSX.Element => {
   const { t } = useTranslation()
   const record = useSessionStore((state) =>
@@ -38,12 +35,7 @@ export const ResearchWorkspaceHeader = ({
     (record.packageOrigin?.importId ?? record.importedResearch?.importId) === source.sourceImportId
   )
   const showReplay = (): void => {
-    usePreviewWorkbenchStore
-      .getState()
-      .upsertAndActivateItem(
-        createSessionReplayItem(source.sourceProjectId, source.sourceSessionId, title)
-      )
-    onShowPreview()
+    showSessionReplay(source.sourceProjectId, source.sourceSessionId, title)
   }
   const newDiscussion = async (): Promise<void> => {
     setPending(true)

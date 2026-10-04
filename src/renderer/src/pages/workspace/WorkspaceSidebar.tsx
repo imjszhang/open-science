@@ -1,6 +1,5 @@
-import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import { useNavigationStore } from '@/stores/navigation-store'
-import { createSessionReplayItem, loadSessionDiscussionContext } from './workspace-session-actions'
+import { showSessionReplay, loadSessionDiscussionContext } from './workspace-session-actions'
 import { openResearchDiscussion, openResearchWorkspace } from './workspace-discussion-navigation'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { useSessionStore } from '@/stores/session-store'
@@ -1499,16 +1498,12 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
       }
     },
     onViewReplay: (session) => {
-      usePreviewWorkbenchStore
-        .getState()
-        .upsertAndActivateItem(
-          createSessionReplayItem(
-            session.projectId,
-            session.id,
-            session.title,
-            useNavigationStore.getState().activeProjectId ?? session.projectId
-          )
-        )
+      showSessionReplay(
+        session.projectId,
+        session.id,
+        session.title,
+        useNavigationStore.getState().activeProjectId ?? session.projectId
+      )
     },
     onDiscussSession: async (session) => {
       const navigationRevision = useNavigationStore.getState().explicitNavigationRevision

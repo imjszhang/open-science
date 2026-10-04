@@ -52,6 +52,95 @@ const sessionRow = (page: Page, title: string): Locator =>
 const replayTab = (page: Page, sourceId: string): Locator =>
   page.locator(`[id="preview-tab-${encodeURIComponent(`tool:${sourceId}:replay`)}"]`)
 
+test('View replay opens the player from materials or a collapsed pane without changing the draft or playhead', async ({
+  app
+}) => {
+  await app.completeOnboarding()
+  let page = await app.configureFakeAgent()
+  const projectName = 'View replay navigation'
+  const projectId = await createProject(page, projectName)
+  const source = sourceFixture(projectId, 'a')
+  page = await app.restartWithSessionFixture(source)
+  await page
+    .getByRole('region', { name: 'Projects', exact: true })
+    .getByRole('button', { name: projectName, exact: true })
+    .click()
+  await sessionRow(page, source.title).click()
+
+  const header = page.getByTestId('research-workspace-header')
+  const viewReplay = header.getByRole('button', { name: 'View replay', exact: true })
+  const replay = page.getByTestId('replay-panel')
+  const materials = page.getByRole('group', { name: 'Research materials', exact: true })
+  const editor = page.getByRole('textbox', { name: 'Ask anything', exact: true })
+  const progress = replay.getByRole('slider', { name: 'Replay progress', exact: true })
+  const browse = replay.getByRole('button', { name: 'Browse steps', exact: true })
+  const directory = page.getByRole('dialog', { name: 'Browse steps', exact: true })
+  await expect(replay).toBeVisible()
+  await browse.click()
+  await directory.getByRole('button', { name: /^Go to step 2:/ }).click()
+  const position = await progress.getAttribute('aria-valuenow')
+  expect(Number(position)).toBeGreaterThan(0)
+  const draft = 'Which evidence supports this recorded conclusion?'
+  await editor.fill(draft)
+  const prompts = await app.readFakeAgentPrompts()
+
+  const expectUnchangedPlayer = async (): Promise<void> => {
+    await expect(replay).toBeVisible()
+    await expect(materials.getByRole('button', { name: 'Replay', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await expect(progress).toHaveAttribute('aria-valuenow', position!)
+    await expect(replay.getByRole('button', { name: 'Play replay', exact: true })).toBeVisible()
+    await expect(editor).toContainText(draft)
+    await expect(header).toContainText(source.title)
+    await expect(page.getByTestId('session-discussion-draft')).toContainText('Entire research')
+  }
+
+  for (const mode of ['Source files', 'Original records']) {
+    await materials.getByRole('button', { name: mode, exact: true }).click()
+    const material = page.getByRole('region', { name: mode, exact: true })
+    await expect(material).toBeVisible()
+    await expect(replay).not.toBeVisible()
+    await viewReplay.click()
+    await expect(material).not.toBeVisible()
+    await expectUnchangedPlayer()
+  }
+
+  await browse.click()
+  await directory
+    .getByRole('button', { name: 'Open original evidence for step 2', exact: true })
+    .click()
+  const evidence = page.getByRole('region', { name: 'Original recorded evidence', exact: true })
+  await expect(evidence).toBeVisible()
+  await viewReplay.click()
+  await expect(evidence).not.toBeVisible()
+  await expectUnchangedPlayer()
+
+  await page.getByRole('button', { name: 'Collapse preview panel', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: 'Expand preview panel', exact: true })
+  ).toBeVisible()
+  await viewReplay.click()
+  await expect(
+    page.getByRole('button', { name: 'Collapse preview panel', exact: true })
+  ).toBeVisible()
+  await expectUnchangedPlayer()
+  // A second explicit request must remain idempotent when the player is already visible.
+  await viewReplay.click()
+  await expectUnchangedPlayer()
+  expect(await app.readFakeAgentPrompts()).toEqual(prompts)
+  expect(
+    await page.evaluate(
+      async (projectId) =>
+        (await window.api.sessions.loadAll()).sessions
+          .filter((session) => session.projectId === projectId)
+          .map((session) => session.id),
+      projectId
+    )
+  ).toEqual([source.id])
+})
+
 test('replaces the discussion Session without replacing the draft or changing source records', async ({
   app
 }, testInfo) => {

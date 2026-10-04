@@ -34,35 +34,42 @@ beforeEach(() => {
     byProject: {},
     activeProjectId: 'project',
     items: [],
-    activeItemId: undefined
+    activeItemId: undefined,
+    panelState: 'collapsed'
   })
   openResearch.mockResolvedValue(true)
 })
 afterEach(cleanup)
 
 it('uses the current research title and opens the source replay without leaving the discussion', () => {
-  const showPreview = vi.fn()
   render(
-    <ResearchWorkspaceHeader source={source} historical={false} onShowPreview={showPreview}>
+    <ResearchWorkspaceHeader source={source} historical={false}>
       <span>Question one</span>
     </ResearchWorkspaceHeader>
   )
   expect(screen.getByText('Current title')).toBeTruthy()
   expect(screen.getByText('Discussion')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'View replay' }))
-  expect(showPreview).toHaveBeenCalledOnce()
+  expect(usePreviewWorkbenchStore.getState().panelState).toBe('open')
   expect(useSessionStore.getState().selectedSessionId).toBe('discussion')
   expect(usePreviewWorkbenchStore.getState().items).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ replaySourceProjectId: 'project', replaySourceSessionId: 'source' })
+      expect.objectContaining({
+        replaySourceProjectId: 'project',
+        replaySourceSessionId: 'source',
+        replayRevealRequest: expect.any(Number)
+      })
     ])
   )
+  fireEvent.click(screen.getByRole('button', { name: 'View replay' }))
+  expect(usePreviewWorkbenchStore.getState().panelState).toBe('open')
+  expect(usePreviewWorkbenchStore.getState().items).toHaveLength(1)
 })
 
 it('keeps a discussion visible with its saved title when the source is missing', () => {
   useSessionStore.setState({ sessions: [] })
   render(
-    <ResearchWorkspaceHeader source={source} historical={false} onShowPreview={vi.fn()}>
+    <ResearchWorkspaceHeader source={source} historical={false}>
       <span>Question one</span>
     </ResearchWorkspaceHeader>
   )
@@ -73,7 +80,7 @@ it('keeps a discussion visible with its saved title when the source is missing',
 
 it('labels original records as read-only and explicitly opens a fresh research draft', async () => {
   render(
-    <ResearchWorkspaceHeader source={source} historical onShowPreview={vi.fn()}>
+    <ResearchWorkspaceHeader source={source} historical>
       <span>Original title</span>
     </ResearchWorkspaceHeader>
   )
