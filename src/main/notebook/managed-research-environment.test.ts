@@ -578,6 +578,458 @@ const cancellationGate = (): { promise: Promise<void>; resolve(): void } => {
   return { promise, resolve }
 }
 
+async function retainCollection(fixture: Awaited<ReturnType<typeof setup>>): Promise<{
+  prepared: ManagedResearchEnvironment
+  collectionId: string
+  outputRoot: string
+}> {
+  const prepared = await fixture.prepare()
+  const collectionId = digest('retained-execution')
+  let outputRoot = ''
+  await expect(
+    fixture.owner.withExecution(
+      { ...prepared, collectionId, executionInvocationId: 'retained-invocation' },
+      async (context) => {
+        outputRoot = context.outputRoot
+        expect((await fixture.owner.get(prepared)).pendingCollection).toEqual({
+          collectionId,
+          executionInvocationId: 'retained-invocation'
+        })
+        await writeFile(join(outputRoot, 'result.json'), '{"from":"original-run"}')
+        throw new Error('Artifact publication failed')
+      }
+    )
+  ).rejects.toThrow('Artifact publication failed')
+  return { prepared, collectionId, outputRoot }
+}
+
+it('retains failed collection bytes through release, restart, quiesce and close, and blocks reuse or migration', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const execute = vi.fn(async () => 'must not overwrite')
+  await expect(
+    fixture.owner.withExecution({ ...prepared, executionInvocationId: 'next' }, execute)
+  ).rejects.toThrow('awaiting collection')
+  expect(execute).not.toHaveBeenCalled()
+  expect(await fixture.owner.release(prepared)).toMatchObject({
+    state: 'ready',
+    pendingCollection: { collectionId, executionInvocationId: 'retained-invocation' }
+  })
+  await expect(fixture.owner.prepareForDataRootHandoff()).rejects.toThrow(
+    'collected or explicitly discarded'
+  )
+  await fixture.owner.quiesce()
+  await fixture.owner.close()
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  await restarted.recover()
+  expect(await restarted.get(prepared)).toMatchObject({
+    state: 'ready',
+    pendingCollection: { collectionId }
+  })
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toBe('{"from":"original-run"}')
+  expect(
+    (await lstat(join(fixture.root, 'research-environments', prepared.environmentId))).isDirectory()
+  ).toBe(true)
+})
+
+it('collects retained files in a new operation without rechecking the runtime or dispatching execution', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const runtimeChecks = vi.mocked(fixture.dependencies.verifyRuntime).mock.calls.length
+  vi.mocked(fixture.dependencies.verifyRuntime).mockRejectedValue(new Error('Node was upgraded'))
+  vi.mocked(fixture.dependencies.stopExecution).mockClear()
+  let authority!: ManagedOutputAuthority
+  const recovered = await fixture.owner.withCollection(
+    { ...prepared, collectionId, operationId: 'new-operation' },
+    async (context) => {
+      authority = context.authority
+      expect(context).not.toHaveProperty('capability')
+      expect(context.outputRoot).toBe(outputRoot)
+      expect(context.receipt.pendingCollection?.collectionId).toBe(collectionId)
+      const file = await resolveManagedOutputAuthority(
+        authority,
+        { ...scope, operationId: 'new-operation' },
+        'result.json'
+      )
+      await expect(
+        resolveManagedOutputAuthority(
+          authority,
+          { ...scope, operationId: 'old-operation' },
+          'result.json'
+        )
+      ).rejects.toThrow('does not belong')
+      return readFile(file.path, 'utf8')
+    }
+  )
+  expect(recovered).toBe('{"from":"original-run"}')
+  expect(fixture.dependencies.stopExecution).toHaveBeenCalledExactlyOnceWith({
+    ...scope,
+    executionInvocationId: 'retained-invocation'
+  })
+  expect(fixture.dependencies.verifyRuntime).toHaveBeenCalledTimes(runtimeChecks)
+  expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
+  await expect(
+    resolveManagedOutputAuthority(
+      authority,
+      { ...scope, operationId: 'new-operation' },
+      'result.json'
+    )
+  ).rejects.toThrow('settled')
+  expect((await fixture.owner.release(prepared)).state).toBe('released')
+  await expect(lstat(outputRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it('keeps the collection fence and revokes its authority when collection fails or is cancelled', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  let authority!: ManagedOutputAuthority
+  await expect(
+    fixture.owner.withCollection(
+      { ...prepared, collectionId, operationId: 'retry-one' },
+      async (context) => {
+        authority = context.authority
+        throw new Error('disk unavailable')
+      }
+    )
+  ).rejects.toThrow('disk unavailable')
+  await expect(
+    resolveManagedOutputAuthority(authority, { ...scope, operationId: 'retry-one' }, 'result.json')
+  ).rejects.toThrow('settled')
+  const controller = new AbortController()
+  await expect(
+    fixture.owner.withCollection(
+      { ...prepared, collectionId, operationId: 'retry-two', signal: controller.signal },
+      async () => {
+        controller.abort(new Error('collection cancelled'))
+      }
+    )
+  ).rejects.toThrow('collection cancelled')
+  expect((await fixture.owner.get(prepared)).pendingCollection?.collectionId).toBe(collectionId)
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+})
+
+it('validates the Session and exact retained identity before seeking stop proof or exposing files', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId } = await retainCollection(fixture)
+  vi.mocked(fixture.dependencies.stopExecution).mockClear()
+  const collect = vi.fn(async () => undefined)
+  await expect(
+    fixture.owner.withCollection(
+      { ...prepared, sessionId: 'foreign', collectionId, operationId: 'collect' },
+      collect
+    )
+  ).rejects.toThrow('does not belong')
+  await expect(
+    fixture.owner.withCollection(
+      { ...prepared, collectionId: digest('different'), operationId: 'collect' },
+      collect
+    )
+  ).rejects.toThrow('does not match')
+  await expect(
+    fixture.owner.discardCollection({ ...prepared, collectionId: digest('different') })
+  ).rejects.toThrow('does not match')
+  expect(fixture.dependencies.stopExecution).not.toHaveBeenCalled()
+  expect(collect).not.toHaveBeenCalled()
+})
+
+it('requires the original stop proof again after active execution was cleared', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  expect((await fixture.owner.get(prepared)).activeExecution).toBeUndefined()
+  vi.mocked(fixture.dependencies.stopExecution).mockResolvedValue({ verified: false })
+  const collect = vi.fn(async () => undefined)
+  await expect(
+    fixture.owner.withCollection({ ...prepared, collectionId, operationId: 'collect' }, collect)
+  ).rejects.toThrow('not verified')
+  expect(collect).not.toHaveBeenCalled()
+  expect(await fixture.owner.get(prepared)).toMatchObject({
+    state: 'cleanup-pending',
+    pendingCollection: { collectionId }
+  })
+  expect((await fixture.owner.release(prepared)).state).toBe('cleanup-pending')
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  await restarted.recover()
+  expect(await restarted.get(prepared)).toMatchObject({
+    state: 'cleanup-pending',
+    pendingCollection: { collectionId }
+  })
+  expect((await restarted.get(prepared)).activeExecution).toBeUndefined()
+  await expect(restarted.quiesce()).rejects.toThrow('cleanup is pending')
+  vi.mocked(fixture.dependencies.stopExecution).mockResolvedValue({ verified: true })
+  await fixture.owner.withCollection(
+    { ...prepared, collectionId, operationId: 'collect' },
+    async () => undefined
+  )
+  expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
+})
+
+it('rejects replaced output ownership and preserves both the original and substituted directories', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const container = join(outputRoot, '..')
+  const original = container + '-retained-parent'
+  // Keep the original inode elsewhere; never delete it merely to make the check pass.
+  await rename(container, original)
+  await mkdir(container, { mode: 0o700 })
+  await mkdir(outputRoot, { mode: 0o700 })
+  await writeFile(join(outputRoot, 'foreign.txt'), 'preserve')
+  const collect = vi.fn(async () => undefined)
+  await expect(
+    fixture.owner.withCollection({ ...prepared, collectionId, operationId: 'collect' }, collect)
+  ).rejects.toThrow('ownership changed')
+  expect(collect).not.toHaveBeenCalled()
+  await new ManagedResearchEnvironmentOwner(fixture.dependencies).recover()
+  expect((await fixture.owner.get(prepared)).pendingCollection?.collectionId).toBe(collectionId)
+  expect(await readFile(join(outputRoot, 'foreign.txt'), 'utf8')).toBe('preserve')
+  expect(await readFile(join(original, 'files/result.json'), 'utf8')).toContain('original-run')
+})
+
+it('recovers an interrupted execution with pending output without releasing its directories', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const receipt = await fixture.owner.get(prepared)
+  await writeFile(
+    join(fixture.root, 'research-environments/receipts', prepared.environmentId + '.json'),
+    JSON.stringify({
+      ...receipt,
+      state: 'releasing',
+      activeExecution: { executionInvocationId: 'retained-invocation' }
+    })
+  )
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  await restarted.recover()
+  expect(await restarted.get(prepared)).toMatchObject({
+    state: 'ready',
+    pendingCollection: { collectionId }
+  })
+  expect((await restarted.get(prepared)).activeExecution).toBeUndefined()
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+})
+
+it('does not restore a stale pending collection snapshot after a concurrent collection completes', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId } = await retainCollection(fixture)
+  const receipt = await fixture.owner.get(prepared)
+  await writeFile(
+    join(fixture.root, 'research-environments/receipts', prepared.environmentId + '.json'),
+    JSON.stringify({
+      ...receipt,
+      activeExecution: { executionInvocationId: 'retained-invocation' }
+    })
+  )
+  const snapshotRead = cancellationGate()
+  const resumeRecovery = cancellationGate()
+  const inventory = fixture.owner as unknown as { list(): Promise<ManagedResearchEnvironment[]> }
+  const list = inventory.list.bind(fixture.owner)
+  vi.spyOn(inventory, 'list').mockImplementationOnce(async () => {
+    const snapshot = await list()
+    snapshotRead.resolve()
+    await resumeRecovery.promise
+    return snapshot
+  })
+  const recovery = fixture.owner.recover()
+  await snapshotRead.promise
+  await fixture.owner.withCollection(
+    { ...prepared, collectionId, operationId: 'collect' },
+    async () => 'saved'
+  )
+  resumeRecovery.resolve()
+  await recovery
+  expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
+  expect((await fixture.owner.get(prepared)).activeExecution).toBeUndefined()
+})
+
+it('clears the retention fence only after successful collection and verified cleanup', async () => {
+  const fixture = await setup()
+  const prepared = await fixture.prepare()
+  const collectionId = digest('successful-collection')
+  const execute = vi.fn(async () => 'collected')
+  await expect(
+    fixture.owner.withExecution(
+      { ...prepared, collectionId, executionInvocationId: 'original' },
+      execute
+    )
+  ).resolves.toBe('collected')
+  expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
+  vi.mocked(fixture.dependencies.stopExecution).mockResolvedValue({ verified: false })
+  await expect(
+    fixture.owner.withExecution(
+      { ...prepared, collectionId: digest('unconfirmed'), executionInvocationId: 'unconfirmed' },
+      execute
+    )
+  ).rejects.toThrow('not verified')
+  expect((await fixture.owner.get(prepared)).pendingCollection?.collectionId).toBe(
+    digest('unconfirmed')
+  )
+})
+
+it('preserves the durable retention fence when its successful-clear write fails', async () => {
+  const fixture = await setup()
+  const prepared = await fixture.prepare()
+  const collectionId = digest('clear-write-failure')
+  const journal = fixture.owner as unknown as {
+    write(receipt: ManagedResearchEnvironment): Promise<void>
+  }
+  const write = journal.write.bind(fixture.owner)
+  let failed = false
+  vi.spyOn(journal, 'write').mockImplementation(async (receipt) => {
+    if (!failed && !receipt.activeExecution && !receipt.pendingCollection) {
+      failed = true
+      throw new Error('retention commit failed')
+    }
+    await write(receipt)
+  })
+  await expect(
+    fixture.owner.withExecution(
+      { ...prepared, collectionId, executionInvocationId: 'original' },
+      async ({ outputRoot }) => {
+        await writeFile(join(outputRoot, 'result.json'), 'preserved')
+      }
+    )
+  ).rejects.toThrow('retention commit failed')
+  expect(await fixture.owner.get(prepared)).toMatchObject({
+    state: 'cleanup-pending',
+    pendingCollection: { collectionId, executionInvocationId: 'original' }
+  })
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  await restarted.recover()
+  expect((await restarted.get(prepared)).pendingCollection?.collectionId).toBe(collectionId)
+})
+
+it('retains the discard record and bytes if clearing its fence fails, then completes the same explicit discard', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const journal = fixture.owner as unknown as {
+    write(receipt: ManagedResearchEnvironment): Promise<void>
+  }
+  const write = journal.write.bind(fixture.owner)
+  let failed = false
+  vi.spyOn(journal, 'write').mockImplementation(async (receipt) => {
+    if (!failed && !receipt.pendingCollection && receipt.discardedCollections?.length) {
+      failed = true
+      throw new Error('discard clear failed')
+    }
+    await write(receipt)
+  })
+  await expect(fixture.owner.discardCollection({ ...prepared, collectionId })).rejects.toThrow(
+    'discard clear failed'
+  )
+  const interrupted = await fixture.owner.get(prepared)
+  expect(interrupted.pendingCollection?.collectionId).toBe(collectionId)
+  expect(interrupted.discardedCollections?.[0].collectionId).toBe(collectionId)
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  await restarted.recover()
+  await expect(
+    restarted.withCollection(
+      { ...prepared, collectionId, operationId: 'collect' },
+      async () => undefined
+    )
+  ).rejects.toThrow('explicitly discarded')
+  expect(
+    (await restarted.discardCollection({ ...prepared, collectionId })).pendingCollection
+  ).toBeUndefined()
+  expect((await restarted.release(prepared)).state).toBe('released')
+})
+
+it('records explicit discarded identity durably before allowing the output directory to be released', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const discarded = await fixture.owner.discardCollection({ ...prepared, collectionId })
+  expect(discarded.pendingCollection).toBeUndefined()
+  expect(discarded.discardedCollections).toEqual([
+    { collectionId, executionInvocationId: 'retained-invocation', discardedAt: expect.any(Number) }
+  ])
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+  expect(
+    (await new ManagedResearchEnvironmentOwner(fixture.dependencies).get(prepared))
+      .discardedCollections
+  ).toEqual(discarded.discardedCollections)
+  expect(
+    (await fixture.owner.discardCollection({ ...prepared, collectionId })).discardedCollections
+  ).toHaveLength(1)
+  await expect(
+    fixture.owner.withExecution(
+      { ...prepared, collectionId, executionInvocationId: 'replacement' },
+      async () => undefined
+    )
+  ).rejects.toThrow('explicitly discarded')
+  expect((await fixture.owner.release(prepared)).state).toBe('released')
+  await expect(lstat(outputRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it.each(['session', 'project'] as const)(
+  'records pending output loss when explicitly deleting its %s',
+  async (kind) => {
+    const fixture = await setup()
+    const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+    if (kind === 'session') await fixture.owner.releaseSession(scope)
+    else await fixture.owner.releaseProject(scope.projectId)
+    expect(await fixture.owner.get(prepared)).toMatchObject({
+      state: 'released',
+      discardedCollections: [
+        {
+          collectionId,
+          executionInvocationId: 'retained-invocation',
+          discardedAt: expect.any(Number)
+        }
+      ]
+    })
+    await expect(lstat(outputRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+  }
+)
+
+it('serializes collection with release and does not erase outputs when cancellation interrupts collection', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const entered = cancellationGate()
+  const collecting = fixture.owner.withCollection(
+    { ...prepared, collectionId, operationId: 'collect' },
+    async ({ signal }) => {
+      entered.resolve()
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      )
+    }
+  )
+  const outcome = collecting.catch((error: unknown) => error)
+  await entered.promise
+  const released = await fixture.owner.release(prepared)
+  expect(await outcome).toBeInstanceOf(Error)
+  expect(released.pendingCollection?.collectionId).toBe(collectionId)
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+})
+
+it('runs only one simultaneous collector and makes queued stale discard fail without deleting collected output', async () => {
+  const fixture = await setup()
+  const { prepared, collectionId, outputRoot } = await retainCollection(fixture)
+  const entered = cancellationGate()
+  const finish = cancellationGate()
+  const first = fixture.owner.withCollection(
+    { ...prepared, collectionId, operationId: 'first' },
+    async () => {
+      entered.resolve()
+      await finish.promise
+      return 'saved'
+    }
+  )
+  await entered.promise
+  const collect = vi.fn(async () => undefined)
+  const second = fixture.owner
+    .withCollection({ ...prepared, collectionId, operationId: 'second' }, collect)
+    .catch((error: unknown) => error)
+  const discard = fixture.owner
+    .discardCollection({ ...prepared, collectionId })
+    .catch((error: unknown) => error)
+  finish.resolve()
+  expect(await first).toBe('saved')
+  expect(await second).toBeInstanceOf(Error)
+  expect(await discard).toBeInstanceOf(Error)
+  expect(collect).not.toHaveBeenCalled()
+  expect(await readFile(join(outputRoot, 'result.json'), 'utf8')).toContain('original-run')
+})
+
 it.each(['release', 'quiesce'] as const)(
   'cancels verification and earlier queued executions before dispatch during %s',
   async (action) => {
@@ -677,7 +1129,11 @@ it('clears a cancelled durable intent without asking Notebook to stop an executi
   })
   const execute = vi.fn(async () => 'must not dispatch')
   const running = fixture.owner.withExecution(
-    { ...prepared, executionInvocationId: 'not-dispatched' },
+    {
+      ...prepared,
+      collectionId: digest('not-dispatched'),
+      executionInvocationId: 'not-dispatched'
+    },
     execute
   )
   const cancelled = running.catch((error: unknown) => error)
@@ -690,4 +1146,5 @@ it('clears a cancelled durable intent without asking Notebook to stop an executi
   expect(fixture.dependencies.stopExecution).not.toHaveBeenCalled()
   expect(await fixture.owner.get(prepared)).toMatchObject({ state: 'ready' })
   expect((await fixture.owner.get(prepared)).activeExecution).toBeUndefined()
+  expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
 })

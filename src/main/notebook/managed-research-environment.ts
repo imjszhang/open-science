@@ -94,6 +94,9 @@ const runtimeSchema = z
   })
   .strict()
 const scopeSchema = z.object({ projectId: identity, sessionId: identity }).strict()
+const collectionSchema = z
+  .object({ collectionId: checksum, executionInvocationId: identity })
+  .strict()
 const receiptSchema = scopeSchema
   .extend({
     schemaVersion: z.literal(1),
@@ -109,6 +112,11 @@ const receiptSchema = scopeSchema
     directory: directorySchema.optional(),
     outputNonce: z.string().uuid(),
     outputDirectory: directorySchema.optional(),
+    pendingCollection: collectionSchema.optional(),
+    discardedCollections: z
+      .array(collectionSchema.extend({ discardedAt: z.number().int().nonnegative() }).strict())
+      .max(1000)
+      .optional(),
     prepared: z
       .object({
         source: sourceSchema,
@@ -151,6 +159,7 @@ export type PrepareManagedResearchEnvironment = ManagedResearchScope & {
 }
 export type ManagedEnvironmentExecution = EnvironmentReference & {
   executionInvocationId: string
+  collectionId?: string
   environment?: Readonly<Record<string, string>>
   localServicePort?: number
   signal?: AbortSignal
@@ -164,6 +173,17 @@ export type ManagedEnvironmentExecutionContext = Readonly<{
   receipt: ManagedResearchEnvironment
   signal: AbortSignal
   createOutputAuthority(operationId: string): ManagedOutputAuthority
+}>
+export type ManagedEnvironmentCollection = EnvironmentReference & {
+  collectionId: string
+  operationId: string
+  signal?: AbortSignal
+}
+export type ManagedEnvironmentCollectionContext = Readonly<{
+  outputRoot: string
+  receipt: ManagedResearchEnvironment
+  signal: AbortSignal
+  authority: ManagedOutputAuthority
 }>
 export type ManagedResearchEnvironmentDependencies = {
   dataRoot: string
@@ -268,6 +288,8 @@ export class ManagedResearchEnvironmentOwner {
   }
 
   private async removeDirectories(receipt: ManagedResearchEnvironment): Promise<void> {
+    if (receipt.pendingCollection)
+      throw new Error('Managed execution outputs are awaiting collection; preserving them.')
     await removeManagedEnvironmentDirectory(this.outputContainer(receipt), receipt.outputDirectory)
     await removeManagedEnvironmentDirectory(this.root(receipt.environmentId), receipt.directory)
   }
@@ -550,21 +572,29 @@ export class ManagedResearchEnvironmentOwner {
     return path
   }
 
-  private async stopAndCleanSocket(receipt: ManagedResearchEnvironment): Promise<void> {
+  private async stopAndCleanSocket(
+    receipt: ManagedResearchEnvironment,
+    retainedInvocationId?: string
+  ): Promise<void> {
     const active = receipt.activeExecution
-    if (!active) return
+    if (active && retainedInvocationId && active.executionInvocationId !== retainedInvocationId)
+      throw new Error('Retained collection does not belong to the active execution.')
+    const executionInvocationId = active?.executionInvocationId ?? retainedInvocationId
+    if (!executionInvocationId) return
     const proof = await this.dependencies.stopExecution({
       projectId: receipt.projectId,
       sessionId: receipt.sessionId,
-      executionInvocationId: active.executionInvocationId
+      executionInvocationId
     })
     if (!proof.verified)
       throw new Error('Execution cleanup is not verified; preserving environment resources.')
-    if (active.socket) {
+    if (active?.socket) {
       await removeManagedEnvironmentDirectory(this.socketPath(receipt), active.socket.directory)
     }
-    delete receipt.activeExecution
-    await this.write(receipt)
+    if (active) {
+      delete receipt.activeExecution
+      await this.write(receipt)
+    }
   }
 
   async withExecution<T>(
@@ -572,6 +602,8 @@ export class ManagedResearchEnvironmentOwner {
     execute: (context: ManagedEnvironmentExecutionContext) => Promise<T>
   ): Promise<T> {
     identity.parse(request.executionInvocationId)
+    const collectionId =
+      request.collectionId === undefined ? undefined : checksum.parse(request.collectionId)
     const reference = {
       ...scopeSchema.parse({ projectId: request.projectId, sessionId: request.sessionId }),
       environmentId: checksum.parse(request.environmentId)
@@ -595,6 +627,17 @@ export class ManagedResearchEnvironmentOwner {
       assertAdmission()
       const receipt = await this.require(reference)
       assertAdmission()
+      if (receipt.pendingCollection)
+        throw new Error(
+          'Managed execution outputs are awaiting collection; collect or discard them first.'
+        )
+      if (
+        collectionId &&
+        receipt.discardedCollections?.some((entry) => entry.collectionId === collectionId)
+      )
+        throw new Error(
+          'Managed execution collection was explicitly discarded and cannot be reused.'
+        )
       if (receipt.state !== 'ready' || receipt.activeExecution)
         throw new Error('Managed environment is not ready.')
       await this.verifyInputs(receipt)
@@ -675,6 +718,11 @@ export class ManagedResearchEnvironmentOwner {
             })
       })
       receipt.activeExecution = { executionInvocationId: request.executionInvocationId }
+      if (collectionId)
+        receipt.pendingCollection = {
+          collectionId,
+          executionInvocationId: request.executionInvocationId
+        }
       await this.write(receipt)
       let resolveSettled!: () => void
       const settled = new Promise<void>((resolve) => {
@@ -714,11 +762,16 @@ export class ManagedResearchEnvironmentOwner {
       controller.abort(new Error('Managed environment execution has settled.'))
       publication.abort(new Error('Managed environment output collection has settled.'))
       try {
-        if (dispatched) await this.stopAndCleanSocket(receipt)
-        else {
+        if (dispatched) {
+          await this.stopAndCleanSocket(receipt)
+          if (succeeded && collectionId) {
+            await this.clearPendingCollection(receipt)
+          }
+        } else {
           // The callback has never received its capability, so no Notebook dispatch is possible.
           // Clear our own intent without inventing a Run or asking for nonexistent process proof.
           delete receipt.activeExecution
+          if (collectionId) delete receipt.pendingCollection
           await this.write(receipt)
         }
       } catch (error) {
@@ -741,7 +794,172 @@ export class ManagedResearchEnvironmentOwner {
     })
   }
 
+  private async verifyCollectionDirectories(receipt: ManagedResearchEnvironment): Promise<string> {
+    if (
+      !receipt.directory ||
+      !receipt.outputDirectory ||
+      !(await verifyManagedEnvironmentDirectory(
+        this.root(receipt.environmentId),
+        receipt.directory
+      )) ||
+      !(await verifyManagedEnvironmentDirectory(
+        this.outputContainer(receipt),
+        receipt.outputDirectory
+      ))
+    )
+      throw new Error('Retained collection directory ownership is unavailable; preserving it.')
+    const outputRoot = join(this.outputContainer(receipt), 'files')
+    const stat = await lstat(outputRoot)
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (await realpath(outputRoot)) !== outputRoot)
+      throw new Error('Retained collection output directory has changed.')
+    return outputRoot
+  }
+
+  /** A new publication lease for retained bytes, never a resumed execution or runtime grant. */
+  async withCollection<T>(
+    request: ManagedEnvironmentCollection,
+    collect: (context: ManagedEnvironmentCollectionContext) => Promise<T>
+  ): Promise<T> {
+    const reference = {
+      ...scopeSchema.parse({ projectId: request.projectId, sessionId: request.sessionId }),
+      environmentId: checksum.parse(request.environmentId)
+    }
+    const collectionId = checksum.parse(request.collectionId)
+    const operationId = identity.parse(request.operationId)
+    const generation = this.cancellationGeneration
+    const releaseGeneration = this.releaseGenerations.get(reference.environmentId) ?? 0
+    const assertAdmission = (): void => {
+      request.signal?.throwIfAborted()
+      if (
+        this.closed ||
+        this.quiescing ||
+        generation !== this.cancellationGeneration ||
+        releaseGeneration !== (this.releaseGenerations.get(reference.environmentId) ?? 0)
+      )
+        throw new ManagedEnvironmentCancelledError()
+    }
+    assertAdmission()
+    return this.exclusive(reference.environmentId, async () => {
+      assertAdmission()
+      const receipt = await this.require(reference)
+      if (receipt.pendingCollection?.collectionId !== collectionId)
+        throw new Error('Retained collection does not match this managed environment.')
+      if (receipt.discardedCollections?.some((entry) => entry.collectionId === collectionId))
+        throw new Error('Retained collection was explicitly discarded.')
+      if (!['ready', 'cleanup-pending', 'releasing'].includes(receipt.state))
+        throw new Error('Managed environment is unavailable for output collection.')
+      let outputRoot: string
+      try {
+        // Even if activeExecution was already cleared, ask the original Notebook owner again.
+        await this.stopAndCleanSocket(receipt, receipt.pendingCollection.executionInvocationId)
+        outputRoot = await this.verifyCollectionDirectories(receipt)
+      } catch (error) {
+        receipt.state = 'cleanup-pending'
+        receipt.error =
+          'Retained output collection requires verified stopped execution and owned directories.'
+        await this.write(receipt)
+        throw error
+      }
+      assertAdmission()
+      receipt.state = 'ready'
+      delete receipt.error
+      await this.write(receipt)
+      assertAdmission()
+      const controller = new AbortController()
+      const signal = AbortSignal.any([
+        controller.signal,
+        this.shutdown.signal,
+        ...(request.signal ? [request.signal] : [])
+      ])
+      let resolveSettled!: () => void
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve
+      })
+      this.live.set(receipt.environmentId, { controller, settled })
+      try {
+        const authority = createManagedOutputAuthority({
+          ...reference,
+          operationId,
+          outputRoot,
+          signal
+        })
+        const result = await collect({
+          outputRoot,
+          receipt: structuredClone(receipt),
+          signal,
+          authority
+        })
+        signal.throwIfAborted()
+        await this.clearPendingCollection(receipt)
+        return result
+      } finally {
+        controller.abort(new Error('Managed environment output collection has settled.'))
+        this.live.delete(receipt.environmentId)
+        resolveSettled()
+      }
+    })
+  }
+
+  private async clearPendingCollection(receipt: ManagedResearchEnvironment): Promise<void> {
+    const pending = receipt.pendingCollection
+    delete receipt.pendingCollection
+    try {
+      await this.write(receipt)
+    } catch (error) {
+      // A subsequent cleanup-error write must not erase the retention fence after a failed commit.
+      receipt.pendingCollection = pending
+      throw error
+    }
+  }
+
+  private async discardPendingCollection(receipt: ManagedResearchEnvironment): Promise<void> {
+    const pending = receipt.pendingCollection
+    if (!pending) return
+    const discarded = receipt.discardedCollections ?? []
+    const previous = discarded.find(({ collectionId }) => collectionId === pending.collectionId)
+    if (previous && previous.executionInvocationId !== pending.executionInvocationId)
+      throw new Error('Discarded collection identity conflicts with its retained execution.')
+    if (!previous) {
+      if (discarded.length >= 1000)
+        throw new Error('Managed environment discard history is full; preserving outputs.')
+      receipt.discardedCollections = [...discarded, { ...pending, discardedAt: this.now() }]
+      // Record explicit loss before removing the retention fence. Either crash state is safe.
+      await this.write(receipt)
+    }
+    await this.clearPendingCollection(receipt)
+  }
+
+  async discardCollection(
+    scope: EnvironmentReference & { collectionId: string }
+  ): Promise<ManagedResearchEnvironment> {
+    const reference = {
+      ...scopeSchema.parse({ projectId: scope.projectId, sessionId: scope.sessionId }),
+      environmentId: checksum.parse(scope.environmentId)
+    }
+    const collectionId = checksum.parse(scope.collectionId)
+    return this.exclusive(reference.environmentId, async () => {
+      const receipt = await this.require(reference)
+      if (
+        !receipt.pendingCollection &&
+        receipt.discardedCollections?.some((entry) => entry.collectionId === collectionId)
+      )
+        return structuredClone(receipt)
+      if (receipt.pendingCollection?.collectionId !== collectionId)
+        throw new Error('Retained collection does not match this managed environment.')
+      await this.stopAndCleanSocket(receipt, receipt.pendingCollection.executionInvocationId)
+      await this.discardPendingCollection(receipt)
+      return structuredClone(receipt)
+    })
+  }
+
   async release(scope: EnvironmentReference): Promise<ManagedResearchEnvironment> {
+    return this.releaseEnvironment(scope, false)
+  }
+
+  private async releaseEnvironment(
+    scope: EnvironmentReference,
+    discardOutputs: boolean
+  ): Promise<ManagedResearchEnvironment> {
     // Validate before cancellation: another Session cannot stop a guessed environment handle.
     await this.require(scope)
     this.releaseGenerations.set(
@@ -757,9 +975,15 @@ export class ManagedResearchEnvironmentOwner {
       receipt.state = 'releasing'
       await this.write(receipt)
       try {
-        await this.stopAndCleanSocket(receipt)
-        await this.removeDirectories(receipt)
-        receipt.state = 'released'
+        await this.stopAndCleanSocket(receipt, receipt.pendingCollection?.executionInvocationId)
+        if (discardOutputs) await this.discardPendingCollection(receipt)
+        if (receipt.pendingCollection) {
+          // Releasing process resources does not authorize losing uncollected research output.
+          receipt.state = 'ready'
+        } else {
+          await this.removeDirectories(receipt)
+          receipt.state = 'released'
+        }
         delete receipt.error
       } catch {
         receipt.state = 'cleanup-pending'
@@ -795,15 +1019,20 @@ export class ManagedResearchEnvironmentOwner {
   }
 
   async recover(): Promise<void> {
-    for (const receipt of await this.list()) {
-      await this.exclusive(receipt.environmentId, async () => {
+    for (const snapshot of await this.list()) {
+      await this.exclusive(snapshot.environmentId, async () => {
+        // Collection/release may have advanced while recovery was waiting for the same owner lock.
+        const receipt = await this.require(snapshot)
         if (this.live.has(receipt.environmentId)) return
         if (receipt.state === 'ready' && !receipt.activeExecution) return
         if (receipt.state === 'released' || receipt.state === 'failed') return
         try {
-          await this.stopAndCleanSocket(receipt)
+          await this.stopAndCleanSocket(receipt, receipt.pendingCollection?.executionInvocationId)
           // A preparation interrupted before publication is discarded, never resumed or executed.
-          if (receipt.state !== 'ready') {
+          if (receipt.pendingCollection) {
+            await this.verifyCollectionDirectories(receipt)
+            receipt.state = 'ready'
+          } else if (receipt.state !== 'ready') {
             await this.removeDirectories(receipt)
             receipt.state = 'released'
           }
@@ -821,7 +1050,7 @@ export class ManagedResearchEnvironmentOwner {
     scopeSchema.parse(scope)
     for (const receipt of await this.list()) {
       if (receipt.projectId !== scope.projectId || receipt.sessionId !== scope.sessionId) continue
-      if ((await this.release(receipt)).state !== 'released')
+      if ((await this.releaseEnvironment(receipt, true)).state !== 'released')
         throw new Error('Session environment cleanup is pending.')
     }
   }
@@ -831,7 +1060,7 @@ export class ManagedResearchEnvironmentOwner {
     identity.parse(projectId)
     for (const receipt of await this.list()) {
       if (receipt.projectId !== projectId) continue
-      if ((await this.release(receipt)).state !== 'released')
+      if ((await this.releaseEnvironment(receipt, true)).state !== 'released')
         throw new Error('Project environment cleanup is pending.')
     }
   }
@@ -843,7 +1072,12 @@ export class ManagedResearchEnvironmentOwner {
   async prepareForDataRootHandoff(): Promise<void> {
     await Promise.all([...this.operations.values()])
     for (const receipt of await this.list()) {
-      if ((await this.release(receipt)).state !== 'released')
+      const released = await this.release(receipt)
+      if (released.pendingCollection)
+        throw new Error(
+          'Managed execution outputs must be collected or explicitly discarded before moving data.'
+        )
+      if (released.state !== 'released')
         throw new Error('Managed environment cleanup must complete before moving data.')
     }
   }
