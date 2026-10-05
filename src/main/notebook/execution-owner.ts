@@ -53,6 +53,7 @@ import {
 } from './shell-process'
 import { prepareNotebookWorkloadCache } from './notebook-workload-cache-paths'
 import { startWorkingFileObservation } from './working-file-observer'
+import { NestedWorkingFileOwner, type FrozenNestedWorkingFile } from './nested-working-file-owner'
 import type { TransientViewImage } from './host-view-image-service'
 import {
   unavailableNotebookDependencyProjection,
@@ -461,6 +462,7 @@ class NotebookExecutionOwner {
     }
   >()
   private readonly shellProcess: NotebookShellProcess
+  private readonly nestedWorkingFiles = new NestedWorkingFileOwner()
   private readonly shellAdmission: BoundedShellAdmission
   private readonly shellRuntimeBinding: ShellRuntimeBinding
   private controlCompletionInterceptor: NotebookControlCompletionInterceptor | undefined
@@ -1430,6 +1432,15 @@ class NotebookExecutionOwner {
                     ?.filter((input) => input.sourceKind === 'artifact-version')
                     .map((input) => input.sourceFileId) ?? []
               })
+              const nestedWorkingFiles = this.nestedWorkingFiles.open(
+                {
+                  projectId: session.projectId,
+                  sessionId: session.sessionId,
+                  parentControlInvocationId: runId,
+                  rootExecutionId: request.rootExecutionId
+                },
+                queuedRun
+              )
               reachedExecutor = true
               return session
                 .execute({
@@ -1437,6 +1448,7 @@ class NotebookExecutionOwner {
                   kernelEpochId,
                   code: request.code,
                   kind: 'repl',
+                  nestedWorkingFiles,
                   ...(sourceFileAccessContext ? { sourceFileAccessContext } : {}),
                   cwd: session.cwd,
                   notebookSessionRoot: session.notebookSessionRoot,
@@ -1456,7 +1468,10 @@ class NotebookExecutionOwner {
                   inputRunLeaseId: request.inputRunLeaseId,
                   controlInvocationId: runId
                 })
-                .finally(() => releaseControlInvocation?.())
+                .finally(() => {
+                  nestedWorkingFiles.close()
+                  releaseControlInvocation?.()
+                })
             })()
         ).catch((error: unknown) => {
           // Preparation can yield after the Run starts but before the interpreter receives it.
@@ -1530,7 +1545,8 @@ class NotebookExecutionOwner {
     request: ExecuteShellRequest,
     signal?: AbortSignal,
     onAdmitted?: (run: NotebookRunRecord) => void,
-    managedExecution?: ManagedShellExecutionCapability
+    managedExecution?: ManagedShellExecutionCapability,
+    nestedExecution?: { parentControlInvocationId: string }
   ): Promise<NotebookShellResult> {
     if (request.executionInvocationId)
       this.assertShellInvocationAvailable({
@@ -1769,6 +1785,7 @@ class NotebookExecutionOwner {
           return publicShellResult(cancelled)
         }
         {
+          let frozenNestedFiles: readonly FrozenNestedWorkingFile[] = []
           const terminalized = await this.options.runTerminalization.runAdmitted({
             session,
             queuedRun: {
@@ -1792,6 +1809,13 @@ class NotebookExecutionOwner {
                 notebookSessionRoot: frozenShellContext.notebookSessionRoot,
                 ...this.fileEvidenceLocation(session),
                 runId: runId!,
+                ...(managed && nestedExecution
+                  ? {
+                      onFrozenWorkingFiles: (files: readonly FrozenNestedWorkingFile[]) => {
+                        frozenNestedFiles = files
+                      }
+                    }
+                  : {}),
                 signal: lifecycleSignal
               })
               let workingFiles: NotebookWorkingFile[] = []
@@ -1899,6 +1923,18 @@ class NotebookExecutionOwner {
               }
             }
           })
+          if (managed && nestedExecution && ownedTreeReaped) {
+            this.nestedWorkingFiles.record(
+              {
+                projectId: session.projectId,
+                sessionId: session.sessionId,
+                parentControlInvocationId: nestedExecution.parentControlInvocationId,
+                rootExecutionId: request.rootExecutionId
+              },
+              terminalized.run,
+              frozenNestedFiles
+            )
+          }
           // Cancellation must report an unconfirmed stop to its owning turn. Ordinary launch/exit
           // cleanup failures retain the existing result and recovery instructions for their caller.
           if (!ownedTreeReaped && lifecycleSignal.aborted) throw new NotebookExecutionStopError()

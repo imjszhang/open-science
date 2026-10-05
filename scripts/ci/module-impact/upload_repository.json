@@ -34,7 +34,9 @@
     "src/main/uploads/repository.test-utils.ts",
     "src/main/uploads/storage-helpers.ts"
   ],
-  "consumerModules": ["session_persistence"],
+  "consumerModules": [
+    "session_persistence"
+  ],
   "testFiles": {
     "owner": [
       "src/main/uploads/active-transfer-owner.test.ts",
@@ -566,9 +568,15 @@
       "src/main/session-package/headless.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
-      "src/main/composition/handoff.test.ts"
+      "src/main/composition/handoff.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/nested-working-file-owner.test.ts"
     ]
   },
-  "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
+  "capabilityOverlays": [
+    "windows_sensitive",
+    "e2e_regressions",
+    "e2e_delegation"
+  ],
   "fallbackCapability": "main_runtime"
 }

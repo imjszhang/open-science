@@ -6,7 +6,9 @@
     "packages/safe-file-publisher-native/package.json",
     "packages/safe-file-publisher-native/src/safe_file_publisher_native.cc"
   ],
-  "interfacePaths": ["packages/safe-file-publisher-native/index.cjs"],
+  "interfacePaths": [
+    "packages/safe-file-publisher-native/index.cjs"
+  ],
   "consumerModules": [],
   "testFiles": {
     "owner": [],
@@ -396,9 +398,13 @@
       "src/main/session-package/headless.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/composition/session-packages.test.ts"
+      "src/main/composition/session-packages.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ]
   },
-  "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],
+  "capabilityOverlays": [
+    "notebook_network_sandbox",
+    "windows_sensitive"
+  ],
   "fallbackCapability": "main_runtime"
 }

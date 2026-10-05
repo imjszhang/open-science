@@ -3,10 +3,14 @@
     "src/main/connectors/descriptors/expression.test.ts",
     "src/main/connectors/descriptors/expression.ts"
   ],
-  "interfacePaths": ["src/main/connectors/descriptors/expression.ts"],
+  "interfacePaths": [
+    "src/main/connectors/descriptors/expression.ts"
+  ],
   "consumerModules": [],
   "testFiles": {
-    "owner": ["src/main/connectors/descriptors/expression.test.ts"],
+    "owner": [
+      "src/main/connectors/descriptors/expression.test.ts"
+    ],
     "contract": [
       "src/preload/index.test.ts",
       "src/renderer/web/api-installer.test.ts",
@@ -193,7 +197,8 @@
       "src/main/notebook/local-rpc-server.managed-execution.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
-      "src/main/composition/handoff.test.ts"
+      "src/main/composition/handoff.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

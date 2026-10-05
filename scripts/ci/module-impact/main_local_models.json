@@ -15,7 +15,10 @@
   ],
   "consumerModules": [],
   "testFiles": {
-    "owner": ["src/main/local-models/download.test.ts", "src/main/local-models/owner.test.ts"],
+    "owner": [
+      "src/main/local-models/download.test.ts",
+      "src/main/local-models/owner.test.ts"
+    ],
     "contract": [
       "src/preload/index.test.ts",
       "src/renderer/web/api-installer.test.ts",
@@ -340,9 +343,14 @@
       "src/main/session-package/headless.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/composition/session-packages.test.ts"
+      "src/main/composition/session-packages.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ]
   },
-  "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],
+  "capabilityOverlays": [
+    "e2e_regressions",
+    "e2e_delegation",
+    "windows_sensitive"
+  ],
   "fallbackCapability": "main_runtime"
 }

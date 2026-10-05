@@ -3,10 +3,14 @@
     "src/main/connectors/descriptors/genes-ontology.ts",
     "src/main/connectors/descriptors/genes-ontology.test.ts"
   ],
-  "interfacePaths": ["src/main/connectors/descriptors/genes-ontology.ts"],
+  "interfacePaths": [
+    "src/main/connectors/descriptors/genes-ontology.ts"
+  ],
   "consumerModules": [],
   "testFiles": {
-    "owner": ["src/main/connectors/descriptors/genes-ontology.test.ts"],
+    "owner": [
+      "src/main/connectors/descriptors/genes-ontology.test.ts"
+    ],
     "contract": [
       "src/main/connectors/descriptors/genes.test.ts",
       "src/main/connectors/registry.test.ts",
@@ -195,7 +199,8 @@
       "src/main/notebook/local-rpc-server.managed-execution.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
-      "src/main/composition/handoff.test.ts"
+      "src/main/composition/handoff.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

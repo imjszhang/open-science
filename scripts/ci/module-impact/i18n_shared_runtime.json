@@ -1,6 +1,10 @@
 {
-  "ownerPaths": ["src/shared/i18n/core.ts"],
-  "interfacePaths": ["src/shared/i18n/core.ts"],
+  "ownerPaths": [
+    "src/shared/i18n/core.ts"
+  ],
+  "interfacePaths": [
+    "src/shared/i18n/core.ts"
+  ],
   "consumerModules": [],
   "testFiles": {
     "owner": [],
@@ -707,7 +711,8 @@
       "src/main/session-persistence/create-managed-session.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/composition/session-packages.test.ts"
+      "src/main/composition/session-packages.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

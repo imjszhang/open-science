@@ -38,7 +38,10 @@ export type ManagedExecutionTurnContext = Pick<
   | 'provenanceContext'
   | 'recordRun'
   | 'saveOutput'
->
+> & {
+  /** Exact Main control invocation, present only when borrowing an active Agent turn. */
+  executionInvocationId?: string
+}
 const resultSchema = z
   .object({
     executionInvocationId: z.string(),
@@ -343,6 +346,7 @@ export class ManagedExecutionService {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
     const context: ManagedExecutionTurnContext = Object.freeze({
       operationId: admittedContext.operationId,
+      executionInvocationId: admittedContext.executionInvocationId,
       projectId: admittedContext.projectId,
       sessionId: admittedContext.sessionId,
       workspaceCwd: admittedContext.workspaceCwd,
@@ -441,7 +445,10 @@ export class ManagedExecutionService {
                 registeredInputFiles: inputs
               },
               environment.capability,
-              environment.signal
+              environment.signal,
+              context.executionInvocationId
+                ? { parentControlInvocationId: context.executionInvocationId }
+                : undefined
             )
             const cleanup = await this.dependencies.runtime.confirmManagedShellCleanup(
               {

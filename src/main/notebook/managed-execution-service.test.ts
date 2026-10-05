@@ -202,7 +202,8 @@ it('freezes parsed requests before asynchronous preparation and publishes only s
       provenanceContext: provenance
     }),
     expect.any(Object),
-    expect.any(AbortSignal)
+    expect.any(AbortSignal),
+    undefined
   )
   expect(result).toMatchObject({ runId: 'notebook-run', status: 'completed' })
   expect(h.context.recordRun).toHaveBeenCalledWith('notebook-run')
@@ -228,11 +229,16 @@ it('snapshots trusted turn identities before awaits so mutation cannot relabel a
     await gate.promise
     return []
   })
-  const context = { ...h.context, provenanceContext: { ...h.context.provenanceContext } }
+  const context = {
+    ...h.context,
+    executionInvocationId: 'outer-control-run',
+    provenanceContext: { ...h.context.provenanceContext }
+  }
   const originalCwd = context.workspaceCwd
   const pending = h.service.executeInTurn(h.request, context)
   await vi.waitFor(() => expect(h.dependencies.resolvePreparedInputs).toHaveBeenCalledOnce())
   context.operationId = 'different-operation'
+  context.executionInvocationId = 'different-control-run'
   context.workspaceCwd = join(h.root, 'other-workspace')
   context.provenanceContext.promptMessageId = 'different-prompt'
   gate.resolve()
@@ -244,7 +250,8 @@ it('snapshots trusted turn identities before awaits so mutation cannot relabel a
       provenanceContext: provenance
     }),
     expect.any(Object),
-    expect.any(AbortSignal)
+    expect.any(AbortSignal),
+    { parentControlInvocationId: 'outer-control-run' }
   )
 })
 

@@ -304,7 +304,10 @@
     "src/main/notebook/session-operation-owner.integration.test.ts",
     "src/main/notebook/session-operation-owner.ts",
     "src/main/notebook/session-operation.test-support.ts",
-    "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
+    "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+    "src/main/notebook/nested-working-file-owner.ts",
+    "src/main/notebook/nested-working-file-owner.test.ts",
+    "src/main/notebook/managed-nested-generation.integration.test.ts"
   ],
   "interfacePaths": [
     "src/main/notebook/analysis-version.ts",
@@ -378,7 +381,8 @@
     "src/main/notebook/managed-execution-port.ts",
     "src/main/notebook/managed-execution-service.ts",
     "src/main/notebook/session-operation-owner.ts",
-    "src/main/notebook/session-operation.test-support.ts"
+    "src/main/notebook/session-operation.test-support.ts",
+    "src/main/notebook/nested-working-file-owner.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -580,7 +584,9 @@
       "src/main/notebook/managed-execution-service.macos.integration.test.ts",
       "src/main/notebook/managed-execution-service.test.ts",
       "src/main/notebook/session-operation-owner.integration.test.ts",
-      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/notebook/nested-working-file-owner.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",
@@ -1009,6 +1015,9 @@
       "src/main/composition/session-packages.test.ts"
     ]
   },
-  "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],
+  "capabilityOverlays": [
+    "notebook_network_sandbox",
+    "windows_sensitive"
+  ],
   "fallbackCapability": "main_runtime"
 }

@@ -1668,16 +1668,18 @@ class NotebookRuntimeService {
   async executeManagedShell(
     request: ExecuteShellRequest,
     capability: ManagedShellExecutionCapability,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    nestedExecution?: { parentControlInvocationId: string }
   ): Promise<NotebookShellResult> {
     this.assertManagedExecutionCapability(request, capability)
-    return this.executeShellWithPolicy(request, signal, capability)
+    return this.executeShellWithPolicy(request, signal, capability, nestedExecution)
   }
 
   private async executeShellWithPolicy(
     request: ExecuteShellRequest,
     signal?: AbortSignal,
-    capability?: ManagedShellExecutionCapability
+    capability?: ManagedShellExecutionCapability,
+    nestedExecution?: { parentControlInvocationId: string }
   ): Promise<NotebookShellResult> {
     this.assertManagedShellCommand(request)
     if (request.background) {
@@ -1701,7 +1703,8 @@ class NotebookRuntimeService {
           request,
           signal ? AbortSignal.any([signal, deletionSignal]) : deletionSignal,
           (run) => managedCall?.admitted(run.runId),
-          capability
+          capability,
+          nestedExecution
         )
       })
     } finally {

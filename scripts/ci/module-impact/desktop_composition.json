@@ -1227,9 +1227,15 @@
       "src/main/session-package/headless.test.ts",
       "src/main/session-persistence/create-local-session.test.ts",
       "src/main/session-persistence/create-managed-session.test.ts",
-      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/nested-working-file-owner.test.ts"
     ]
   },
-  "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],
+  "capabilityOverlays": [
+    "e2e_regressions",
+    "e2e_delegation",
+    "windows_sensitive"
+  ],
   "fallbackCapability": "main_runtime"
 }
