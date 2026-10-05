@@ -18,7 +18,9 @@
     "packages/open-science/package.json",
     "packages/open-science/rollback-to-0.7.3.mjs",
     "packages/open-science/rollback-to-0.7.3.test.ts",
-    "packages/open-science/managed-execution-types.test.ts"
+    "packages/open-science/managed-execution-types.test.ts",
+    "packages/open-science/run-observation-types.test.ts",
+    "packages/open-science/run-observations.test.ts"
   ],
   "interfacePaths": [
     "packages/open-science/cli.mjs",
@@ -38,7 +40,9 @@
       "packages/open-science/connector-types.test.ts",
       "packages/open-science/connector.test.ts",
       "packages/open-science/rollback-to-0.7.3.test.ts",
-      "packages/open-science/managed-execution-types.test.ts"
+      "packages/open-science/managed-execution-types.test.ts",
+      "packages/open-science/run-observation-types.test.ts",
+      "packages/open-science/run-observations.test.ts"
     ],
     "contract": [],
     "consumer": [

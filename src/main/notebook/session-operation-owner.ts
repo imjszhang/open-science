@@ -33,6 +33,12 @@ import {
   type ManagedExecutionRecoveredOutput
 } from './managed-execution-output'
 
+import {
+  saveAuxiliaryOutput,
+  type AuxiliaryOutput,
+  type AuxiliaryOutputResult
+} from '../run-observation/auxiliary-output'
+
 const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const scopeSchema = z
@@ -86,6 +92,8 @@ export type SessionOperationContext = Readonly<{
   provenanceContext: Readonly<NotebookRunProvenanceContext>
   recordRun(runId: string): Promise<void>
   saveOutput(output: SessionOperationOutput): Promise<ArtifactVersionFile>
+  /** Main-owned optional inline evidence; failures are explicit and still fully drained. */
+  saveAuxiliaryOutput?(output: AuxiliaryOutput): Promise<AuxiliaryOutputResult>
   recoverOutput(output: ManagedExecutionRecoveryOutput): Promise<ManagedExecutionRecoveredOutput>
 }>
 export type StartSessionOperation = SessionOperationScope & {
@@ -528,6 +536,8 @@ export class SessionOperationOwner {
         provenanceContext: Object.freeze({ ...provenance }),
         recordRun: (runId: string) => track(() => writer.recordRun(runId)),
         saveOutput: (output: SessionOperationOutput) => track(() => writer.saveOutput(output)),
+        saveAuxiliaryOutput: (output: AuxiliaryOutput) =>
+          track(() => saveAuxiliaryOutput(output, (value) => writer.saveOutput(value))),
         recoverOutput: (output: ManagedExecutionRecoveryOutput) =>
           track(() => writer.recoverOutput(output))
       })

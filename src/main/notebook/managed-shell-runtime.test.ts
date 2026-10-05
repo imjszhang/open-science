@@ -246,6 +246,45 @@ describe.skipIf(process.platform === 'win32')(
       }
     })
 
+    it('cancels only the exact admitted managed Run from Replay and preserves ordinary Shell', async () => {
+      await service.executeShell({
+        ...request('export RETAINED=replay-safe'),
+        executionInvocationId: 'ordinary'
+      })
+      const lifetime = new AbortController()
+      const execution = service.executeManagedShell(
+        request('echo observing; while :; do sleep 1; done'),
+        capability({ signal: lifetime.signal })
+      )
+      try {
+        let runId = ''
+        await vi.waitFor(async () => {
+          const runs = await repository.readSessionRuns(identity.projectId, identity.sessionId)
+          const run = runs.find((row) => row.submissionIdentity === identity.executionInvocationId)
+          expect(run?.status).toBe('running')
+          runId = run!.runId
+        })
+        await expect(
+          service.cancelManagedShellRun({ ...identity, runId: 'foreign-run' })
+        ).rejects.toThrow('unavailable')
+        await expect(
+          service.cancelManagedShellRun({ ...identity, sessionId: 'foreign-session', runId })
+        ).rejects.toThrow('unavailable')
+        await service.cancelManagedShellRun({ ...identity, runId })
+        await expect(execution).resolves.toMatchObject({ cancelled: true })
+        const runs = await repository.readSessionRuns(identity.projectId, identity.sessionId)
+        expect(runs.find((row) => row.runId === runId)?.status).toBe('cancelled')
+        const ordinary = await service.executeShell({
+          ...request('printf "$RETAINED"'),
+          executionInvocationId: 'ordinary-check'
+        })
+        expect(ordinary.stdout).toContain('replay-safe')
+      } finally {
+        lifetime.abort()
+        await execution
+      }
+    })
+
     it('returns exact Run cleanup proof and retries its original owner without closing persistent Shell', async () => {
       await service.executeShell({
         ...request('export RETAINED=original'),

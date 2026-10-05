@@ -125,6 +125,8 @@ type NotebookShellProcess = {
 }
 
 type PreparedShellLaunch = {
+  onOutput?: import('./managed-shell-execution').ManagedShellExecutionPolicy['onOutput']
+  privateServiceValues?: readonly string[]
   platform: NodeJS.Platform
   invocation: ShellInvocation
   baseEnv: NodeJS.ProcessEnv
@@ -427,6 +429,10 @@ const prepareShellLaunchOptions = async (
         )
         shellEnv.OPEN_SCIENCE_SERVICE_SOCKET = localService.socketPath
         shellEnv.OPEN_SCIENCE_SERVICE_PORT = String(managed.localService.logicalPort)
+        if (managed.localService.proof) {
+          shellEnv.OPEN_SCIENCE_SERVICE_PROOF = managed.localService.proof.value
+          shellEnv.OPEN_SCIENCE_SERVICE_PROOF_PATH = managed.localService.proof.path
+        }
       }
     } else {
       workloadCacheEnv = prepareNotebookWorkloadCache(options.runtimeRoot)
@@ -620,6 +626,12 @@ const prepareShellLaunchOptions = async (
     invocation,
     baseEnv,
     sandboxed,
+    ...(managed?.onOutput ? { onOutput: managed.onOutput } : {}),
+    ...(managed?.localService?.proof
+      ? {
+          privateServiceValues: [managed.localService.proof.value, managed.localService.proof.path]
+        }
+      : {}),
     endSandboxExecution: options.deferExecution ? undefined : sandboxed?.beginExecution?.()
   }
 }
@@ -1003,7 +1015,16 @@ const runShellCommand = (
         } catch {
           complete = false
         }
-        const normalizedResult = { ...result, stderr }
+        const redactServiceValues = (text: string): string => {
+          for (const secret of prepared.privateServiceValues ?? [])
+            text = text.split(secret).join('[redacted]')
+          return text
+        }
+        const normalizedResult = {
+          ...result,
+          stdout: redactServiceValues(result.stdout),
+          stderr: redactServiceValues(stderr)
+        }
         const completed = complete
           ? normalizedResult
           : withIncompleteCleanup(normalizedResult, 'may-have-run')
@@ -1095,6 +1116,12 @@ const runShellCommand = (
       }
       child.stdout!.on('data', (chunk: string) => {
         if (options.onProcess) return
+        try {
+          if (options.runId)
+            prepared.onOutput?.({ runId: options.runId, stream: 'stdout', text: chunk })
+        } catch {
+          // Observing output must not change execution or process-tree cleanup.
+        }
         stdout = appendOutput(
           stdout,
           chunk,
@@ -1106,6 +1133,12 @@ const runShellCommand = (
       })
       child.stderr!.on('data', (chunk: string) => {
         if (options.onProcess) return
+        try {
+          if (options.runId)
+            prepared.onOutput?.({ runId: options.runId, stream: 'stderr', text: chunk })
+        } catch {
+          // Observing output must not change execution or process-tree cleanup.
+        }
         stderr = appendOutput(
           stderr,
           chunk,

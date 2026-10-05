@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
-import { request } from 'node:http'
+import { Agent, request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,76 @@ const roots: string[] = []
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
+
+it.skipIf(process.platform === 'win32')(
+  'serves a private generation proof and business response on the same connection',
+  async () => {
+    const { root, socket } = await fixture()
+    const proof = 'a'.repeat(64)
+    const proofPath = '/__open_science_proof_' + 'b'.repeat(32)
+    const path = join(root, 'proof-service.mjs')
+    await writeFile(
+      path,
+      `import http from 'node:http';
+    let requests = 0;
+    const server = http.createServer((req, res) => res.end(JSON.stringify({ requests: ++requests,
+      proofVisible: Object.keys(process.env).some(key => key.startsWith('OPEN_SCIENCE_SERVICE_PROOF')) })));
+    server.listen(4173, '127.0.0.1', () => console.log('ready'));
+    process.on('SIGTERM', () => server.close());`
+    )
+    const child = spawn(process.execPath, ['--import', preload, path], {
+      env: childEnvironment(socket, {
+        OPEN_SCIENCE_SERVICE_PROOF: proof,
+        OPEN_SCIENCE_SERVICE_PROOF_PATH: proofPath
+      }),
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    const closed = once(child, 'close')
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 5000)
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 })
+    const sockets: unknown[] = []
+    const get = (route: string): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const req = request(
+          {
+            agent,
+            socketPath: socket,
+            hostname: 'localhost',
+            port: 80,
+            path: route,
+            headers: { host: '127.0.0.1:4173' }
+          },
+          (res) => {
+            let body = ''
+            res.setEncoding('utf8')
+            res.on('data', (part) => {
+              body += part
+            })
+            res.on('end', () => resolve(body))
+            res.on('error', reject)
+          }
+        )
+        req.on('socket', (value) => sockets.push(value))
+        req.on('error', reject)
+        req.end()
+      })
+    try {
+      await once(child.stdout, 'data')
+      expect(await get(proofPath)).toBe(proof)
+      expect(JSON.parse(await get('/business'))).toEqual({ requests: 1, proofVisible: false })
+      expect(sockets).toHaveLength(2)
+      expect(sockets[0]).toBe(sockets[1])
+      const helper = await execute(root, socket, "console.log('helper remains usable')")
+      expect(helper).toEqual({ code: 0, stdout: 'helper remains usable\n', stderr: '' })
+      expect(JSON.parse(await get('/business')).requests).toBe(2)
+    } finally {
+      agent.destroy()
+      child.kill('SIGTERM')
+      await closed
+      clearTimeout(timeout)
+    }
+  }
+)
 
 async function fixture(): Promise<{ root: string; socket: string }> {
   // Canonical /tmp avoids macOS's symlink alias and keeps sun_path below its byte limit.
@@ -195,9 +265,15 @@ describe.skipIf(process.platform === 'win32')(
       )
       await chmod(root, 0o700)
       await writeFile(socket, 'preserve existing content')
-      expect((await execute(root, socket, "console.log('unexpected')")).stderr).toContain(
-        'destination already exists'
-      )
+      expect(
+        (
+          await execute(
+            root,
+            socket,
+            "import http from 'node:http'; http.createServer().listen(4173, '127.0.0.1')"
+          )
+        ).stderr
+      ).toContain('destination already exists')
       expect(await readFile(socket, 'utf8')).toBe('preserve existing content')
       const nested = join(root, 'private')
       await mkdir(nested, { mode: 0o700 })

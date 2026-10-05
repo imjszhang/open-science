@@ -1,0 +1,321 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { ErrorNotice } from '@/components/error-notice'
+import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
+import type { ObservationQuestionRecovery } from './replay/use-observation-question-recovery'
+import type {
+  RunObservationSelection,
+  RunObservationTarget
+} from '../../../../shared/run-observation'
+import type {
+  RunObservationViewerAccess,
+  RecordedObservationViewerAccess
+} from '../../../../shared/run-observation-viewer'
+import type {
+  RecordedObservationTarget,
+  RecordedRunObservationSelection
+} from '../../../../shared/run-observation-recorded'
+type ViewerAccess = RunObservationViewerAccess | RecordedObservationViewerAccess
+
+export type RunObservationPreviewProps = {
+  title: string
+  isActive: boolean
+  questionRecovery?: ObservationQuestionRecovery
+} & (
+  | {
+      mode?: 'live'
+      target: RunObservationTarget
+      allowInteraction?: boolean
+      allowCancel?: boolean
+      allowCapture?: boolean
+      onAskSelection?: (
+        selection: RunObservationSelection,
+        viewerId: string
+      ) => void | Promise<void>
+      onAskArchiveSelection?: never
+    }
+  | {
+      mode: 'recorded'
+      target: RecordedObservationTarget
+      allowInteraction?: never
+      allowCancel?: never
+      allowCapture?: never
+      onAskSelection?: never
+      onAskArchiveSelection?: (
+        selection: RecordedRunObservationSelection,
+        viewerId: string
+      ) => void | Promise<void>
+    }
+)
+
+const targetKey = (target: RunObservationTarget | RecordedObservationTarget): string =>
+  JSON.stringify(
+    'artifactId' in target
+      ? ['recorded', target.projectId, target.sessionId, target.artifactId, target.versionId]
+      : [
+          'live',
+          target.projectId,
+          target.sessionId,
+          target.operationId,
+          target.executionInvocationId,
+          target.runId
+        ]
+  )
+const validAccess = (
+  access: ViewerAccess,
+  target: RunObservationTarget | RecordedObservationTarget
+): boolean => {
+  if (targetKey(access.target) !== targetKey(target)) return false
+  try {
+    const url = new URL(access.url)
+    return (
+      url.protocol === 'http:' &&
+      url.hostname === `viewer-${access.viewerId}.localhost` &&
+      Boolean(url.port) &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      url.pathname === '/__open_science_viewer' &&
+      /^[a-f0-9]{64}$/.test(url.searchParams.get('grant') ?? '') &&
+      [...url.searchParams.keys()].length === 1
+    )
+  } catch {
+    return false
+  }
+}
+const matchesSelection = (
+  selection: RunObservationSelection,
+  target: RunObservationTarget
+): boolean => {
+  const identity = selection.identity
+  return (
+    identity.projectId === target.projectId &&
+    identity.sessionId === target.sessionId &&
+    (['operationId', 'executionInvocationId', 'runId'] as const).every(
+      (key) => !target[key] || target[key] === identity[key]
+    ) &&
+    selection.cursor.epoch === selection.snapshot.cursor.epoch &&
+    selection.cursor.sequence === selection.snapshot.cursor.sequence &&
+    selection.stepId === selection.snapshot.stepId &&
+    targetKey(identity) === targetKey(selection.snapshot.identity)
+  )
+}
+
+/** Electron owns only this viewer's lifetime and selection delivery. The embedded browser bundle
+ * owns the same scoped observation UI used by an external agent. No cross-origin message bridge. */
+const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.JSX.Element => {
+  const { t } = useTranslation()
+  const [admission] = useState(() =>
+    props.mode === 'recorded'
+      ? { mode: 'recorded' as const, target: props.target }
+      : {
+          mode: 'live' as const,
+          target: props.target,
+          allowInteraction: props.allowInteraction,
+          allowCancel: props.allowCancel,
+          allowCapture: props.allowCapture
+        }
+  )
+  const [access, setAccess] = useState<ViewerAccess>()
+  const [openFailed, setOpenFailed] = useState(false)
+  const [selectionFailed, setSelectionFailed] = useState<'read' | 'ask'>()
+  const [retry, setRetry] = useState(0)
+  const delivered = useRef(new Set<string>())
+  const [requestedSelectionId, setRequestedSelectionId] = useState<string>()
+  const [recovering, setRecovering] = useState(false)
+  const added = useRunObservationQuestionStore((state) => state.lastAdded)
+  const draftReceived = Boolean(
+    requestedSelectionId && added?.selection.selectionId === requestedSelectionId
+  )
+  const current = useRef(props)
+  useLayoutEffect(() => {
+    current.current = props
+  }, [props])
+  useEffect(() => {
+    let disposed = false,
+      opened: ViewerAccess | undefined
+    const api = window.api?.observations
+    const revoke = (viewerId: string): void => {
+      void api?.revoke({ viewerId }).catch(() => undefined)
+    }
+    if (!api) {
+      queueMicrotask(() => {
+        if (!disposed) setOpenFailed(true)
+      })
+      return () => {
+        disposed = true
+      }
+    }
+    const opening =
+      admission.mode === 'recorded'
+        ? api.openRecorded({ target: admission.target })
+        : api.open({
+            target: admission.target,
+            allowInteraction: admission.allowInteraction,
+            allowCancel: admission.allowCancel,
+            allowCapture: admission.allowCapture
+          })
+    void opening.then(
+      (result) => {
+        if (disposed) {
+          revoke(result.viewerId)
+          return
+        }
+        if (
+          !validAccess(result, admission.target) ||
+          (admission.mode === 'recorded') !== ('mode' in result && result.mode === 'recorded')
+        ) {
+          revoke(result.viewerId)
+          setOpenFailed(true)
+          return
+        }
+        opened = result
+        setAccess(result)
+        setOpenFailed(false)
+      },
+      () => {
+        if (!disposed) setOpenFailed(true)
+      }
+    )
+    return () => {
+      disposed = true
+      if (opened) revoke(opened.viewerId)
+    }
+  }, [admission, retry])
+  useEffect(() => {
+    if (!access || !props.isActive || !(props.onAskSelection || props.onAskArchiveSelection)) return
+    let disposed = false,
+      timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        let selectionId: string | undefined, deliver: (() => void | Promise<void>) | undefined
+        if (admission.mode === 'recorded') {
+          const selected = await window.api.observations.recordingSelection({
+            viewerId: access.viewerId
+          })
+          const destination = current.current
+          if (disposed || !destination.isActive || destination.mode !== 'recorded') return
+          if (selected) {
+            if (
+              !selected.selectionId ||
+              targetKey(selected.receiving) !== targetKey(admission.target)
+            )
+              throw new Error('Recorded selection scope changed.')
+            selectionId = selected.selectionId
+            deliver = destination.onAskArchiveSelection
+              ? () => destination.onAskArchiveSelection!(selected, access.viewerId)
+              : undefined
+          }
+        } else {
+          const selected = await window.api.observations.selection({ viewerId: access.viewerId })
+          const destination = current.current
+          if (disposed || !destination.isActive || destination.mode === 'recorded') return
+          if (selected) {
+            if (!matchesSelection(selected, admission.target))
+              throw new Error('Selection scope changed.')
+            selectionId = selected.selectionId
+            deliver = destination.onAskSelection
+              ? () => destination.onAskSelection!(selected, access.viewerId)
+              : undefined
+          }
+        }
+        if (selectionId && deliver && !delivered.current.has(selectionId)) {
+          delivered.current.add(selectionId)
+          setRequestedSelectionId(selectionId)
+          try {
+            await deliver()
+            if (!disposed) setSelectionFailed(undefined)
+          } catch {
+            if (!disposed) setSelectionFailed('ask')
+          }
+        }
+      } catch {
+        if (!disposed) setSelectionFailed('read')
+      }
+      if (!disposed)
+        timer = setTimeout(() => {
+          void poll()
+        }, 750)
+    }
+    void poll()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [access, admission, props.isActive, props.onAskSelection, props.onAskArchiveSelection])
+  return (
+    <div className="flex h-full min-h-0 flex-col" hidden={!props.isActive}>
+      {openFailed ? (
+        <ErrorNotice
+          inline
+          title={t('Could not open the research viewer.')}
+          description={
+            props.mode === 'recorded'
+              ? t('The recorded evidence is unavailable.')
+              : t('The experiment may still be running. Retry to open a new observation link.')
+          }
+          primaryButton={{ label: t('Retry'), onClick: () => setRetry((value) => value + 1) }}
+        />
+      ) : access ? (
+        <>
+          {draftReceived ? (
+            <p role="status" className="shrink-0 border-b border-border-200 px-3 py-2 text-xs">
+              {t('Selected step added to the current draft. Review it before sending.')}
+            </p>
+          ) : null}
+          {selectionFailed ? (
+            <ErrorNotice
+              inline
+              title={t('Could not reference this recorded step.')}
+              description={
+                selectionFailed === 'ask'
+                  ? props.mode === 'recorded'
+                    ? t(
+                        'Open an editable Session in this Project, or use Discuss from the imported research, to ask about this step.'
+                      )
+                    : t('Open the recorded Session to ask about this step.')
+                  : t('Return to this preview and select the step again.')
+              }
+              primaryButton={
+                selectionFailed === 'ask' && props.questionRecovery
+                  ? {
+                      label: props.questionRecovery.label,
+                      loading: recovering,
+                      onClick: () => {
+                        if (recovering) return
+                        setRecovering(true)
+                        void Promise.resolve()
+                          .then(() => props.questionRecovery!.onClick())
+                          .catch(() => setSelectionFailed('ask'))
+                          .finally(() => setRecovering(false))
+                      }
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+          <iframe
+            key={access.viewerId}
+            title={props.title}
+            src={access.url}
+            sandbox="allow-scripts allow-same-origin allow-forms"
+            referrerPolicy="no-referrer"
+            className="min-h-0 w-full flex-1 border-0"
+          />
+        </>
+      ) : (
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          {props.mode === 'recorded'
+            ? t('Loading archived observation…')
+            : t('Connecting to the research run…')}
+        </p>
+      )}
+    </div>
+  )
+}
+export const RunObservationPreview = (props: RunObservationPreviewProps): React.JSX.Element => (
+  <RunObservationPreviewContent
+    key={`${targetKey(props.target)}:${Boolean(props.allowInteraction)}:${Boolean(props.allowCancel)}:${Boolean(props.allowCapture)}`}
+    {...props}
+  />
+)

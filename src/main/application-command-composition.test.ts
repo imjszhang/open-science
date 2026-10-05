@@ -232,6 +232,41 @@ const invocation = (
 }
 
 describe('application command composition', () => {
+  it('leaves the six local observation methods with their scoped IPC owner instead of installing another command router', async () => {
+    const composition = createApplicationCommandComposition(dependencies())
+    const observations = RENDERER_CONTRACT_CATALOG.filter(
+      (contract) => contract.capability === 'run-observation'
+    )
+    expect(observations.map((contract) => contract.channel)).toEqual([
+      'run-observation:open',
+      'run-observation:openRecorded',
+      'run-observation:recordingSelection',
+      'run-observation:recordingStatus',
+      'run-observation:revoke',
+      'run-observation:selection'
+    ])
+    for (const contract of observations) {
+      expect(contract.applicationCommand).toBeUndefined()
+      expect(contract.surfaceInstallation).toEqual({
+        electron: 'preload',
+        localWeb: 'unavailable',
+        remoteWeb: 'unavailable'
+      })
+      for (const view of [
+        composition.electron,
+        composition.localWeb,
+        composition.remoteWeb,
+        composition.task
+      ]) {
+        expect(view.commandNames()).not.toContain(contract.channel)
+        await expect(view.invoke(contract.channel!, invocation())).rejects.toMatchObject({
+          code: 'command-unavailable'
+        })
+      }
+    }
+    composition.dispose()
+  })
+
   it('joins the runtime-validated contracts into the Electron view', () => {
     const composition = createApplicationCommandComposition(dependencies())
 

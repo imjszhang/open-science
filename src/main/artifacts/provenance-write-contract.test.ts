@@ -86,6 +86,7 @@ const PUBLIC_METHODS = [
   'getVersionProvenance',
   'getReviewerVersionTrace',
   'resolveVersionDescriptors',
+  'resolvePublishedSessionVersionsByContent',
   'getVersionCore',
   'getVersionLiterature',
   'readDependencyRelations',

@@ -72,8 +72,15 @@ export type ReplayStageReadiness = ReplayFrameReadiness & {
 }
 export type ReplayStageProps = {
   document: ReplayDocument
+  sourceIdentity?: string
   // The interactive pane uses readable responsive layout; standalone capture stays canonical.
   fitContainer?: boolean
+  // Inject immutable observed evidence while retaining the shared material/file panes.
+  primaryContent?: React.ReactNode
+  primaryLabel?: string
+  followPrimary?: boolean
+  primaryMode?: 'record' | 'project'
+  renderResource?: (resource: ReplayResource, onClose: () => void) => React.ReactNode
   wide?: boolean
   followNotebook?: boolean
   // Explicit play/seek restores the current conversation without persisting reader state.
@@ -102,6 +109,18 @@ export type ReplayStageProps = {
   onReady?: (readiness: ReplayStageReadiness) => void
   readinessTimeoutMs?: number
 }
+
+// Keep injected preview renderers behind a component boundary. Closing is an event action,
+// never something that the stage invokes while projecting a frame.
+const ReplayResourceSlot = ({
+  renderResource,
+  resource,
+  onClose
+}: {
+  renderResource: NonNullable<ReplayStageProps['renderResource']>
+  resource: ReplayResource
+  onClose: () => void
+}): React.JSX.Element => <>{renderResource(resource, onClose)}</>
 
 // Keep simple frozen image/text/table inspection; use workspace renderers for richer formats.
 const usesRichPreview = (resource: ReplayResource): boolean =>
@@ -568,6 +587,11 @@ const usePrependAnchor = (
 const ReplayStageContent = ({
   document: replayDocument,
   fitContainer = false,
+  primaryContent,
+  primaryLabel,
+  followPrimary = true,
+  primaryMode,
+  renderResource,
   scene,
   resources = {},
   reducedMotion = false,
@@ -630,13 +654,19 @@ const ReplayStageContent = ({
     setBrowsingConversation(false)
   }
   const followingTranscript = useFollowScrollBottom(
-    fitContainer && (wide || !materialsOpen) && historyStart === undefined,
+    fitContainer && followPrimary && (wide || !materialsOpen) && historyStart === undefined,
     {
-      onFollowingChange: (following) => setBrowsingConversation(!following),
+      onFollowingChange: (following) => {
+        setBrowsingConversation(!following)
+        if (primaryContent && !following) onInspect?.()
+      },
       resetKey: `${focusKey}:${returnRequest}`
     }
   )
   const transcript = fitContainer ? followingTranscript : captureTranscript
+  useLayoutEffect(() => {
+    if (primaryMode === 'project' && transcript.current) transcript.current.scrollTop = 0
+  }, [primaryMode, transcript])
   const [rememberConversationAnchor, releaseConversationAnchor] = usePrependAnchor(
     () => transcript.current,
     '[data-replay-step]',
@@ -963,12 +993,14 @@ const ReplayStageContent = ({
       data-replay-position={scene.positionMs}
       data-replay-branch={scene.branchId}
       className="@container/replay flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden bg-bg-000 text-text-100"
-      onWheelCapture={() => {
+      onWheelCapture={(event) => {
+        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         onInspect?.()
       }}
       onPointerDownCapture={(event) => {
+        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         onInspect?.()
@@ -976,6 +1008,7 @@ const ReplayStageContent = ({
           onCloseFiles?.()
       }}
       onKeyDownCapture={(event) => {
+        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         if (event.key === 'Escape' && inspecting) {
@@ -1015,7 +1048,7 @@ const ReplayStageContent = ({
       >
         <section
           ref={transcript}
-          aria-label={t('Historical conversation')}
+          aria-label={primaryLabel ?? t('Historical conversation')}
           tabIndex={0}
           className={
             fitContainer
@@ -1029,72 +1062,74 @@ const ReplayStageContent = ({
             overflowAnchor: fitContainer ? 'none' : undefined
           }}
         >
-          <div className={fitContainer ? 'space-y-1' : 'space-y-3'}>
-            {fitContainer && transcriptStart > 0 ? (
-              <div className="flex justify-center py-2 [overflow-anchor:none]">
-                <Button
-                  variant="secondary"
-                  data-replay-load-messages
-                  className="max-w-full gap-1.5"
-                  onClick={() => {
-                    rememberConversationAnchor()
-                    onInspect?.()
-                    setBrowsingConversation(true)
-                    setHistoryStart(Math.max(0, transcriptStart - REPLAY_TRANSCRIPT_STEP_LIMIT))
-                    requestAnimationFrame(() => {
-                      const viewport = transcript.current
-                      ;(
-                        viewport?.querySelector<HTMLElement>('[data-replay-load-messages]') ??
-                        viewport?.querySelector<HTMLElement>('[data-replay-step]')
-                      )?.focus({ preventScroll: true })
-                    })
-                  }}
-                >
-                  <ChevronUp size={14} aria-hidden="true" />
-                  {t('Load earlier messages')}
-                </Button>
-              </div>
-            ) : null}
-            {transcriptSteps.map((step) => (
-              <StepConversation
-                interactive={fitContainer}
-                artifactResources={replayDocument.resources}
-                resources={resources}
-                visibleResourceIds={scene.visibleResourceIds}
-                onSelectResource={onSelectResource ? selectResource : undefined}
-                runDetails={runDetails}
-                key={step.id}
-                step={step}
-                active={step.id === active?.id}
-                messageCharacters={step.id === active?.id ? scene.messageCharacters : 0}
-                showResults={step.id !== active?.id || scene.showResults}
-              />
-            ))}
-            {fitContainer && browsingConversation ? (
-              <div className="sticky bottom-0 flex justify-center py-2 [overflow-anchor:none]">
-                <Button
-                  variant="secondary"
-                  className="max-w-full gap-1.5 shadow-sm"
-                  onClick={() => {
-                    setHistoryStart(undefined)
-                    setBrowsingConversation(false)
-                    setReturnRequest((request) => request + 1)
-                    requestAnimationFrame(() => {
-                      transcript.current
-                        ?.querySelector<HTMLElement>('[data-replay-active]')
-                        ?.focus({ preventScroll: true })
-                    })
-                  }}
-                >
-                  <ChevronDown size={14} aria-hidden="true" />
-                  {t('Return to current step')}
-                </Button>
-              </div>
-            ) : null}
-            {!scene.visibleSteps.length ? (
-              <p className="p-4 text-text-300">{t('No recorded steps are available.')}</p>
-            ) : null}
-          </div>
+          {primaryContent ?? (
+            <div className={fitContainer ? 'space-y-1' : 'space-y-3'}>
+              {fitContainer && transcriptStart > 0 ? (
+                <div className="flex justify-center py-2 [overflow-anchor:none]">
+                  <Button
+                    variant="secondary"
+                    data-replay-load-messages
+                    className="max-w-full gap-1.5"
+                    onClick={() => {
+                      rememberConversationAnchor()
+                      onInspect?.()
+                      setBrowsingConversation(true)
+                      setHistoryStart(Math.max(0, transcriptStart - REPLAY_TRANSCRIPT_STEP_LIMIT))
+                      requestAnimationFrame(() => {
+                        const viewport = transcript.current
+                        ;(
+                          viewport?.querySelector<HTMLElement>('[data-replay-load-messages]') ??
+                          viewport?.querySelector<HTMLElement>('[data-replay-step]')
+                        )?.focus({ preventScroll: true })
+                      })
+                    }}
+                  >
+                    <ChevronUp size={14} aria-hidden="true" />
+                    {t('Load earlier messages')}
+                  </Button>
+                </div>
+              ) : null}
+              {transcriptSteps.map((step) => (
+                <StepConversation
+                  interactive={fitContainer}
+                  artifactResources={replayDocument.resources}
+                  resources={resources}
+                  visibleResourceIds={scene.visibleResourceIds}
+                  onSelectResource={onSelectResource ? selectResource : undefined}
+                  runDetails={runDetails}
+                  key={step.id}
+                  step={step}
+                  active={step.id === active?.id}
+                  messageCharacters={step.id === active?.id ? scene.messageCharacters : 0}
+                  showResults={step.id !== active?.id || scene.showResults}
+                />
+              ))}
+              {fitContainer && browsingConversation ? (
+                <div className="sticky bottom-0 flex justify-center py-2 [overflow-anchor:none]">
+                  <Button
+                    variant="secondary"
+                    className="max-w-full gap-1.5 shadow-sm"
+                    onClick={() => {
+                      setHistoryStart(undefined)
+                      setBrowsingConversation(false)
+                      setReturnRequest((request) => request + 1)
+                      requestAnimationFrame(() => {
+                        transcript.current
+                          ?.querySelector<HTMLElement>('[data-replay-active]')
+                          ?.focus({ preventScroll: true })
+                      })
+                    }}
+                  >
+                    <ChevronDown size={14} aria-hidden="true" />
+                    {t('Return to current step')}
+                  </Button>
+                </div>
+              ) : null}
+              {!scene.visibleSteps.length ? (
+                <p className="p-4 text-text-300">{t('No recorded steps are available.')}</p>
+              ) : null}
+            </div>
+          )}
         </section>
         <section
           ref={material}
@@ -1340,7 +1375,7 @@ const ReplayStageContent = ({
                   usesRichPreview(resource) &&
                   resource.availability === 'recorded' &&
                   resource.versionId &&
-                  resource.locator ? (
+                  (resource.locator || renderResource) ? (
                     <Suspense
                       fallback={
                         <p className="p-4 text-sm text-text-300">
@@ -1348,7 +1383,15 @@ const ReplayStageContent = ({
                         </p>
                       }
                     >
-                      <ReplayFilePreview resource={resource} onClose={returnToOrigin} />
+                      {renderResource ? (
+                        <ReplayResourceSlot
+                          renderResource={renderResource}
+                          resource={resource}
+                          onClose={returnToOrigin}
+                        />
+                      ) : (
+                        <ReplayFilePreview resource={resource} onClose={returnToOrigin} />
+                      )}
                     </Suspense>
                   ) : prepared?.status === 'ready' ? (
                     <>
@@ -1499,7 +1542,7 @@ export const ReplayStage = (props: ReplayStageProps): React.JSX.Element => {
           key={JSON.stringify([
             props.document.source.projectId,
             props.document.source.sessionId,
-            props.document.source.fingerprint,
+            props.sourceIdentity ?? props.document.source.fingerprint,
             props.preparationId ?? 0
           ])}
           {...props}

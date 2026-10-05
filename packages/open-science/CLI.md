@@ -856,6 +856,40 @@ Both operations retain already published immutable Artifacts. No command accepts
 `recoveryAuthority` or `writeAttempt`. This first execution sandbox
 supports local macOS; paired remote web callers are explicitly unsupported.
 
+## Observe an existing research run
+
+`observations` uses the same local service as `execution`. It opens and reads a scoped Replay viewer;
+opening a viewer does not start a Run or a new Session. The CLI returns the viewer URL for the caller
+to open in a browser or Codex panel. It does not automatically launch a browser.
+
+```bash
+open-science observations open --input-json '{"target":{"projectId":"project-id","sessionId":"session-id","operationId":"operation-id"},"allowInteraction":false,"allowCancel":false}' --json
+open-science observations snapshot --input-file viewer.json --json
+open-science observations history --input-file viewer.json --json
+open-science observations changes --input-file cursor.json --json
+open-science observations select --input-file step.json --json
+open-science observations selection --input-file viewer.json --json
+open-science observations revoke --input-file viewer.json --json
+```
+
+Each command accepts one JSON object from stdin, `--input-json`, or `--input-file`.
+`viewer.json` contains `viewerId` returned by `open`. `cursor.json` additionally contains the exact
+`cursor: { "epoch": "...", "sequence": 0 }` from a snapshot; `step.json` adds its `stepId`.
+Use an exact operation, invocation or Run identifier in the opening target. Only `target`,
+`allowInteraction`, and `allowCancel` are accepted by `open`; no environment, arbitrary URL,
+credentials or execution command can be supplied there.
+
+`selection` lets Codex retrieve the snapshot frozen by the browser's step selection, including the
+correct evidence cutoff. `history` is bounded process-local sampling with explicit coverage and
+truncation, and `changes` can return a replacement `resync` snapshot after reconnecting or expiry.
+Viewing links expire and must not be stored in `.science` packages.
+
+Pausing Replay or using `revoke` closes viewing access without cancelling the Run. `--timeout-ms`
+sets only the HTTP request deadline; `--wait` and `--cancel-on-timeout` are not accepted. Project
+interaction requires `allowInteraction: true`, while a viewer stop control separately requires
+`allowCancel: true`. To declare a real project page, add `projectView` plus `localServicePort` to the
+existing `execution run` JSON request; see the [SDK example](./README.md#observe-an-existing-research-run).
+
 ## Local `.science` package import and export
 
 The package commands accept a JSON object from stdin, `--input-json`, or `--input-file`. Paths in
@@ -881,3 +915,34 @@ For larger archives, increase `--timeout-ms`. Timing out stops waiting, not the 
 Keep `--idempotency-key` unchanged when retrying a request whose response was lost; use a new key
 for a new transfer. The same key with different input is rejected. A restarted service requires a
 new preflight and review. `cancel-import` explicitly discards an uncommitted staged preview.
+
+
+Recorded observations use a receiving Artifact Version, not an author-machine Run ID:
+
+```bash
+open-science observations open-recorded --input-json '{"target":{"projectId":"p","sessionId":"s","artifactId":"a","versionId":"v"}}' --json
+open-science observations recording --input-json '{"viewerId":"VIEWER_UUID"}' --json
+open-science observations select-recording --input-json '{"viewerId":"VIEWER_UUID","stepKey":"observation-0"}' --json
+open-science observations recording-selection --input-json '{"viewerId":"VIEWER_UUID"}' --json
+```
+
+Current Run recording status and live image capture use the active Run's viewer:
+
+```bash
+open-science observations recording-status --input-json '{"target":{"projectId":"p","sessionId":"s","runId":"run-id"}}' --json
+open-science observations capture-options --input-json '{"viewerId":"VIEWER_UUID"}' --json
+open-science observations capture --input-json '{"viewerId":"VIEWER_UUID","request":{"source":"project-export","exportKey":"frame.png","idempotencyKey":"capture-1"}}' --json
+open-science observations captures --input-json '{"viewerId":"VIEWER_UUID"}' --json
+open-science observations capture-content --input-json '{"viewerId":"VIEWER_UUID","captureId":"CAPTURE_ID","offset":0,"length":1048576}' --json
+```
+
+The recorded viewer cannot execute, cancel, or reconnect to a project service. Its media resolve
+within the receiving Session by verified content, and unavailable media remain explicitly missing.
+
+`captures` and `capture-content` read already captured images from a live Run using the viewer's
+existing read authorization. They do not create a capture or execute work. `capture-content` returns
+JSON with `dataBase64`, the full image's `checksum` and `sizeBytes`, the chunk's byte `offset`, and
+`nextOffset` when more bytes remain. The default and maximum chunk length is 1048576 bytes. Follow
+`nextOffset`, decode and concatenate the chunks, then verify the full image's SHA-256 before using it.
+Paths, URLs and replacement Session scopes are not accepted. The live image cache ends with the
+Run; published images remain ordinary Artifact Versions in its saved recording.

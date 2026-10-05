@@ -106,7 +106,9 @@
     "src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.test.tsx",
     "src/main/notebook/dependency-analysis.stdlib-replay.test.ts",
     "src/main/artifacts/resumed-finalization-ownership.test.ts",
-    "src/main/artifacts/export-filename.ts"
+    "src/main/artifacts/export-filename.ts",
+    "src/main/artifacts/session-version-content-reader.ts",
+    "src/main/artifacts/session-version-content-reader.test.ts"
   ],
   "interfacePaths": [
     "src/main/artifacts/provenance-message-snapshot.ts",
@@ -144,7 +146,8 @@
     "src/main/artifacts/session-reproducibility-store.ts",
     "src/main/notebook/reproduction-runtime.ts",
     "src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.tsx",
-    "src/main/artifacts/ro-crate-export.ts"
+    "src/main/artifacts/ro-crate-export.ts",
+    "src/main/artifacts/session-version-content-reader.ts"
   ],
   "consumerModules": ["session_persistence"],
   "testFiles": {
@@ -189,7 +192,8 @@
       "src/main/artifacts/session-reproducibility-store.test.ts",
       "src/main/artifacts/session-reproducibility.test.ts",
       "src/main/artifacts/storage-access.context.test.ts",
-      "src/main/artifacts/resumed-finalization-ownership.test.ts"
+      "src/main/artifacts/resumed-finalization-ownership.test.ts",
+      "src/main/artifacts/session-version-content-reader.test.ts"
     ],
     "contract": [
       "src/main/artifacts/artifact-reproducibility-ipc.test.ts",
@@ -584,7 +588,19 @@
       "src/main/notebook/managed-nested-generation.integration.test.ts",
       "src/main/notebook/managed-execution-collection.integration.test.ts",
       "src/main/notebook/managed-output-publication.integration.test.ts",
-      "src/main/composition/artifact-surfaces.test.ts"
+      "src/main/composition/artifact-surfaces.test.ts",
+      "src/main/managed-runtime-views.integration.test.ts",
+      "src/main/replay-viewer/http-host.integration.test.ts",
+      "src/main/run-observation-external-port.test.ts",
+      "src/main/run-observation/managed-coordinator.test.ts",
+      "src/main/run-observation/recorded-reader.test.ts",
+      "src/main/runtime-view/browser-host.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/renderer/replay-viewer/browser.integration.test.ts",
+      "src/main/run-observation/capture-package.integration.test.ts",
+      "src/main/notebook/managed-execution-output.test.ts",
+      "src/main/run-observation/auxiliary-output.test.ts",
+      "src/main/run-observation/media-collector.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

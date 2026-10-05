@@ -1,0 +1,628 @@
+import { request, type IncomingHttpHeaders } from 'node:http'
+import { createHash } from 'node:crypto'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { createCallerContext, type CallerContext } from '../caller-context'
+import { RunObservationOwner, type RunObservationSource } from '../run-observation/owner'
+import { ObservationViewers } from '../run-observation/viewers'
+import { recordedFixture } from '../run-observation/recorded-viewer.test-support'
+import type { RuntimeViewAccess } from '../../shared/runtime-view'
+import type { RunObservationSnapshot } from '../../shared/run-observation'
+import {
+  ReplayViewerHttpHost,
+  type ReplayViewerHttpAccess,
+  type ReplayViewerHttpDependencies,
+  type ReplayViewerHttpOpenOptions
+} from './http-host'
+
+const scope = { projectId: 'project-a', sessionId: 'session-a', operationId: 'operation-a' }
+const cleanup: Array<() => Promise<void> | void> = []
+afterEach(async () => {
+  for (const close of cleanup.splice(0).reverse()) await close()
+})
+const caller = (current: () => boolean): CallerContext =>
+  createCallerContext({
+    clientId: 'client-a',
+    lifecycleClientId: 'lifecycle-a',
+    leaseId: 'lease-a',
+    surface: 'task',
+    location: 'local',
+    principalKind: 'automation',
+    actionOrigin: 'automation',
+    isAuthorizationCurrent: current
+  })
+type Harness = {
+  host: ReplayViewerHttpHost
+  viewers: ObservationViewers
+  owner: CallerContext
+  source: RunObservationSource
+  projectOpen: Mock<ReplayViewerHttpDependencies['projectViews']['open']>
+  projectClose: Mock<ReplayViewerHttpDependencies['projectViews']['closeViewer']>
+  readAsset: Mock<ReplayViewerHttpDependencies['readAsset']>
+  readArtifact: Mock<NonNullable<ReplayViewerHttpDependencies['readArtifact']>>
+  cancel: Mock<NonNullable<ReplayViewerHttpDependencies['cancelRun']>>
+  setAuthorized(value: boolean): void
+}
+function harness(
+  options: {
+    readAsset?: ReplayViewerHttpDependencies['readAsset']
+    cancel?: boolean
+    lifetimeMs?: number
+    recorded?: boolean
+    capture?: ReplayViewerHttpDependencies['capture']
+    listCaptures?: ReplayViewerHttpDependencies['listCaptures']
+    readCapture?: ReplayViewerHttpDependencies['readCapture']
+    recordingStatus?: ReplayViewerHttpDependencies['recordingStatus']
+  } = {}
+): Harness {
+  let authorized = true
+  const source: RunObservationSource = {
+    identity: { ...scope, runId: 'run-a', executionInvocationId: 'invocation-a' },
+    phase: 'running',
+    artifacts: [
+      { versionId: 'version-a', name: 'result.html', mimeType: 'text/html', producerRunId: 'run-a' }
+    ],
+    run: {
+      runId: 'run-a',
+      executionInvocationId: 'invocation-a',
+      cellId: 'cell-a',
+      source: 'agent',
+      kernelKind: 'bash',
+      script: 'private source',
+      status: 'running',
+      startedAt: 100,
+      text: { stdout: 'first', stderr: '', traceback: '', plain: [] },
+      outputs: [],
+      workingFiles: []
+    }
+  }
+  const observer = new RunObservationOwner({
+    authorize: (target, view) => viewers.assertViewer(target, view),
+    read: async () => source
+  })
+  const viewers = new ObservationViewers({
+    observer,
+    ...(options.recorded
+      ? {
+          recorded: {
+            authorizeScope: async () => undefined,
+            read: async () => recordedFixture().payload
+          }
+        }
+      : {}),
+    authorizeScope: async () => undefined,
+    onRevoked: (viewerId) => host.closeViewer(viewerId),
+    limits: { lifetimeMs: options.lifetimeMs }
+  })
+  cleanup.push(() => viewers.close())
+  const projectOpen = vi.fn<ReplayViewerHttpDependencies['projectViews']['open']>(
+    async (runScope) =>
+      ({
+        view: {
+          viewId: 'view-a',
+          scope: { ...runScope, environmentId: 'env-a', generationId: 'generation-a' },
+          title: 'Project',
+          state: 'ready',
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 1000).toISOString(),
+          embeddingAdapted: true
+        },
+        url: 'http://rv-view-a.localhost:5001/private-test-grant'
+      }) satisfies RuntimeViewAccess
+  )
+  const projectClose = vi.fn<ReplayViewerHttpDependencies['projectViews']['closeViewer']>()
+  const readArtifact = vi.fn<NonNullable<ReplayViewerHttpDependencies['readArtifact']>>(
+    async () => ({ body: Buffer.from('<script>unsafe()</script>'), mimeType: 'text/html' })
+  )
+  const cancel = vi.fn<NonNullable<ReplayViewerHttpDependencies['cancelRun']>>(
+    async () => undefined
+  )
+  const readAsset = vi.fn<ReplayViewerHttpDependencies['readAsset']>(
+    options.readAsset ??
+      (async (path) =>
+        path === 'index.html'
+          ? { body: Buffer.from('<h1>Viewer</h1>'), mimeType: 'text/html; charset=utf-8' }
+          : path === 'assets/main.js'
+            ? { body: Buffer.from('console.log("viewer")'), mimeType: 'application/javascript' }
+            : undefined)
+  )
+  const host = new ReplayViewerHttpHost({
+    ...(options.capture
+      ? {
+          capture: options.capture,
+          captureOptions: async () => ({ hostView: false, projectExports: ['frame.png'] })
+        }
+      : {}),
+    listCaptures: options.listCaptures,
+    readCapture: options.readCapture,
+    recordingStatus: options.recordingStatus,
+    viewers,
+    projectViews: { open: projectOpen, closeViewer: projectClose },
+    readAsset,
+    readArtifact,
+    ...(options.recorded
+      ? {
+          readRecordingMedia: async () => ({ body: recordedFixture().bytes, mimeType: 'text/html' })
+        }
+      : {}),
+    ...(options.cancel ? { cancelRun: cancel } : {})
+  })
+  cleanup.push(() => host.close())
+  const owner = caller(() => authorized)
+  return {
+    host,
+    viewers,
+    owner,
+    source,
+    projectOpen,
+    projectClose,
+    readAsset,
+    readArtifact,
+    cancel,
+    setAuthorized: (value: boolean): void => {
+      authorized = value
+    }
+  }
+}
+type HttpResult = { status: number; headers: IncomingHttpHeaders; body: string }
+async function http(
+  url: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string; path?: string } = {}
+): Promise<HttpResult> {
+  return new Promise((resolve, reject) => {
+    const pending = request(
+      url,
+      {
+        family: 4,
+        lookup: (_hostname, _options, callback) => callback(null, '127.0.0.1', 4),
+        method: options.method ?? 'GET',
+        headers: options.headers,
+        ...(options.path ? { path: options.path } : {})
+      },
+      (response) => {
+        const chunks: Buffer[] = []
+        response.on('data', (chunk: Buffer) => chunks.push(chunk))
+        response.on('error', reject)
+        response.on('end', () =>
+          resolve({
+            status: response.statusCode!,
+            headers: response.headers,
+            body: Buffer.concat(chunks).toString()
+          })
+        )
+      }
+    )
+    pending.on('error', reject)
+    pending.end(options.body)
+  })
+}
+async function open(
+  h: ReturnType<typeof harness>,
+  options: ReplayViewerHttpOpenOptions = {}
+): Promise<{
+  access: ReplayViewerHttpAccess
+  origin: string
+  cookie: string
+  boot: HttpResult
+  get(path: string): Promise<HttpResult>
+  post(path: string, body: unknown): Promise<HttpResult>
+}> {
+  const access = await h.host.open(scope, h.owner, options)
+  const boot = await http(access.url)
+  expect(boot.status).toBe(303)
+  const cookie = boot.headers['set-cookie']![0].split(';')[0]
+  const origin = new URL(access.url).origin
+  return {
+    access,
+    origin,
+    cookie,
+    boot,
+    get: (path: string) => http(origin + path, { headers: { cookie } }),
+    post: (path: string, body: unknown) =>
+      http(origin + path, {
+        method: 'POST',
+        headers: { cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+  }
+}
+describe('isolated Replay viewer HTTP host', () => {
+  it('keeps capture permission separate and binds saved images to an actual viewer observation without guessing cursors', async () => {
+    const image = Buffer.from('verified fixture bytes')
+    let result:
+      import('../../shared/run-observation-capture').ObservationMediaCaptureResult | undefined
+    const capture = vi.fn<NonNullable<ReplayViewerHttpDependencies['capture']>>(async (input) => {
+      input.assertAuthorized()
+      const created = result === undefined
+      result ??= {
+        captureId: 'a'.repeat(64),
+        recordingId: 'recording',
+        stepKey: 'observation-99',
+        artifactId: 'artifact',
+        versionId: 'version',
+        checksum: createHash('sha256').update(image).digest('hex'),
+        sizeBytes: image.length,
+        mimeType: 'image/png',
+        publication: 'awaiting-publication',
+        capture: {
+          source: 'project-export',
+          association: 'current-observation',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+          observedAt: 1,
+          width: 1,
+          height: 1
+        }
+      }
+      return { result, created }
+    })
+    const h = harness({
+      capture,
+      listCaptures: async () => (result ? [result] : []),
+      readCapture: async (_target, id) =>
+        id === result?.captureId ? { body: image, mimeType: 'image/png' } : undefined,
+      recordingStatus: async (target) => ({ target, state: 'recording' })
+    })
+    const readOnly = await open(h)
+    const request = { source: 'project-export', exportKey: 'frame.png', idempotencyKey: 'first' }
+    expect((await readOnly.post('/api/capture', request)).status).toBe(403)
+    expect(capture).not.toHaveBeenCalled()
+    const v = await open(h, { allowCapture: true })
+    expect(JSON.parse((await v.get('/api/capture-options')).body)).toEqual({
+      hostView: false,
+      projectExports: ['frame.png']
+    })
+    expect(JSON.parse((await v.get('/api/recording-status')).body)).toMatchObject({
+      target: scope,
+      state: 'recording'
+    })
+    expect((await v.post('/api/capture', { ...request, stepKey: 'old-step' })).status).toBe(400)
+    expect(
+      (await v.post('/api/capture', { source: 'host-view', idempotencyKey: 'host' })).status
+    ).toBe(403)
+    const captured = await v.post('/api/capture', request)
+    expect(captured.status).toBe(200)
+    const frame = JSON.parse(captured.body)
+    const snapshot = JSON.parse((await v.get('/api/snapshot')).body)
+    expect(frame.viewerEvidence).toEqual({
+      cursor: snapshot.cursor,
+      observedAt: snapshot.observedAt,
+      stepId: snapshot.stepId
+    })
+    expect(frame.stepKey).toBe('observation-99')
+    expect(frame.viewerEvidence.cursor.sequence).not.toBe(99)
+    expect(capture.mock.calls[0][0]).toMatchObject({ target: scope, request })
+    expect(capture.mock.calls[0][0].host).toBeUndefined()
+    h.source.run!.text!.stdout = 'changed after capture'
+    expect(JSON.parse((await v.post('/api/capture', request)).body).viewerEvidence).toEqual(
+      frame.viewerEvidence
+    )
+    expect(JSON.parse((await v.get('/api/captures')).body)).toEqual([frame])
+    expect(await h.host.captures(v.access.viewerId, h.owner)).toEqual([frame])
+    const firstChunk = await h.host.captureContent(
+      v.access.viewerId,
+      { captureId: frame.captureId, length: 5 },
+      h.owner
+    )
+    expect(firstChunk).toMatchObject({
+      captureId: frame.captureId,
+      checksum: frame.checksum,
+      offset: 0,
+      dataBase64: image.subarray(0, 5).toString('base64'),
+      nextOffset: 5
+    })
+    const lastChunk = await h.host.captureContent(
+      v.access.viewerId,
+      { captureId: frame.captureId, offset: firstChunk.nextOffset },
+      h.owner
+    )
+    expect(lastChunk.nextOffset).toBeUndefined()
+    expect(
+      Buffer.concat([
+        Buffer.from(firstChunk.dataBase64, 'base64'),
+        Buffer.from(lastChunk.dataBase64, 'base64')
+      ])
+    ).toEqual(image)
+    await expect(
+      h.host.captureContent(
+        v.access.viewerId,
+        { captureId: frame.captureId, offset: image.length + 1 },
+        h.owner
+      )
+    ).rejects.toMatchObject({ code: 'invalid' })
+    await expect(
+      h.host.captureContent(
+        v.access.viewerId,
+        { captureId: frame.captureId, length: 1048577 },
+        h.owner
+      )
+    ).rejects.toThrow()
+    const another = await open(h, { allowCapture: true })
+    const retriedElsewhere = JSON.parse((await another.post('/api/capture', request)).body)
+    expect(retriedElsewhere.captureId).toBe(frame.captureId)
+    expect(retriedElsewhere.viewerEvidence).toBeUndefined()
+    expect(
+      (await h.host.captures(readOnly.access.viewerId, h.owner))[0].viewerEvidence
+    ).toBeUndefined()
+    const media = await v.get('/api/capture-media?captureId=' + frame.captureId)
+    expect(media.status).toBe(200)
+    expect(media.body).toBe(image.toString())
+    expect(media.headers['content-security-policy']).toContain("default-src 'none'")
+    expect((await v.get('/api/capture-media?captureId=' + 'f'.repeat(64))).status).toBe(404)
+    expect((await http(v.origin + '/api/capture-media?captureId=' + frame.captureId)).status).toBe(
+      401
+    )
+    await expect(
+      h.host.capture(
+        v.access.viewerId,
+        request,
+        createCallerContext({ ...h.owner, clientId: 'other' })
+      )
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+    await expect(
+      h.host.captureContent(
+        v.access.viewerId,
+        { captureId: frame.captureId },
+        createCallerContext({ ...h.owner, clientId: 'other' })
+      )
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+    h.setAuthorized(false)
+    await expect(h.host.captures(v.access.viewerId, h.owner)).rejects.toMatchObject({
+      code: 'unauthorized'
+    })
+  })
+  it('exchanges a one-use grant for HttpOnly partitioned access and exposes only fixed viewer scope', async () => {
+    const h = harness(),
+      v = await open(h, { desktopParent: 'file:' })
+    expect(v.origin).toMatch(/^http:\/\/viewer-[a-f0-9-]+\.localhost:\d+$/)
+    expect(v.boot.headers['set-cookie']![0]).toContain(
+      'HttpOnly; Secure; SameSite=None; Partitioned'
+    )
+    expect((await http(v.access.url)).status).toBe(401)
+    expect((await http(v.origin + '/api/snapshot')).status).toBe(401)
+    const context = JSON.parse((await v.get('/api/context')).body)
+    expect(context).toMatchObject({
+      viewerId: v.access.viewerId,
+      target: scope,
+      canInteract: false,
+      canCancel: false,
+      canReadArtifacts: true
+    })
+    expect(context.capability).toBeUndefined()
+    const snapshot = JSON.parse((await v.get('/api/snapshot')).body) as RunObservationSnapshot
+    expect(snapshot.run?.runId).toBe('run-a')
+    expect(JSON.stringify(snapshot)).not.toContain('private source')
+    expect((await v.get('/api/snapshot?sessionId=foreign')).status).toBe(400)
+    expect(
+      (await v.post('/api/changes', { cursor: snapshot.cursor, sessionId: 'foreign' })).status
+    ).toBe(400)
+    expect(
+      (
+        await http(v.origin + '/api/snapshot', {
+          headers: { cookie: v.cookie, host: 'attacker.invalid' }
+        })
+      ).status
+    ).toBe(403)
+  })
+  it('serves only declared packaged assets, revalidates cookies for assets and rejects traversal/global routes', async () => {
+    const h = harness(),
+      v = await open(h, { desktopParent: 'file:' })
+    const entry = await v.get('/')
+    expect(entry.status).toBe(200)
+    expect(entry.headers['content-security-policy']).toContain('frame-ancestors file:')
+    expect(entry.headers['content-security-policy']).toContain('frame-src http://*.localhost:*')
+    expect((await v.get('/assets/main.js')).status).toBe(200)
+    for (const path of [
+      '/api/settings',
+      '/api/execute',
+      '/config.json',
+      '/assets/main.js.map',
+      '/assets/%2e%2e/private'
+    ]) {
+      expect(
+        (await http(v.origin, { headers: { cookie: v.cookie }, path })).status
+      ).toBeGreaterThanOrEqual(400)
+    }
+    expect(h.readAsset.mock.calls.map(([path]) => path)).toEqual(['index.html', 'assets/main.js'])
+    expect((await http(v.origin + '/assets/main.js')).status).toBe(401)
+  })
+  it('returns actual history, updates and a frozen selected step without accepting a caller scope', async () => {
+    const h = harness(),
+      v = await open(h)
+    const snapshot = JSON.parse((await v.get('/api/snapshot')).body) as RunObservationSnapshot
+    h.source.run!.text.stdout = 'second'
+    const changes = JSON.parse((await v.post('/api/changes', { cursor: snapshot.cursor })).body)
+    expect(changes.kind).toBe('delta')
+    expect(changes.changes[0].run.logs.stdout.text).toBe('second')
+    const selected = await v.post('/api/select', {
+      cursor: snapshot.cursor,
+      stepId: snapshot.stepId
+    })
+    expect(selected.status).toBe(200)
+    expect(JSON.parse(selected.body).snapshot.run.logs.stdout.text).toBe('first')
+    expect(JSON.parse((await v.get('/api/selection')).body).cursor).toEqual(snapshot.cursor)
+    expect(JSON.parse((await v.get('/api/history')).body).snapshots).toHaveLength(2)
+    expect(
+      (
+        await http(v.origin + '/api/select', {
+          method: 'POST',
+          headers: {
+            cookie: v.cookie,
+            origin: 'https://foreign.invalid',
+            'content-type': 'application/json'
+          },
+          body: '{}'
+        })
+      ).status
+    ).toBe(403)
+    expect(
+      (
+        await http(v.origin + '/api/select', {
+          method: 'POST',
+          headers: { cookie: v.cookie, 'content-type': 'application/json' },
+          body: '{}'
+        })
+      ).status
+    ).toBe(403)
+  })
+  it('requires explicit interaction grant and pins project opening to the observed running Run', async () => {
+    const h = harness(),
+      readonly = await open(h)
+    expect((await readonly.post('/api/project-view', {})).status).toBe(403)
+    expect(h.projectOpen).not.toHaveBeenCalled()
+    const v = await open(h, { allowInteraction: true, desktopParent: 'file:' })
+    expect((await v.post('/api/project-view', {})).status).toBe(200)
+    expect(h.projectOpen).toHaveBeenCalledWith(
+      { projectId: 'project-a', sessionId: 'session-a', runId: 'run-a' },
+      v.access.viewerId,
+      [v.origin, 'file:'],
+      'partitioned',
+      expect.any(Function)
+    )
+    h.source.run!.status = 'completed'
+    expect((await v.post('/api/project-view', {})).status).toBe(409)
+    expect(h.projectOpen).toHaveBeenCalledTimes(1)
+  })
+  it('closes a newly opened project page if the Run ends before access can be returned', async () => {
+    const h = harness(),
+      v = await open(h, { allowInteraction: true })
+    const original = h.projectOpen.getMockImplementation()!
+    h.projectOpen.mockImplementation(async (...args) => {
+      const result = await original(...args)
+      h.source.run!.status = 'completed'
+      return result
+    })
+    expect((await v.post('/api/project-view', {})).status).toBe(409)
+    expect(h.projectClose).toHaveBeenCalledWith(v.access.viewerId)
+  })
+  it('reads only advertised exact Versions and prevents artifact HTML from gaining viewer origin privileges', async () => {
+    const h = harness(),
+      v = await open(h)
+    expect((await v.get('/api/artifact?versionId=foreign')).status).toBe(404)
+    expect(h.readArtifact).not.toHaveBeenCalled()
+    const artifact = await v.get('/api/artifact?versionId=version-a')
+    expect(artifact.status).toBe(200)
+    expect(artifact.headers['content-security-policy']).toBe("sandbox; default-src 'none'")
+    expect(artifact.headers['content-disposition']).toContain('attachment')
+    expect(h.readArtifact.mock.calls[0][0]).toMatchObject({
+      target: scope,
+      runId: 'run-a',
+      artifact: { versionId: 'version-a' }
+    })
+  })
+  it('requires separately enabled cancellation and explicit confirmation and never cancels on viewer close', async () => {
+    const disabled = harness()
+    await expect(disabled.host.open(scope, disabled.owner, { allowCancel: true })).rejects.toThrow()
+    const h = harness({ cancel: true }),
+      v = await open(h, { allowCancel: true })
+    expect((await v.post('/api/cancel', {})).status).toBe(400)
+    expect(h.cancel).not.toHaveBeenCalled()
+    expect((await v.post('/api/cancel', { confirmed: true })).status).toBe(200)
+    expect(h.cancel.mock.calls[0][0]).toMatchObject({
+      target: scope,
+      runId: 'run-a',
+      caller: { ...h.owner, isAuthorizationCurrent: expect.any(Function) }
+    })
+    h.host.closeViewer(v.access.viewerId)
+    expect(h.cancel).toHaveBeenCalledTimes(1)
+  })
+  it('rejects late reads after caller revocation and never exposes private errors', async () => {
+    let finish!: () => void
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const h = harness({
+        readAsset: async () => {
+          await gate
+          return { body: Buffer.from('private bytes'), mimeType: 'text/plain' }
+        }
+      }),
+      v = await open(h)
+    const reading = v.get('/')
+    const settled = reading.catch(() => ({ status: 410, body: '', headers: {} }))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    h.setAuthorized(false)
+    finish()
+    const response = await settled
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.body).not.toContain('private bytes')
+    const other = harness({
+        readAsset: async () => {
+          throw new Error('/Users/private/secret token=never-show')
+        }
+      }),
+      w = await open(other)
+    const failed = await w.get('/')
+    expect(failed.status).toBe(503)
+    expect(failed.body).not.toContain('/Users')
+    expect(failed.body).not.toContain('never-show')
+  })
+  it('closes expired listeners and enforces JSON request and byte limits', async () => {
+    const h = harness({ lifetimeMs: 80 }),
+      v = await open(h)
+    const oversized = await http(v.origin + '/api/select', {
+      method: 'POST',
+      headers: { cookie: v.cookie, origin: v.origin, 'content-type': 'application/json' },
+      body: 'x'.repeat(9000)
+    })
+    expect(oversized.status).toBe(413)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await expect(v.get('/api/snapshot')).rejects.toThrow()
+    expect(h.projectClose).toHaveBeenCalledWith(v.access.viewerId)
+  })
+})
+
+describe('recorded Replay HTTP viewer', () => {
+  it('serves receiver-scoped history/media and selection without live or execution permissions', async () => {
+    const h = harness({ recorded: true, cancel: true })
+    const { payload, bytes } = recordedFixture()
+    const access = await h.host.openRecorded(payload.receiving, h.owner)
+    const boot = await http(access.url)
+    expect(boot.status).toBe(303)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(access.url).origin
+    const get = (path: string): ReturnType<typeof http> =>
+      http(origin + path, { headers: { cookie } })
+    const post = (path: string, body: unknown): ReturnType<typeof http> =>
+      http(origin + path, {
+        method: 'POST',
+        headers: { cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    expect(JSON.parse((await get('/api/context')).body)).toMatchObject({
+      mode: 'recorded',
+      target: payload.receiving,
+      canInteract: false,
+      canCancel: false,
+      canReadArtifacts: true
+    })
+    expect(JSON.parse((await get('/api/recording')).body)).toEqual(payload)
+    expect((await get('/api/recording/media?mediaKey=foreign')).status).toBe(404)
+    const media = await get('/api/recording/media?mediaKey=export-a')
+    expect(media.status).toBe(200)
+    expect(media.body).toBe(bytes.toString())
+    expect(media.headers['content-disposition']).toContain('attachment')
+    expect(media.headers['content-security-policy']).toContain('sandbox')
+    const selection = await post('/api/recording/select', { stepKey: 'observation-0' })
+    expect(selection.status).toBe(200)
+    expect(await h.viewers.recordingSelection(access.viewerId, { caller: h.owner })).toEqual(
+      JSON.parse(selection.body)
+    )
+    expect(
+      (await post('/api/recording/select', { stepKey: 'observation-0', target: scope })).status
+    ).toBe(400)
+    for (const path of [
+      '/api/snapshot',
+      '/api/history',
+      '/api/artifact?versionId=receiver-version'
+    ])
+      expect((await get(path)).status).toBe(403)
+    for (const path of ['/api/project-view', '/api/cancel'])
+      expect((await post(path, { confirmed: true })).status).toBe(403)
+    expect(h.projectOpen).not.toHaveBeenCalled()
+    expect(h.cancel).not.toHaveBeenCalled()
+    expect(h.readArtifact).not.toHaveBeenCalled()
+    expect((await http(access.url)).status).toBe(401)
+    h.setAuthorized(false)
+    await expect(get('/api/recording')).resolves.toMatchObject({ status: 401 })
+  })
+})

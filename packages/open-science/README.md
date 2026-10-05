@@ -276,6 +276,83 @@ capabilities cannot be supplied through this API. The first supported sandbox is
 callers are rejected. Optional local HTTP service adaptation uses a managed Unix socket and does
 not expose a public TCP endpoint.
 
+## Observe an existing research run
+
+`client.observations` opens a scoped Replay viewer for existing work. Opening a viewer does not
+start a Run, create a Session, rerun an experiment, or open a browser automatically. Use an exact
+`operationId` returned by `execution.execute`, or an exact `executionInvocationId` or `runId`;
+the application never guesses the latest Run in a Session.
+
+```js
+const viewer = await client.observations.open({
+  target: { ...scope, operationId: operation.operationId },
+  allowInteraction: false,
+  allowCancel: false
+})
+console.log(viewer.url) // Open this local URL in Codex's browser panel or a browser.
+const snapshot = await client.observations.snapshot({ viewerId: viewer.viewerId })
+const update = await client.observations.changes({
+  viewerId: viewer.viewerId,
+  cursor: snapshot.cursor
+})
+if (update.kind === 'resync') {
+  console.log(update.snapshot) // Replace the previous snapshot after reconnecting or cursor expiry.
+} else {
+  console.log(update.changes) // Ordered revisions; do not invent progress between observations.
+}
+// The viewer's “Ask about this step” selection is available to this same authenticated SDK caller.
+const selected = await client.observations.selection({ viewerId: viewer.viewerId })
+if (selected) console.log(selected.snapshot)
+// Revoke viewing access when finished. The underlying experiment continues.
+await client.observations.revoke({ viewerId: viewer.viewerId })
+```
+
+`open` accepts only `target`, `allowInteraction`, and `allowCancel`. Both permissions default to
+false. Interactive project controls may change the running experiment and require explicit
+`allowInteraction: true`; the viewer's stop control requires `allowCancel: true` separately.
+Pausing Replay or revoking a viewer does not pause or cancel the experiment. An aborted or timed-out
+SDK request only stops waiting. Use the explicit execution cancellation API when stopping work is
+intended.
+
+`history` returns the viewer's bounded retained observations with `coverage: 'process-local'` and a
+`truncated` indicator. This is sampled evidence, not a claim that every event before opening the
+viewer was recorded. `select({ viewerId, cursor, stepId })` freezes an actually retained step; an
+expired cursor must be refreshed, never silently substituted with the latest output. `selection`
+returns that frozen snapshot or `null`, so Codex can discuss the exact selected log cutoff and
+Artifact Versions. Different viewers retain independent selections.
+
+All methods use the authenticated local service and the viewer's original caller identity and
+authorization. Viewing links and browser grants expire; reopen a viewer after expiry or application
+restart. Keep its `viewerId` while observing, but do not save its temporary URL in research Artifacts
+or `.science` files. Saved process records and media are separate ordinary Artifacts.
+
+A managed command can declare its project Web interface without changing the package protocol:
+
+```js
+const projectOperation = await client.execution.execute({
+  ...scope,
+  environmentId: environment.environmentId,
+  requestId: 'interactive-analysis-1',
+  command: '"$OPEN_SCIENCE_NODE" "$OPEN_SCIENCE_INPUT_DIR/server.mjs"',
+  timeoutMs: 120_000,
+  localServicePort: 8080,
+  projectView: { title: 'Experiment controls', entryPath: '/' }
+})
+const interactiveViewer = await client.observations.open({
+  target: { ...scope, operationId: projectOperation.operationId },
+  allowInteraction: true,
+  allowCancel: true
+})
+console.log(interactiveViewer.url)
+```
+
+The prepared project must actually provide the declared local service; this declaration does not
+install dependencies or create a server. `projectView` requires `localServicePort >= 1024` and accepts
+`title`, `entryPath`, optional project-specific `allowedRequestHeaders`, `webSocketProtocols`, and
+explicit per-run `adaptFrameAncestors`. The application owns routing, credentials and service
+lifetime; these cannot be supplied as project-view options. A closed Run's page is not a historical
+capture of that Run.
+
 ## Local `.science` package transfers
 
 `client.packages` uses explicit file paths on the receiving local machine. It shares the desktop
@@ -317,3 +394,76 @@ Export requires a new destination filename and never overwrites an existing file
 content checks remain enforced. A successful transfer can return `cleanupPending: true` when its
 publication succeeded but private staging cleanup must be retried. Remote callers cannot use host
 file paths. These methods do not open desktop dialogs or weaken desktop command restrictions.
+
+
+### Saved Replay observations
+
+Set `recordObservation: true` on `execution.execute` to capture bounded process observations as
+ordinary Artifacts. This option is independent of `projectView`; command-line projects can record
+without a Web service. Opening or closing a viewer does not start or stop recording or execution.
+Execution, capture, and Artifact publication have separate outcomes. Missing captures are not
+reconstructed from the current project page.
+
+After publication, or after importing the result `.science`, open the receiving Artifact Version:
+
+```js
+const recorded = await client.observations.openRecorded({
+  target: { projectId, sessionId, artifactId, versionId }
+})
+// Open recorded.url in the host's ordinary browser pane.
+const evidence = await client.observations.recording({ viewerId: recorded.viewerId })
+const selected = await client.observations.recordingSelection({ viewerId: recorded.viewerId })
+```
+
+The browser's Ask action freezes an exact recorded step for the creating SDK caller. Copying that
+reference does not automatically send a message to Codex. Source IDs identify author evidence only;
+the current receiving Artifact/Version controls reads. This uses ordinary Artifact bytes and does
+not add mandatory `.science` entries or change native recipes.
+
+### Read current captured images from Codex or another local agent
+
+`observations.captures` lists images already captured for the active Run. It does not take a new
+picture, start work, or create a Session. A viewer needs its existing read authorization; creating
+images separately requires `allowCapture: true` and an available capture capability. External
+agents can request declared project exports. Host screenshots require an authorized Electron host
+and are advertised by `captureOptions`, rather than assumed available in every browser.
+
+```js
+import { createHash } from 'node:crypto'
+
+const frames = await client.observations.captures({ viewerId: viewer.viewerId })
+const frame = frames.at(-1)
+if (frame) {
+  const chunks = []
+  let offset = 0
+  for (;;) {
+    const chunk = await client.observations.captureContent({
+      viewerId: viewer.viewerId,
+      captureId: frame.captureId,
+      offset,
+      length: 1048576
+    })
+    if (chunk.checksum !== frame.checksum || chunk.sizeBytes !== frame.sizeBytes)
+      throw new Error('Captured image identity changed')
+    chunks.push(Buffer.from(chunk.dataBase64, 'base64'))
+    if (chunk.nextOffset === undefined) break
+    offset = chunk.nextOffset
+  }
+  const image = Buffer.concat(chunks)
+  if (image.length !== frame.sizeBytes || createHash('sha256').update(image).digest('hex') !== frame.checksum)
+    throw new Error('Captured image verification failed')
+  // The agent can now inspect or display these verified bytes using its own image tools.
+}
+```
+
+Each chunk defaults to, and cannot exceed, 1 MiB. `checksum` and `sizeBytes` describe the entire
+image; `offset` and `nextOffset` describe byte positions. Every read rechecks viewer authorization.
+Only `viewerId` and `captureId` identify content; URLs, paths, alternative scopes and producer IDs
+are not accepted. This live cache is released when the Run ends. After publication, read the saved
+Artifact Version through the recorded observation workflow instead. `awaiting-publication` means
+the ordinary Artifact has been saved but its owning turn has not published it yet.
+
+`capture` returns an `ObservationViewerCapture`. Its optional `viewerEvidence` is an explicit
+association with the initiating viewer's real observation, independent of the recording's private
+`stepKey`; other viewers' cursors must not be equated. `capture.startedAt` and `finishedAt` record
+actual acquisition time, while an unchanged observation may retain an earlier `observedAt`.

@@ -1077,35 +1077,35 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   id: 'host.managedExecution',
   path: 'host.managedExecution',
   aliases: ['managedExecution'],
-  summary: 'Prepare, run and collect materials.',
+  summary: 'Managed research materials.',
   callForms: [
-    { signature: 'await host.managedExecution.runtimes()', accepts: 'no_arguments' },
+    { signature: 'host.managedExecution.runtimes()', accepts: 'no_arguments' },
     {
-      signature: 'await host.managedExecution.inspectMaterials(options)',
+      signature: 'host.managedExecution.inspectMaterials(options)',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.prepare(options)',
+      signature: 'host.managedExecution.prepare(options)',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.execute(options)',
+      signature: 'host.managedExecution.execute(options)',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.getEnvironment({ environmentId })',
+      signature: 'host.managedExecution.getEnvironment({ environmentId })',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.releaseEnvironment({ environmentId })',
+      signature: 'host.managedExecution.releaseEnvironment({ environmentId })',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.collectOutputs(options)',
+      signature: 'host.managedExecution.collectOutputs(options)',
       accepts: 'options'
     },
     {
-      signature: 'await host.managedExecution.discardOutputs(options)',
+      signature: 'host.managedExecution.discardOutputs(options)',
       accepts: 'options'
     }
   ],
@@ -1127,13 +1127,13 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
         name: 'collectionId',
         type: 'string',
         required: false,
-        description: 'collectOutputs/discardOutputs: getEnvironment.pendingCollection.collectionId.'
+        description: 'getEnvironment.pendingCollection.collectionId.'
       },
       {
         name: 'requestId',
         type: 'string',
         required: false,
-        description: 'Stable identity for prepare/execute/collectOutputs.'
+        description: 'prepare/execute/collectOutputs: stable retry ID.'
       },
       {
         name: 'sourceIdentity',
@@ -1152,20 +1152,19 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
         type: 'object',
         required: false,
         description:
-          'prepare: {files:[{versionId,restorePath}]} or {descriptorVersionId,materialKeys,materialVersions?}; relative paths; materialVersions maps keys to Version IDs.'
+          'prepare: {files:[{versionId,restorePath}]} or {descriptorVersionId,materialKeys,materialVersions?}; paths relative; versions by key.'
       },
       {
         name: 'versionIds',
         type: 'string[]',
         required: false,
-        description: 'Source Versions; inspection also accepts descriptorVersionId.'
+        description: 'inspect: versionIds or descriptorVersionId.'
       },
       {
         name: 'outputs',
         type: 'object[]',
         required: false,
-        description:
-          'execute: [{path,filename,contentType?,optional?}]; relative output paths; default [].'
+        description: 'execute: [{path,filename,contentType?,optional?}]; relative paths.'
       },
       {
         name: 'timeoutMs',
@@ -1177,7 +1176,19 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
         name: 'localServicePort',
         type: 'integer',
         required: false,
-        description: 'execute: managed loopback HTTP port (1–65535).'
+        description: 'execute: managed port, 1–65535.'
+      },
+      {
+        name: 'recordObservation',
+        type: 'boolean',
+        required: false,
+        description: 'execute: save process records; default false.'
+      },
+      {
+        name: 'projectView',
+        type: 'object',
+        required: false,
+        description: 'execute: {title,entryPath?}; relative Web entry, localServicePort >=1024.'
       },
       {
         name: 'command',
@@ -1191,27 +1202,27 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   returns: {
     type: 'object',
     description:
-      'runtimes: { available, runtimes, diagnostics?: { nativeServiceSupported, issues: [{ code, message, action }] } }.'
+      'runtimes: {available,runtimes,diagnostics?:{nativeServiceSupported,issues:[{code, message, action}]}}.'
   },
   constraints: [
-    'Active Main turn; does not create another Session or call another model.',
-    'Inspect materials; explain missing inputs/changed conditions; use returned IDs.',
+    'Main turn; does not create another Session/model.',
+    'Inspect; use returned IDs; explain missing inputs/changed conditions.',
     'macOS; existing Node >=22. Inputs: OPEN_SCIENCE_INPUT_DIR; outputs: OPEN_SCIENCE_OUTPUT_DIR.',
-    'Node found is not plan readiness; explain diagnostics. No auto-install or host-terminal fallback.',
-    'Stop turn to cancel. collectOutputs never reruns the command; if publication is pending, finish/recover the original turn.',
-    'releaseEnvironment preserves pending outputs; requested cleanup completes after all exact Versions and the receipt publish. Only explicit discardOutputs abandons them.',
-    'Same-turn output versionId: host.artifactPath via producer authority; ordinary catalog stays published-only.',
+    'Node found is not plan readiness. No installs/host-terminal fallback.',
+    'Stop turn to cancel. collectOutputs never reruns the command; finish/recover the original turn for publication.',
+    'releaseEnvironment preserves pending outputs until all exact Versions and the receipt publish; explicit discardOutputs abandons them.',
+    'Same-turn reads: host.artifactPath via producer authority; ordinary catalog stays published-only.',
     'Never supply provenance, recoveryAuthority or writeAttempt.'
   ],
   examples: [],
   backgroundSafety: 'unsafe',
-  backgroundSafetyReason: 'Active foreground Artifact turn.',
+  backgroundSafetyReason: 'Main Artifact turn.',
   resolveAvailability: ({ capabilities }) =>
     capabilities.managedExecution
       ? { status: 'available' }
       : {
           status: 'unavailable',
-          reason: 'Managed execution requires an active Main turn and configured service.'
+          reason: 'Active Main turn/service required.'
         }
 }
 

@@ -21,5 +21,14 @@
   "src/main/pdf-annotations/native-import-worker-entry.ts": [
     "src/main/pdf-annotations/native-import.ts"
   ],
-  "src/main/session-diagnostics/worker-entry.ts": ["src/main/ipc.ts"]
+  "src/main/session-diagnostics/worker-entry.ts": ["src/main/ipc.ts"],
+  "src/renderer/replay-viewer/main.tsx": ["src/renderer/replay-viewer/index.html"],
+  "src/renderer/replay-viewer/index.html": ["vite.replay-viewer.config.ts"],
+  "vite.replay-viewer.config.ts": ["src/main/replay-viewer/assets.ts"],
+  "src/main/notebook/node-local-service-preload.mjs": [
+    "src/main/notebook/managed-research-environment.ts"
+  ],
+  "src/main/run-observation/electron-capture.ts": [
+    "src/main/run-observation/electron-capture.integration.test.ts"
+  ]
 }

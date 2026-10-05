@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -11,12 +11,27 @@ import {
   managedCollectionReferenceSchema,
   managedOutputSelectionSchema,
   managedOperationReferenceSchema,
+  managedObservationResultSchema,
   prepareManagedEnvironmentRequestSchema,
   type CreateManagedSessionRequest,
   type ManagedRuntimeDiagnosticCode,
   type ManagedRuntimeDiagnostics
 } from '../../shared/managed-execution'
-import type { NotebookRunInputFile } from '../../shared/notebook'
+import type { NotebookRunInputFile, NotebookRunRecord } from '../../shared/notebook'
+import type { RunObservationTarget } from '../../shared/run-observation'
+import type { RunObservationRecordingStatus } from '../../shared/run-observation-recording-status'
+import type {
+  RunObservationRecorder,
+  RunObservationRecordingHandle
+} from '../run-observation/recorder'
+import { ManagedRunObservationCoordinator } from '../run-observation/managed-coordinator'
+import type { ArtifactVersionDescriptor } from '../../shared/artifact-provenance'
+import {
+  runtimeViewLaunchSchema,
+  type RuntimeViewLaunch,
+  type RuntimeViewScope
+} from '../../shared/runtime-view'
+import type { ManagedServiceProof, ManagedShellOutput } from './managed-shell-execution'
 import type { NotebookRunRepository } from './repository'
 import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
 import { MAX_ARTIFACT_VERSION_DESCRIPTOR_IDS } from '../../shared/artifacts'
@@ -29,6 +44,7 @@ import {
 import { inspectResearchMaterials, type ResearchMaterialAuthority } from './research-materials'
 import {
   ManagedEnvironmentCancelledError,
+  type ManagedEnvironmentExecutionContext,
   type ManagedResearchEnvironment,
   type ManagedResearchEnvironmentOwner,
   type ManagedResearchRuntime
@@ -57,6 +73,7 @@ export type ManagedExecutionTurnContext = Pick<
   | 'provenanceContext'
   | 'recordRun'
   | 'saveOutput'
+  | 'saveAuxiliaryOutput'
   | 'recoverOutput'
 > & {
   /** Exact Main control invocation, present only when borrowing an active Agent turn. */
@@ -72,8 +89,9 @@ const resultSchema = z
     runId: z.string(),
     status: z.enum(['completed', 'failed', 'cancelled']),
     exitCode: z.number().int().nullable(),
-    outputs: z.array(z.object({ filename: z.string(), versionId: z.string() }).strict()).max(101),
-    missingOptionalOutputs: z.array(z.string()).max(100)
+    outputs: z.array(z.object({ filename: z.string(), versionId: z.string() }).strict()).max(102),
+    missingOptionalOutputs: z.array(z.string()).max(100),
+    observation: managedObservationResultSchema.optional()
   })
   .strict()
 export type ManagedExecutionResult = z.infer<typeof resultSchema>
@@ -125,12 +143,63 @@ const journalSchema = z
     sessionId: z.string(),
     operationId: z.string(),
     requestId: z.string(),
+    projectView: runtimeViewLaunchSchema.optional(),
+    recordObservation: z.boolean().optional(),
+    observation: managedObservationResultSchema.optional(),
     state: z.enum(['running', 'awaiting-publication', 'completed', 'failed']),
     collection: collectionSchema.optional(),
     result: resultSchema.optional()
   })
   .strict()
 type Journal = z.infer<typeof journalSchema>
+
+const inspectionTargetSchema = z
+  .object({
+    projectId: identity,
+    sessionId: identity,
+    operationId: identity.optional(),
+    executionInvocationId: identity.optional(),
+    runId: identity.optional()
+  })
+  .strict()
+  .refine((value) => Boolean(value.operationId || value.executionInvocationId || value.runId))
+
+export type ManagedExecutionInspection = {
+  identity: {
+    projectId: string
+    sessionId: string
+    operationId: string
+    executionInvocationId: string
+    environmentId?: string
+    runId?: string
+  }
+  requestId: string
+  state: Journal['state']
+  run: NotebookRunRecord | null
+  artifacts: ArtifactVersionDescriptor[]
+  projectView?: RuntimeViewLaunch
+  /** Main-private redaction inputs, never a public response. */
+  secrets: string[]
+}
+
+export type ManagedServiceRegistration = {
+  scope: RuntimeViewScope
+  declaration: RuntimeViewLaunch
+  socketPath: string
+  proof: ManagedServiceProof
+  logicalPort: number
+  signal: AbortSignal
+}
+
+export type ManagedObservationMediaRegistration = {
+  target: Required<RunObservationTarget>
+  generationId: string
+  recording: RunObservationRecordingHandle
+  outputs: z.output<typeof managedOutputSelectionSchema>[]
+  outputAuthority: ManagedOutputAuthority
+  saveAuxiliaryOutput: NonNullable<ManagedExecutionTurnContext['saveAuxiliaryOutput']>
+  signal: AbortSignal
+}
 
 export type ManagedExecutionServiceDependencies = {
   dataRoot: string
@@ -144,10 +213,16 @@ export type ManagedExecutionServiceDependencies = {
     | 'discardCollection'
     | 'acknowledgeCollection'
   >
-  artifacts: Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'>
+  artifacts: Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'> &
+    Partial<Pick<ArtifactProvenanceRepository, 'replayVersion'>>
+  /** Optional independent Main capture; enabled only by the recordObservation request option. */
+  observations?: Pick<RunObservationRecorder, 'start' | 'load' | 'markPublished'>
   notebooks: Pick<NotebookRunRepository, 'readSessionDocuments'>
   operations: Pick<SessionOperationOwner, 'start' | 'get' | 'wait' | 'cancel'>
   runtime: Pick<NotebookRuntimeService, 'executeManagedShell' | 'confirmManagedShellCleanup'>
+  /** Optional Main integration; omitted for existing non-interactive executions. */
+  registerProjectService?(service: ManagedServiceRegistration): () => void
+  registerObservationMedia?(input: ManagedObservationMediaRegistration): { close(): Promise<void> }
   runtimes: {
     discover(): Promise<{
       runtimes: Array<{ runtimeId: string; runtime: ManagedResearchRuntime }>
@@ -176,6 +251,12 @@ export type ManagedExecutionServiceDependencies = {
 }
 
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
+const observationTarget = (journal: Journal): RunObservationTarget => ({
+  projectId: journal.projectId,
+  sessionId: journal.sessionId,
+  operationId: journal.operationId,
+  executionInvocationId: 'managed-' + journal.key
+})
 const publicRuntime = (
   runtime: ManagedResearchRuntime
 ): Omit<ManagedResearchRuntime, 'executable' | 'readOnlyRoots'> => {
@@ -261,6 +342,16 @@ const publicEnvironment = (receipt: ManagedResearchEnvironment): unknown => ({
 
 /** Shared execution core. Internal tools supply their current turn; external calls admit one. */
 export class ManagedExecutionService {
+  private readonly liveOutput = new Map<
+    string,
+    {
+      runId?: string
+      stdout: string
+      stderr: string
+      truncated: boolean
+      secrets: string[]
+    }
+  >()
   private readonly publicationCandidates = new Map<
     string,
     { projectId: string; sessionId: string }
@@ -271,7 +362,179 @@ export class ManagedExecutionService {
     { fingerprint: string; completion: Promise<ManagedExecutionResult> }
   >()
 
-  constructor(private readonly dependencies: ManagedExecutionServiceDependencies) {}
+  private readonly observationCoordinator: ManagedRunObservationCoordinator
+
+  constructor(private readonly dependencies: ManagedExecutionServiceDependencies) {
+    this.observationCoordinator = new ManagedRunObservationCoordinator({
+      dataRoot: dependencies.dataRoot,
+      artifacts: dependencies.artifacts,
+      recorder: () => dependencies.observations
+    })
+  }
+
+  /** Read-only exact admission lookup. No executor, Session, environment or process is created. */
+  async inspectExecution(value: unknown): Promise<ManagedExecutionInspection | undefined> {
+    const target = inspectionTargetSchema.parse(value)
+    const runs = (
+      await this.dependencies.notebooks.readSessionDocuments(target.projectId, target.sessionId)
+    ).flatMap((document) => document.runs)
+    let invocation = target.executionInvocationId
+    if (target.runId) {
+      const selected = runs.filter((run) => run.runId === target.runId)
+      if (selected.length !== 1 || !selected[0].executionInvocationId) return undefined
+      if (invocation && selected[0].executionInvocationId !== invocation) return undefined
+      invocation = selected[0].executionInvocationId
+    }
+    let keys: string[]
+    if (invocation) {
+      if (!/^managed-[a-f0-9]{64}$/.test(invocation)) return undefined
+      keys = [invocation.slice('managed-'.length)]
+    } else {
+      let names: string[]
+      try {
+        names = await readdir(join(this.dependencies.dataRoot, 'managed-execution-requests'))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+        throw error
+      }
+      keys = names
+        .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
+        .map((name) => name.slice(0, -5))
+      if (keys.length > 10000)
+        throw new Error('Select an exact execution invocation to inspect this Run.')
+    }
+    const candidates: Journal[] = []
+    for (const key of keys) {
+      const journal = await this.readJournal(key)
+      if (
+        journal &&
+        journal.projectId === target.projectId &&
+        journal.sessionId === target.sessionId &&
+        (!target.operationId || target.operationId === journal.operationId)
+      )
+        candidates.push(journal)
+    }
+    if (candidates.length > 1)
+      throw new Error('This operation contains multiple executions. Select a Run or invocation.')
+    const journal = candidates[0]
+    if (!journal) return undefined
+    const executionInvocationId = 'managed-' + journal.key
+    const matches = runs.filter((run) => run.executionInvocationId === executionInvocationId)
+    if (matches.length > 1) throw new Error('The execution has ambiguous Notebook Run evidence.')
+    let run = matches[0] ? structuredClone(matches[0]) : null
+    const live = this.liveOutput.get(journal.key)
+    if (run && live?.runId === run.runId && ['queued', 'running'].includes(run.status)) {
+      run = {
+        ...run,
+        text: { ...run.text, stdout: live.stdout, stderr: live.stderr },
+        truncated: run.truncated || live.truncated
+      }
+    }
+    const artifacts: ArtifactVersionDescriptor[] = []
+    const outputs = journal.result?.outputs ?? []
+    for (let offset = 0; offset < outputs.length; offset += MAX_ARTIFACT_VERSION_DESCRIPTOR_IDS) {
+      const batch = outputs.slice(offset, offset + MAX_ARTIFACT_VERSION_DESCRIPTOR_IDS)
+      const versions = await this.dependencies.artifacts.resolveVersionDescriptors({
+        projectId: target.projectId,
+        appSessionId: target.sessionId,
+        versionIds: batch.map((output) => output.versionId)
+      })
+      artifacts.push(
+        ...versions.filter(
+          (version) =>
+            version.projectId === target.projectId &&
+            version.sessionId === target.sessionId &&
+            version.state === 'finalized' &&
+            version.isPublished === true &&
+            batch.some(
+              (output) => output.versionId === version.versionId && output.filename === version.name
+            )
+        )
+      )
+    }
+    return {
+      identity: {
+        projectId: journal.projectId,
+        sessionId: journal.sessionId,
+        operationId: journal.operationId,
+        executionInvocationId,
+        ...(journal.collection ? { environmentId: journal.collection.environmentId } : {}),
+        ...(run ? { runId: run.runId } : {})
+      },
+      requestId: journal.requestId,
+      state: journal.state,
+      run,
+      artifacts,
+      ...(journal.projectView ? { projectView: journal.projectView } : {}),
+      secrets: [...(live?.secrets ?? [])]
+    }
+  }
+
+  /** Status never publishes, restarts recording or creates an execution. */
+  async recordingStatus(value: unknown): Promise<RunObservationRecordingStatus> {
+    const target = inspectionTargetSchema.parse(value)
+    const inspected = await this.inspectExecution(target)
+    if (!inspected) throw new Error('The exact managed execution is unavailable.')
+    const journal = await this.readJournal(inspected.identity.executionInvocationId.slice(8))
+    if (
+      !journal ||
+      journal.projectId !== inspected.identity.projectId ||
+      journal.sessionId !== inspected.identity.sessionId ||
+      journal.operationId !== inspected.identity.operationId
+    )
+      throw new Error('The recorded execution identity is unavailable.')
+    if (!journal.recordObservation) return { target, state: 'not-recorded' }
+    // Preserve the caller's validated selector in the response. Recorder storage uses its own
+    // canonical admission target; adding/removing selectors here would invalidate the viewer scope.
+    const recorded = await this.dependencies.observations?.load(observationTarget(journal))
+    const publication = recorded?.publication
+    const versionId = publication?.state !== 'unpublished' ? publication?.versionId : undefined
+    let archive: RunObservationRecordingStatus['archive']
+    if (versionId && publication && publication.state !== 'unpublished') {
+      const versions = await this.dependencies.artifacts.resolveVersionDescriptors({
+        projectId: target.projectId,
+        appSessionId: target.sessionId,
+        versionIds: [versionId]
+      })
+      const exact = versions.filter(
+        (version) =>
+          version.versionId === versionId &&
+          version.projectId === target.projectId &&
+          version.sessionId === target.sessionId &&
+          (!publication.artifactId || version.artifactId === publication.artifactId) &&
+          version.checksum === publication.checksum &&
+          version.size === publication.sizeBytes &&
+          version.state === 'finalized' &&
+          version.isPublished === true
+      )
+      if (exact.length === 1)
+        archive = {
+          projectId: target.projectId,
+          sessionId: target.sessionId,
+          artifactId: exact[0].artifactId,
+          versionId
+        }
+    }
+    const capacityLimit = recorded?.capacityLimit ?? recorded?.archive?.coverage.capacityLimit
+    const state: RunObservationRecordingStatus['state'] = archive
+      ? 'saved'
+      : capacityLimit
+        ? 'capacity'
+        : recorded?.status === 'recording' && !recorded.recovered
+          ? 'recording'
+          : journal.observation?.status === 'failed' ||
+              journal.observation?.status === 'unavailable'
+            ? 'failed'
+            : !recorded && journal.observation?.status === 'recording'
+              ? 'recording'
+              : 'saving'
+    return {
+      target,
+      state,
+      ...(archive ? { archive } : {}),
+      ...(capacityLimit ? { capacityLimit } : {})
+    }
+  }
 
   async runtimes(): Promise<{
     available: boolean
@@ -367,6 +630,7 @@ export class ManagedExecutionService {
 
   /** The existing Artifact publication hook is a hint; exact durable Versions remain authority. */
   async reconcilePublishedOutputs(scope?: { projectId: string; sessionId: string }): Promise<void> {
+    await this.observationCoordinator.reconcilePublished(scope)
     if (!scope) {
       let names: string[]
       try {
@@ -424,7 +688,17 @@ export class ManagedExecutionService {
   private async confirmPublishedCollection(journal: Journal): Promise<boolean> {
     if (!journal.result || !journal.collection || journal.collection.discarded) return false
     this.publicationCandidates.set(journal.key, journal)
-    const outputs = journal.result.outputs
+    await this.refreshObservation(journal)
+    // The original Run owns its output retention fence. Optional capture owns a separate durable
+    // publication receipt, so a capture failure cannot retain the execution environment forever.
+    const outputs = journal.result.outputs.filter(
+      (output) =>
+        !(
+          journal.recordObservation &&
+          output.versionId === journal.observation?.versionId &&
+          output.filename === `replay-${journal.observation.recordingId}.json`
+        )
+    )
     for (let offset = 0; offset < outputs.length; offset += MAX_ARTIFACT_VERSION_DESCRIPTOR_IDS) {
       const batch = outputs.slice(offset, offset + MAX_ARTIFACT_VERSION_DESCRIPTOR_IDS)
       const versions = await this.dependencies.artifacts.resolveVersionDescriptors({
@@ -463,6 +737,10 @@ export class ManagedExecutionService {
     const current = await this.readJournal(journal.key)
     if (current && !current.collection?.discarded) {
       current.state = 'completed'
+      if (journal.observation) {
+        current.observation = journal.observation
+        if (current.result) current.result.observation = journal.observation
+      }
       await this.writeJournal(current)
     }
     // A completed A may be queried while B is pending. Never acknowledge B using A's Versions.
@@ -519,6 +797,9 @@ export class ManagedExecutionService {
       provenanceContext: Object.freeze({ ...admittedContext.provenanceContext }),
       recordRun: admittedContext.recordRun.bind(admittedContext),
       saveOutput: admittedContext.saveOutput.bind(admittedContext),
+      ...(admittedContext.saveAuxiliaryOutput
+        ? { saveAuxiliaryOutput: admittedContext.saveAuxiliaryOutput.bind(admittedContext) }
+        : {}),
       recoverOutput: admittedContext.recoverOutput.bind(admittedContext)
     })
     if (request.projectId !== context.projectId || request.sessionId !== context.sessionId)
@@ -538,10 +819,21 @@ export class ManagedExecutionService {
       )
         throw new Error('Retained output collection requires the original Main Agent branch.')
       if (journal.result) {
-        if (await this.reconcileCollection(journal)) return journal.result
-        throw new Error(
-          'Saved outputs are awaiting publication by their original conversation turn. The environment is retained; finish or recover that turn before collecting again. No command was executed.'
-        )
+        if (!(await this.reconcileCollection(journal)))
+          throw new Error(
+            'Saved outputs are awaiting publication by their original conversation turn. The environment is retained; finish or recover that turn before collecting again. No command was executed.'
+          )
+        if (
+          journal.recordObservation &&
+          ['ready', 'pending', 'failed', 'unavailable'].includes(journal.observation?.status ?? '')
+        ) {
+          await this.publishObservation(journal, context, journal.result.outputs, true)
+          journal.result.observation = journal.observation
+          await this.writeJournal(journal)
+        }
+        // A newly saved capture is successful work in this turn. Return normally so the existing
+        // Artifact owner can finalize/publish it; its own receipt reports awaiting publication.
+        return journal.result
       }
       return this.dependencies.environments.withCollection(
         { ...request, operationId: context.operationId, signal, retainCollection: true },
@@ -692,13 +984,64 @@ export class ManagedExecutionService {
     await this.writeJournal(journal)
   }
 
+  private async publishObservation(
+    journal: Journal,
+    context: ManagedExecutionTurnContext,
+    outputs: ManagedExecutionResult['outputs'],
+    recovery: boolean,
+    handle?: RunObservationRecordingHandle
+  ): Promise<void> {
+    if (!journal.recordObservation) return
+    const files = journal.collection?.frozen?.files ?? []
+    const publication = await this.observationCoordinator.publish({
+      target: observationTarget(journal),
+      context,
+      handle,
+      recovery,
+      reservedFilenames: files.map((file) => file.filename),
+      media: files.flatMap((file) =>
+        file.versionId
+          ? [
+              {
+                mediaKey: 'output-' + digest(file.filename),
+                name: file.filename,
+                mimeType: file.contentType ?? 'application/octet-stream',
+                checksum: file.sha256,
+                sizeBytes: file.sizeBytes,
+                sourceVersionId: file.versionId,
+                stepKeys: []
+              }
+            ]
+          : []
+      )
+    })
+    journal.observation = publication.result
+    if (
+      publication.output &&
+      !outputs.some(
+        (item) =>
+          item.filename === publication.output!.filename &&
+          item.versionId === publication.output!.versionId
+      )
+    )
+      outputs.push(publication.output)
+  }
+
+  private async refreshObservation(journal: Journal): Promise<void> {
+    if (!journal.recordObservation) return
+    const current = await this.observationCoordinator.confirm(observationTarget(journal))
+    if (current) journal.observation = current
+    if (journal.result && journal.observation) journal.result.observation = journal.observation
+  }
+
   private async publishCollection(
     journal: Journal,
     context: ManagedExecutionTurnContext,
     environment: ManagedResearchEnvironment,
     authority: ManagedOutputAuthority,
     signal: AbortSignal,
-    recovery: boolean
+    recovery: boolean,
+    observationHandle?: RunObservationRecordingHandle
   ): Promise<ManagedExecutionResult> {
     const collection = journal.collection!
     const frozen = collection.frozen!
@@ -768,6 +1111,7 @@ export class ManagedExecutionService {
         outputs.push({ filename: file.filename, versionId: saved.versionId })
         await this.writeJournal(journal)
       }
+      await this.publishObservation(journal, context, outputs, recovery, observationHandle)
       const result: ManagedExecutionResult = {
         collectionId: journal.key,
         executionInvocationId: 'managed-' + journal.key,
@@ -775,7 +1119,8 @@ export class ManagedExecutionService {
         status: frozen.status,
         exitCode: frozen.exitCode,
         outputs,
-        missingOptionalOutputs: frozen.missingOptionalOutputs
+        missingOptionalOutputs: frozen.missingOptionalOutputs,
+        ...(journal.observation ? { observation: journal.observation } : {})
       }
       // This ordinary Artifact records the current collection event. Recovery never claims a new
       // producer Run and never reopens the prior Artifact turn. Earlier partial receipts remain.
@@ -819,6 +1164,8 @@ export class ManagedExecutionService {
 
   async execute(value: unknown): ReturnType<SessionOperationOwner['start']> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
+    if (request.projectView && !this.dependencies.registerProjectService)
+      throw new Error('Interactive project viewing is not available in this runtime.')
     return this.dependencies.operations.start({
       projectId: request.projectId,
       sessionId: request.sessionId,
@@ -887,6 +1234,8 @@ export class ManagedExecutionService {
     signal?: AbortSignal
   ): Promise<ManagedExecutionResult> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
+    if (request.projectView && !this.dependencies.registerProjectService)
+      throw new Error('Interactive project viewing is not available in this runtime.')
     const context: ManagedExecutionTurnContext = Object.freeze({
       operationId: admittedContext.operationId,
       executionInvocationId: admittedContext.executionInvocationId,
@@ -896,6 +1245,9 @@ export class ManagedExecutionService {
       provenanceContext: Object.freeze({ ...admittedContext.provenanceContext }),
       recordRun: admittedContext.recordRun.bind(admittedContext),
       saveOutput: admittedContext.saveOutput.bind(admittedContext),
+      ...(admittedContext.saveAuxiliaryOutput
+        ? { saveAuxiliaryOutput: admittedContext.saveAuxiliaryOutput.bind(admittedContext) }
+        : {}),
       recoverOutput: admittedContext.recoverOutput.bind(admittedContext)
     })
     if (request.projectId !== context.projectId || request.sessionId !== context.sessionId) {
@@ -936,7 +1288,10 @@ export class ManagedExecutionService {
     if (existing) {
       if (existing.fingerprint !== fingerprint)
         throw new Error('Prepared execution request conflicts with its earlier contents.')
-      if (existing.result) return existing.result
+      if (existing.result) {
+        await this.refreshObservation(existing)
+        return existing.result
+      }
       throw new Error(
         'Prepared execution was interrupted or failed. Query its environment and collect retained outputs without rerunning the command.'
       )
@@ -950,6 +1305,8 @@ export class ManagedExecutionService {
       sessionId: request.sessionId,
       operationId: context.operationId,
       requestId: request.requestId,
+      ...(request.projectView ? { projectView: request.projectView } : {}),
+      ...(request.recordObservation ? { recordObservation: true } : {}),
       state: 'running',
       collection: {
         environmentId: request.environmentId,
@@ -959,17 +1316,125 @@ export class ManagedExecutionService {
       }
     }
     await this.writeJournal(journal)
+    const proof = request.projectView
+      ? {
+          value: randomBytes(32).toString('hex'),
+          path: '/__open_science_proof_' + randomBytes(16).toString('hex')
+        }
+      : undefined
+    const generationId = randomUUID()
+    const output = {
+      stdout: '',
+      stderr: '',
+      truncated: false,
+      secrets: proof ? [proof.value, proof.path] : []
+    } as {
+      runId?: string
+      stdout: string
+      stderr: string
+      truncated: boolean
+      secrets: string[]
+    }
+    this.liveOutput.set(key, output)
+    const observeOutput = (chunk: ManagedShellOutput): void => {
+      if (this.liveOutput.get(key) !== output || (output.runId && output.runId !== chunk.runId))
+        return
+      output.runId = chunk.runId
+      const text = output[chunk.stream] + chunk.text
+      const limit = 64 * 1024
+      if (text.length <= limit) output[chunk.stream] = text
+      else {
+        const tail = text.slice(-limit)
+        const newline = tail.indexOf('\n')
+        output[chunk.stream] = newline < 0 ? '' : tail.slice(newline + 1)
+        output.truncated = true
+      }
+    }
+    let unregisterService: (() => void) | undefined
+    let observationHandle: RunObservationRecordingHandle | undefined
+    let mediaEnvironment: ManagedEnvironmentExecutionContext | undefined
+    let mediaLease: { close(): Promise<void> } | undefined
+    const closeMedia = async (): Promise<void> => {
+      const lease = mediaLease
+      mediaLease = undefined
+      // Capture is auxiliary; drain its tracked writes without replacing the Run outcome.
+      await lease?.close().catch(() => undefined)
+    }
     try {
-      return await this.dependencies.withWritableSession(request, () =>
-        this.dependencies.environments.withExecution(
+      return await this.dependencies.withWritableSession(request, async () => {
+        if (request.recordObservation) {
+          const capture = await this.observationCoordinator.begin(
+            observationTarget(journal),
+            context
+          )
+          observationHandle = capture.handle
+          journal.observation = capture.result
+          await this.writeJournal(journal).catch(() => undefined)
+        }
+        return this.dependencies.environments.withExecution(
           {
             ...request,
             executionInvocationId: 'managed-' + key,
             collectionId: key,
             retainCollection: true,
+            onOutput: observeOutput,
+            ...(proof
+              ? {
+                  serviceProof: proof,
+                  onServiceAllocated: (allocated: {
+                    runId: string
+                    socketPath: string
+                    signal: AbortSignal
+                  }): void => {
+                    unregisterService = this.dependencies.registerProjectService!({
+                      scope: {
+                        projectId: request.projectId,
+                        sessionId: request.sessionId,
+                        environmentId: request.environmentId,
+                        runId: allocated.runId,
+                        generationId
+                      },
+                      declaration: request.projectView!,
+                      socketPath: allocated.socketPath,
+                      logicalPort: request.localServicePort!,
+                      proof,
+                      signal: allocated.signal
+                    })
+                    if (
+                      observationHandle &&
+                      mediaEnvironment &&
+                      context.saveAuxiliaryOutput &&
+                      this.dependencies.registerObservationMedia
+                    ) {
+                      try {
+                        mediaLease = this.dependencies.registerObservationMedia({
+                          target: {
+                            projectId: request.projectId,
+                            sessionId: request.sessionId,
+                            operationId: context.operationId,
+                            executionInvocationId: 'managed-' + key,
+                            runId: allocated.runId
+                          },
+                          generationId,
+                          recording: observationHandle,
+                          outputs: structuredClone(request.outputs),
+                          outputAuthority: mediaEnvironment.createOutputAuthority(
+                            context.operationId
+                          ),
+                          saveAuxiliaryOutput: context.saveAuxiliaryOutput.bind(context),
+                          signal: allocated.signal
+                        })
+                      } catch {
+                        // The page and execution remain available when optional capture cannot start.
+                      }
+                    }
+                  }
+                }
+              : {}),
             signal
           },
           async (environment) => {
+            mediaEnvironment = environment
             const inputs = await this.dependencies.resolvePreparedInputs(environment.receipt)
             const executionInvocationId = 'managed-' + key
             await this.dependencies.runtime.executeManagedShell(
@@ -990,6 +1455,7 @@ export class ManagedExecutionService {
                 ? { parentControlInvocationId: context.executionInvocationId }
                 : undefined
             )
+            await closeMedia()
             const cleanup = await this.dependencies.runtime.confirmManagedShellCleanup(
               { projectId: request.projectId, sessionId: request.sessionId, executionInvocationId },
               { retry: true }
@@ -1002,6 +1468,8 @@ export class ManagedExecutionService {
               cleanup.scope.executionInvocationId !== executionInvocationId
             )
               throw new Error('Prepared execution has no verified stopped Notebook Run.')
+            unregisterService?.()
+            unregisterService = undefined
             await context.recordRun(cleanup.runId)
             const authority = environment.createOutputAuthority(context.operationId)
             await this.freezeCollection(journal, context, authority, environment.publicationSignal)
@@ -1013,11 +1481,12 @@ export class ManagedExecutionService {
               environment.receipt,
               authority,
               environment.publicationSignal,
-              false
+              false,
+              observationHandle
             )
           }
         )
-      )
+      })
     } catch (error) {
       // A durable completed result is not undone by a later resource-cleanup failure. Its pending
       // retention can be cleared through collectOutputs once the original stop is verified.
@@ -1026,6 +1495,13 @@ export class ManagedExecutionService {
         await this.writeJournal(journal)
       }
       throw error
+    } finally {
+      // Keep cleanup order independent of optional observation. Finish drains its own pending
+      // reads and freezes a truthful partial on errors; it never cancels or restarts the Run.
+      await closeMedia()
+      if (observationHandle) await this.observationCoordinator.drain(observationHandle)
+      unregisterService?.()
+      this.liveOutput.delete(key)
     }
   }
 }

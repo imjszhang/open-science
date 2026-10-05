@@ -96,6 +96,11 @@ import {
 import { readPreparedLiteratureSidecar } from './prepared-literature-sidecar'
 import { validateArtifactSaveSource } from './save-request'
 import type { NotebookDependencyAnalyzer } from '../notebook/dependency-analysis'
+import {
+  readPublishedSessionVersionsByContent,
+  type ResolvePublishedSessionVersionsByContentRequest,
+  type PublishedSessionContentVersion
+} from './session-version-content-reader'
 
 const SAFE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -1202,6 +1207,12 @@ class ArtifactProvenanceRepository {
           : []
       })
     )
+  }
+
+  resolvePublishedSessionVersionsByContent(
+    request: ResolvePublishedSessionVersionsByContentRequest
+  ): Promise<PublishedSessionContentVersion[]> {
+    return readPublishedSessionVersionsByContent(this.options, request)
   }
 
   async getVersionLiterature(

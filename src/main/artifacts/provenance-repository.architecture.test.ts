@@ -237,6 +237,7 @@ describe('Artifact Provenance repository architecture', () => {
         'reserveWrite',
         'resolveReviewerTurnFileEvidence',
         'resolveVersionDescriptors',
+        'resolvePublishedSessionVersionsByContent',
         'validateFinalizationOwnership',
         'writeAppGeneratedVersion',
         'writeCodeReconstructionCache'
@@ -517,7 +518,9 @@ describe('Artifact Provenance repository architecture', () => {
       'src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.test.tsx',
       'src/main/notebook/dependency-analysis.stdlib-replay.test.ts',
       'src/main/artifacts/resumed-finalization-ownership.test.ts',
-      'src/main/artifacts/export-filename.ts'
+      'src/main/artifacts/export-filename.ts',
+      'src/main/artifacts/session-version-content-reader.ts',
+      'src/main/artifacts/session-version-content-reader.test.ts'
     ])
     expect(module.interfacePaths).toEqual([
       'src/main/artifacts/provenance-message-snapshot.ts',
@@ -555,7 +558,8 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/artifacts/session-reproducibility-store.ts',
       'src/main/notebook/reproduction-runtime.ts',
       'src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.tsx',
-      'src/main/artifacts/ro-crate-export.ts'
+      'src/main/artifacts/ro-crate-export.ts',
+      'src/main/artifacts/session-version-content-reader.ts'
     ])
     expect(module.consumerModules).toEqual(['session_persistence'])
     expect(module.testFiles.owner).toEqual([
@@ -599,7 +603,8 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/artifacts/session-reproducibility-store.test.ts',
       'src/main/artifacts/session-reproducibility.test.ts',
       'src/main/artifacts/storage-access.context.test.ts',
-      'src/main/artifacts/resumed-finalization-ownership.test.ts'
+      'src/main/artifacts/resumed-finalization-ownership.test.ts',
+      'src/main/artifacts/session-version-content-reader.test.ts'
     ])
     expect(module.testFiles.contract).toEqual([
       'src/main/artifacts/artifact-reproducibility-ipc.test.ts',
@@ -994,7 +999,19 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/notebook/managed-nested-generation.integration.test.ts',
       'src/main/notebook/managed-execution-collection.integration.test.ts',
       'src/main/notebook/managed-output-publication.integration.test.ts',
-      'src/main/composition/artifact-surfaces.test.ts'
+      'src/main/composition/artifact-surfaces.test.ts',
+      'src/main/managed-runtime-views.integration.test.ts',
+      'src/main/replay-viewer/http-host.integration.test.ts',
+      'src/main/run-observation-external-port.test.ts',
+      'src/main/run-observation/managed-coordinator.test.ts',
+      'src/main/run-observation/recorded-reader.test.ts',
+      'src/main/runtime-view/browser-host.integration.test.ts',
+      'src/main/runtime-view/tuanzi.macos.integration.test.ts',
+      'src/renderer/replay-viewer/browser.integration.test.ts',
+      'src/main/run-observation/capture-package.integration.test.ts',
+      'src/main/notebook/managed-execution-output.test.ts',
+      'src/main/run-observation/auxiliary-output.test.ts',
+      'src/main/run-observation/media-collector.test.ts'
     ])
     expect(module.capabilityOverlays).toEqual([
       'windows_sensitive',

@@ -5065,7 +5065,7 @@ describe('managed execution HTTP API', () => {
         listArtifacts: vi.fn(),
         acquireArtifact: vi.fn(),
         releaseArtifact: vi.fn(),
-        ...(options.unavailable ? {} : { callManagedExecution: call })
+        ...(options.unavailable ? {} : { callManagedExecution: call, callRunObservation: call })
       },
       bootstrap: {
         appName: 'Open-Science',
@@ -5093,6 +5093,56 @@ describe('managed execution HTTP API', () => {
       },
       body: JSON.stringify(body)
     })
+
+  it('dispatches observation requests through the scoped local adapter without execution', async () => {
+    const { base, call, contexts } = await setup()
+    for (const method of [
+      'open',
+      'snapshot',
+      'history',
+      'changes',
+      'select',
+      'selection',
+      'revoke'
+    ]) {
+      const body = { viewerId: 'viewer-fixture' }
+      const response = await fetch(`${base}/api/v1/observations/${method}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer execution-token', 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      expect(response.status).toBe(200)
+      expect(call).toHaveBeenLastCalledWith(method, body)
+    }
+    expect(contexts.every((context) => context.location === 'local')).toBe(true)
+  })
+
+  it('keeps the observation route authenticated, local and budgeted', async () => {
+    const local = await setup({ budget: true })
+    const invoke = (base: string, body: unknown, authenticated = true): Promise<Response> =>
+      fetch(`${base}/api/v1/observations/open`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(authenticated ? { authorization: 'Bearer execution-token' } : {})
+        },
+        body: JSON.stringify(body)
+      })
+    expect((await invoke(local.base, {}, false)).status).toBe(401)
+    expect((await invoke(local.base, [])).status).toBe(400)
+    expect((await invoke(local.base, { payload: 'x'.repeat(200) })).status).toBe(413)
+    expect(local.call).not.toHaveBeenCalled()
+    const remote = await setup({ remote: true })
+    const denied = await fetch(`${remote.base}/api/v1/observations/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}'
+    })
+    expect(denied.status).toBe(403)
+    expect(remote.call).not.toHaveBeenCalled()
+    const unavailable = await setup({ unavailable: true })
+    expect((await invoke(unavailable.base, {})).status).toBe(503)
+  })
 
   const materialRequest = (
     materials: PrepareManagedEnvironmentRequest['materials']

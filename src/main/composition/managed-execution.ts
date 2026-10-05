@@ -28,6 +28,18 @@ import { augmentedPathEnv } from '../settings/shell-path'
 import { resolveDataRoot } from '../storage-root'
 import { withDataRootWrite } from '../storage/migration-state'
 import { assertResearchSessionWritable } from '../storage/session-package-state'
+import { ManagedRuntimeViews } from '../managed-runtime-views'
+import { createManagedRunObservationReader } from '../managed-run-observation'
+import { RunObservationOwner } from '../run-observation/owner'
+import { ObservationViewers } from '../run-observation/viewers'
+import { RunObservationRecorder } from '../run-observation/recorder'
+import { createRecordedObservationReader } from '../run-observation/recorded-reader'
+import { ObservationMediaCollector } from '../run-observation/media-collector'
+import { readObservationProjectExport } from '../run-observation/project-export-reader'
+import { captureElectronObservationView } from '../run-observation/electron-capture'
+import { ReplayViewerHttpHost } from '../replay-viewer/http-host'
+import { createReplayViewerAssetReader } from '../replay-viewer/assets'
+import { createRunObservationExternalPort } from '../run-observation-external-port'
 import type { composeManagedFiles } from './managed-files'
 import type { composeNotebookRuntime } from './notebook-runtime'
 import type { composeProjectLifecycle } from './project-lifecycle'
@@ -41,6 +53,8 @@ export type ManagedExecutionComposition = {
   environments: ManagedResearchEnvironmentOwner
   operations: SessionOperationOwner
   runtimeSessions: RuntimeSessionOwner
+  observationViewers: ObservationViewers
+  projectViews: ManagedRuntimeViews
   notebookLifecycle: Awaited<ReturnType<typeof composeNotebookRuntime>>['notebookLifecycle']
   getActiveSessions(): { projectId: string; sessionId: string }[]
   hold(): void
@@ -193,13 +207,64 @@ export async function composeManagedExecution({
     withProjectAvailable: (projectId, operation) =>
       archive.withProjectAvailable(projectId, operation)
   })
-  const service = new ManagedExecutionService({
+  const projectViews = new ManagedRuntimeViews()
+  const observationMedia = new ObservationMediaCollector()
+  const service: ManagedExecutionService = new ManagedExecutionService({
     artifacts: managedFiles.artifactProvenanceRepository,
     dataRoot,
     notebooks: managedFiles.notebookRepository,
     environments,
     operations,
     runtime: notebook,
+    registerProjectService: (registration) => projectViews.register(registration),
+    registerObservationMedia: (input) => {
+      const outputs = input.outputs.filter((output) => /\.(png|jpe?g|webp)$/i.test(output.filename))
+      const assertCurrent = (): void => {
+        input.signal.throwIfAborted()
+        if (closed) throw new Error('Observation capture is closed.')
+      }
+      return observationMedia.register({
+        target: input.target,
+        generationId: input.generationId,
+        recording: input.recording,
+        signal: input.signal,
+        assertCurrent,
+        projectExports: outputs.map((output) => output.filename),
+        readProjectExport: async (key, signal) => {
+          const matches = outputs.filter((output) => output.filename === key)
+          if (matches.length !== 1) throw new Error('The declared project export is unavailable.')
+          return readObservationProjectExport({
+            authority: input.outputAuthority,
+            scope: input.target,
+            path: matches[0].path,
+            signal
+          })
+        },
+        sampleCurrent: async (signal) => {
+          signal.throwIfAborted()
+          assertCurrent()
+          await input.recording.sample()
+          const current = await observationRecorder.load(input.recording.target)
+          signal.throwIfAborted()
+          assertCurrent()
+          const sample = current?.history.snapshots.at(-1)
+          if (
+            !sample ||
+            current?.status !== 'recording' ||
+            sample.run?.runId !== input.target.runId ||
+            sample.run.status !== 'running'
+          )
+            throw new Error('The current recorded Run is unavailable.')
+          return sample
+        },
+        saveAuxiliaryOutput: input.saveAuxiliaryOutput
+      })
+    },
+    observations: {
+      start: (target) => observationRecorder.start(target),
+      load: (target) => observationRecorder.load(target),
+      markPublished: (target, reference) => observationRecorder.markPublished(target, reference)
+    },
     runtimes,
     materials: (request) =>
       createResearchMaterialAuthority(
@@ -276,6 +341,222 @@ export async function composeManagedExecution({
         })
       )
   })
+  // This observer is Main-owned and independent of viewer grants/LRU. It is admitted by the
+  // existing execution turn, so never reacquire an archive gate while that turn is draining.
+  const authorizeRecording = async (target: {
+    projectId: string
+    sessionId: string
+  }): Promise<void> => {
+    if (closed || !(await sessions.readSessionSnapshot(target.projectId, target.sessionId)))
+      throw new Error('The recorded Session is unavailable.')
+  }
+  const recordingObserver = new RunObservationOwner({
+    authorize: authorizeRecording,
+    read: createManagedRunObservationReader(service)
+  })
+  const observationRecorder: RunObservationRecorder = new RunObservationRecorder({
+    dataRoot,
+    authorize: authorizeRecording,
+    read: async (target, signal) => {
+      signal.throwIfAborted()
+      const snapshot = await recordingObserver.snapshot(target, {
+        viewerId: 'main-recording-' + target.executionInvocationId
+      })
+      signal.throwIfAborted()
+      return snapshot
+    },
+    isPublished: async (target, reference) => {
+      const versions = await managedFiles.artifactProvenanceRepository.resolveVersionDescriptors({
+        projectId: target.projectId,
+        appSessionId: target.sessionId,
+        versionIds: [reference.versionId]
+      })
+      return versions.some(
+        (version) =>
+          version.projectId === target.projectId &&
+          version.sessionId === target.sessionId &&
+          version.versionId === reference.versionId &&
+          (!reference.artifactId || version.artifactId === reference.artifactId) &&
+          version.checksum === reference.checksum &&
+          version.size === reference.sizeBytes &&
+          version.state === 'finalized' &&
+          version.isPublished === true
+      )
+    }
+  })
+  const observation = new RunObservationOwner({
+    authorize: (target, viewer) => observationViewers.assertViewer(target, viewer),
+    read: createManagedRunObservationReader(service)
+  })
+  const authorizeObservationScope = async (scope: {
+    projectId: string
+    sessionId: string
+  }): Promise<void> => {
+    assertOpen(scope)
+    await archive.withSessionAvailable(scope.projectId, scope.sessionId, async () => {
+      if (!(await sessions.readSessionSnapshot(scope.projectId, scope.sessionId)))
+        throw new Error('The observed Session is unavailable.')
+    })
+    assertOpen(scope)
+  }
+  const recordedObservations = createRecordedObservationReader({
+    immutableInputAuthority: managedFiles.immutableInputAuthority,
+    projectFilesRepository: sessionAuthority.projectFilesRepository,
+    artifactProvenanceRepository: managedFiles.artifactProvenanceRepository,
+    authorizeScope: authorizeObservationScope,
+    readSourceVersionMapping: async (target) => {
+      const source = await sessions.readSessionSnapshot(target.projectId, target.sessionId)
+      const receipt = source?.packageOrigin ?? source?.forkOrigin
+      if (!receipt) return undefined
+      const origin = await sessionPackages.sessionPackageService.readOrigin({
+        projectId: target.projectId,
+        sessionId: target.sessionId
+      })
+      if (
+        origin.receiptIdentity.importId !== receipt.importId ||
+        origin.receiptIdentity.manifestChecksum !== receipt.manifestChecksum ||
+        origin.sourceManifest.source.projectId !== receipt.sourceProjectId ||
+        origin.sourceManifest.source.sessionId !== receipt.sourceSessionId ||
+        origin.identities[receipt.sourceProjectId] !== target.projectId ||
+        origin.identities[receipt.sourceSessionId] !== target.sessionId
+      )
+        throw new Error('The recorded source receipt is unavailable.')
+      return origin.identities
+    }
+  })
+  const observationViewers = new ObservationViewers({
+    observer: observation,
+    authorizeScope: authorizeObservationScope,
+    recorded: {
+      authorizeScope: authorizeObservationScope,
+      read: (target) => recordedObservations.read(target)
+    },
+    onRevoked: (viewerId) => {
+      viewerHost.closeViewer(viewerId)
+      projectViews.closeViewer(viewerId)
+    }
+  })
+  const mediaTarget = async (
+    target: import('../../shared/run-observation').RunObservationTarget
+  ): Promise<Required<import('../../shared/run-observation').RunObservationTarget>> => {
+    const inspected = await service.inspectExecution(target)
+    if (!inspected?.run || inspected.run.status !== 'running')
+      throw new Error('The observed execution is not running.')
+    return {
+      projectId: inspected.identity.projectId,
+      sessionId: inspected.identity.sessionId,
+      operationId: inspected.identity.operationId,
+      executionInvocationId: inspected.identity.executionInvocationId,
+      runId: inspected.run.runId
+    }
+  }
+  const viewerHost = new ReplayViewerHttpHost({
+    listCaptures: async (target, signal) => {
+      signal.throwIfAborted()
+      try {
+        return observationMedia.listFrames(await mediaTarget(target), {
+          assertAuthorized: () => assertOpen(target),
+          signal
+        })
+      } catch {
+        return []
+      }
+    },
+    readCapture: async (target, captureId, signal) => {
+      const frame = observationMedia.readFrame(await mediaTarget(target), captureId, {
+        assertAuthorized: () => assertOpen(target),
+        signal
+      })
+      return frame ? { body: frame.bytes, mimeType: frame.mimeType } : undefined
+    },
+    captureOptions: async (target, hostViewAvailable) => {
+      try {
+        return observationMedia.options(await mediaTarget(target), {
+          assertAuthorized: () => assertOpen(target),
+          hostViewAvailable
+        })
+      } catch {
+        return { hostView: false, projectExports: [] }
+      }
+    },
+    capture: async ({ target, request, assertAuthorized, signal, host }) => {
+      const exact = await mediaTarget(target)
+      signal.throwIfAborted()
+      assertAuthorized()
+      let created = false
+      const result = await observationMedia.capture(exact, request, {
+        assertAuthorized,
+        signal,
+        onCreated: () => {
+          created = true
+        },
+        ...(host
+          ? {
+              captureHostView: (captureSignal: AbortSignal) =>
+                captureElectronObservationView({ ...host, signal: captureSignal })
+            }
+          : {})
+      })
+      return { result, created }
+    },
+    recordingStatus: (target) => service.recordingStatus(target),
+    viewers: observationViewers,
+    projectViews,
+    readAsset: createReplayViewerAssetReader(),
+    readRecordingMedia: (target, mediaKey, signal) =>
+      recordedObservations.readMedia(target, mediaKey, signal),
+    readArtifact: async ({ target, artifact, signal }) => {
+      signal.throwIfAborted()
+      if (
+        !artifact.artifactId ||
+        !artifact.checksum ||
+        artifact.sizeBytes === undefined ||
+        artifact.sizeBytes > 16 * 1024 * 1024
+      )
+        return undefined
+      const input = await managedFiles.immutableInputAuthority.resolveVersion({
+        projectId: target.projectId,
+        sourceKind: 'artifact-version',
+        inputFileVersionId: artifact.versionId,
+        expectedSourceFileId: artifact.artifactId
+      })
+      if (
+        !input ||
+        input.sourceSessionId !== target.sessionId ||
+        input.checksum !== artifact.checksum ||
+        input.sizeBytes !== artifact.sizeBytes
+      )
+        return undefined
+      const lease = await managedFiles.immutableInputAuthority.openContent(input)
+      try {
+        signal.throwIfAborted()
+        const body = await lease.readRange(0, input.sizeBytes)
+        await lease.verifyUnchanged()
+        signal.throwIfAborted()
+        return { body, mimeType: artifact.mimeType ?? 'application/octet-stream' }
+      } finally {
+        await lease.close()
+      }
+    },
+    cancelRun: async ({ target, runId, caller, signal }) => {
+      assertOpen(target)
+      signal.throwIfAborted()
+      if (!caller.isAuthorizationCurrent() || caller.location !== 'local')
+        throw new Error('Current local authorization is required.')
+      const inspected = await service.inspectExecution({ ...target, runId })
+      signal.throwIfAborted()
+      if (!inspected || inspected.run?.runId !== runId || !caller.isAuthorizationCurrent())
+        throw new Error('The observed Run is unavailable.')
+      await withDataRootWrite(() =>
+        notebook.cancelManagedShellRun({
+          projectId: target.projectId,
+          sessionId: target.sessionId,
+          executionInvocationId: inspected.identity.executionInvocationId,
+          runId
+        })
+      )
+    }
+  })
   // Publication enrichment must drain before handoff, but cannot own a new execution or
   // hold a Session archive gate while waiting for reconciliation's own scoped admission.
   const reconcilePublishedOutputs = (scope?: SessionScope): Promise<void> =>
@@ -298,6 +579,32 @@ export async function composeManagedExecution({
     }
   }
   const external = createManagedExecutionExternalPort({ service, assertOpen, withDataRootWrite })
+  external.observation = createRunObservationExternalPort({
+    viewers: observationViewers,
+    assertOpen,
+    captureOptions: (viewerId, caller) => viewerHost.captureOptions(viewerId, caller),
+    capture: (viewerId, request, caller) => viewerHost.capture(viewerId, request, caller),
+    captures: (viewerId, caller) => viewerHost.captures(viewerId, caller),
+    captureContent: (viewerId, request, caller) =>
+      viewerHost.captureContent(viewerId, request, caller),
+    recordingStatus: async (target) => {
+      await authorizeObservationScope(target)
+      const status = await service.recordingStatus(target)
+      await authorizeObservationScope(target)
+      return status
+    },
+    openRecordedViewer: (target, caller) =>
+      viewerHost.openRecorded(
+        target,
+        caller,
+        caller.surface === 'electron' ? { desktopParent: 'file:' } : {}
+      ),
+    openViewer: (target, caller, permissions) =>
+      viewerHost.open(target, caller, {
+        ...permissions,
+        ...(caller.surface === 'electron' ? { desktopParent: 'file:' as const } : {})
+      })
+  })
   let draining: Promise<void> | undefined
   const quiesce = (): Promise<void> => {
     held = true
@@ -326,6 +633,13 @@ export async function composeManagedExecution({
     await quiesce()
     await operations.close()
     await environments.close()
+    await observationMedia.close()
+    await observationRecorder.close()
+    recordingObserver.close()
+    await observationViewers.close()
+    viewerHost.close()
+    observation.close()
+    projectViews.close()
   }
   const getActiveSessions = (): SessionScope[] => [
     ...new Map(
@@ -368,6 +682,8 @@ export async function composeManagedExecution({
     environments,
     operations,
     runtimeSessions,
+    observationViewers,
+    projectViews,
     notebookLifecycle: {
       getActiveNotebookSessions: () => [
         ...baseNotebookLifecycle.getActiveNotebookSessions(),

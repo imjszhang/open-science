@@ -77,7 +77,12 @@ describe('main-owned managed Shell capability', () => {
     expect(() =>
       createManagedShellExecutionCapability({ ...input(), cwd: `${workspace}${sep}..${sep}work` })
     ).toThrow('normalized absolute')
-    for (const key of ['OPEN_SCIENCE_SERVICE_SOCKET', 'OPEN_SCIENCE_SERVICE_PORT']) {
+    for (const key of [
+      'OPEN_SCIENCE_SERVICE_SOCKET',
+      'OPEN_SCIENCE_SERVICE_PORT',
+      'OPEN_SCIENCE_SERVICE_PROOF',
+      'OPEN_SCIENCE_SERVICE_PROOF_PATH'
+    ]) {
       expect(() =>
         createManagedShellExecutionCapability({ ...input(), environment: { [key]: 'secret' } })
       ).toThrow('execution-owned')

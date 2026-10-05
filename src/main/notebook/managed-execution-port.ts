@@ -24,6 +24,7 @@ import {
 } from './managed-execution-output'
 import type { ArtifactFile } from '../../shared/artifacts'
 import type { SessionOperationContext } from './session-operation-owner'
+import { saveAuxiliaryOutput } from '../run-observation/auxiliary-output'
 
 export const managedExecutionProvenanceSchema = z.object({
   rootFrameId: z.string().min(1),
@@ -70,6 +71,7 @@ export type ManagedExecutionContext = Pick<
   | 'provenanceContext'
   | 'recordRun'
   | 'saveOutput'
+  | 'saveAuxiliaryOutput'
   | 'recoverOutput'
 > & {
   executionInvocationId: string
@@ -234,6 +236,17 @@ export function createManagedExecutionTurnPort(dependencies: {
             })
             return saved
           }),
+        saveAuxiliaryOutput: (output) =>
+          track(() =>
+            saveAuxiliaryOutput(output, async (value) => {
+              let saved!: Awaited<ReturnType<typeof reader.saveOutput>>
+              await withWriter(async (writer) => {
+                saved = await writer.saveOutput(value)
+                return saved
+              })
+              return saved
+            })
+          ),
         recoverOutput: (output) =>
           track(async () => {
             let recovered!: ManagedExecutionRecoveredOutput

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { runtimeViewLaunchSchema } from './runtime-view'
 
 // Additive application requests, not .science fields or caller-issued execution capabilities.
 const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
@@ -90,10 +91,46 @@ export const executeManagedEnvironmentRequestSchema = managedEnvironmentReferenc
       .refine((value) => !value.includes('\0')),
     timeoutMs: z.number().int().min(1).max(600_000).default(60_000),
     localServicePort: z.number().int().min(1).max(65535).optional(),
+    projectView: runtimeViewLaunchSchema.optional(),
+    // Independent of a project Web UI; absent/false preserves existing execution behavior.
+    recordObservation: z.boolean().optional(),
     outputs: z.array(managedOutputSelectionSchema).max(100).default([]),
     description: z.string().min(1).max(16_384).optional()
   })
   .strict()
+  .refine((request) => !request.projectView || (request.localServicePort ?? 0) >= 1024, {
+    message: 'An interactive project view requires a declared local service port of 1024 or above.'
+  })
+/** Capture/publication is reported separately from the actual experiment outcome. */
+export const managedObservationResultSchema = z
+  .object({
+    status: z.enum([
+      'recording',
+      'ready',
+      'saved',
+      'published',
+      'pending',
+      'unavailable',
+      'failed'
+    ]),
+    recordingId: checksum.optional(),
+    versionId: identity.optional(),
+    warning: z
+      .enum([
+        'capture-unavailable',
+        'capture-start-failed',
+        'capture-failed',
+        'capture-empty',
+        'capture-partial',
+        'archive-save-failed',
+        'archive-recovery-pending',
+        'archive-receipt-failed'
+      ])
+      .optional()
+  })
+  .strict()
+export type ManagedObservationResult = z.infer<typeof managedObservationResultSchema>
+
 export const managedOperationReferenceSchema = managedSessionScopeSchema
   .extend({
     requestId: identity

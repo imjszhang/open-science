@@ -528,8 +528,20 @@ export type ExecuteManagedEnvironmentRequest = ManagedEnvironmentReference & {
   /** Process deadline, distinct from a request or wait deadline. Maximum 600000 ms. */
   timeoutMs?: number
   localServicePort?: number
+  /** Declare a project Web interface for this Run; requires localServicePort >= 1024. */
+  projectView?: RuntimeViewLaunch
+  /** Capture process observations independently of whether the project has a Web page. */
+  recordObservation?: boolean
   outputs?: Array<{ path: string; filename: string; contentType?: string; optional?: boolean }>
   description?: string
+}
+export type RuntimeViewLaunch = {
+  title: string
+  entryPath?: string
+  allowedRequestHeaders?: string[]
+  webSocketProtocols?: string[]
+  /** Explicit per-run framing compatibility; does not modify original research files. */
+  adaptFrameAncestors?: boolean
 }
 export type ManagedOperationReference = ManagedSessionScope & { requestId: string }
 export type ManagedRuntime = {
@@ -730,8 +742,325 @@ export type SessionPackagesClient = {
   }>
 }
 
+/** At least one exact operationId, executionInvocationId or runId is required at runtime. */
+export type RunObservationTarget = {
+  projectId: string
+  sessionId: string
+  operationId?: string
+  executionInvocationId?: string
+  runId?: string
+}
+export type RunObservationIdentity = Readonly<RunObservationTarget & { environmentId?: string }>
+export type RunObservationCursor = { epoch: string; sequence: number }
+export type RunObservationPhase =
+  | 'preparing'
+  | 'queued'
+  | 'running'
+  | 'collecting'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'timeout'
+export type RunObservationLog = Readonly<{ text: string; truncated: boolean; redacted: boolean }>
+export type RunObservationRun = Readonly<{
+  runId: string
+  executionInvocationId?: string
+  kernelKind: 'python' | 'r' | 'repl' | 'bash'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'interrupted' | 'cancelled'
+  startedAt: number
+  endedAt?: number
+  exitCode?: number | null
+  logs: Readonly<{
+    stdout: RunObservationLog
+    stderr: RunObservationLog
+    traceback: RunObservationLog
+  }>
+}>
+export type RunObservationArtifact = Readonly<{
+  artifactId?: string
+  versionId: string
+  name: string
+  mimeType?: string
+  producerRunId?: string
+  checksum?: string
+  sizeBytes?: number
+}>
+export type RunObservationSnapshot = Readonly<{
+  identity: RunObservationIdentity
+  cursor: RunObservationCursor
+  observedAt: number
+  phase: RunObservationPhase
+  stepId: string
+  run: RunObservationRun | null
+  artifacts: readonly RunObservationArtifact[]
+  artifactsTruncated: boolean
+}>
+export type RunObservationChange = Readonly<{
+  cursor: RunObservationCursor
+  observedAt: number
+  identity?: RunObservationIdentity
+  phase?: RunObservationPhase
+  stepId?: string
+  run?: RunObservationRun | null
+  artifacts?: readonly RunObservationArtifact[]
+  artifactsTruncated?: boolean
+}>
+export type RunObservationChanges =
+  | Readonly<{
+      kind: 'delta'
+      from: RunObservationCursor
+      cursor: RunObservationCursor
+      changes: readonly RunObservationChange[]
+    }>
+  | Readonly<{
+      kind: 'resync'
+      reason: 'epoch-changed' | 'cursor-expired' | 'cursor-ahead'
+      snapshot: RunObservationSnapshot
+    }>
+export type RunObservationHistory = Readonly<{
+  coverage: 'process-local'
+  truncated: boolean
+  snapshots: readonly RunObservationSnapshot[]
+}>
+export type RunObservationSelection = Readonly<{
+  selectionId: string
+  identity: RunObservationIdentity
+  cursor: RunObservationCursor
+  stepId: string
+  selectedAt: number
+  snapshot: RunObservationSnapshot
+}>
+export type OpenRunObservationRequest = {
+  target: RunObservationTarget
+  /** Defaults to false; opening a project interface may allow interactions that change a live Run. */
+  allowInteraction?: boolean
+  /** Defaults to false; independently authorizes an explicit stop control in this viewer. */
+  allowCancel?: boolean
+  /** Defaults to false; permits saving current observation images as ordinary Artifacts. */
+  allowCapture?: boolean
+}
+export type RunObservationView = Readonly<{
+  viewerId: string
+  target: RunObservationTarget
+  expiresAt: number
+  /** Short-lived local viewing URL; do not persist it with research results. */
+  url: string
+}>
+export type RunObservationViewerReference = { viewerId: string }
+/** Observes existing work; neither opening nor revoking a viewer starts or cancels a Run. */
+export type RecordedObservationTarget = {
+  projectId: string
+  sessionId: string
+  artifactId: string
+  versionId: string
+}
+export type RunObservationMediaCapture = {
+  source: 'host-view' | 'project-export'
+  association: 'current-observation'
+  startedAt: number
+  finishedAt: number
+  observedAt: number
+  width: number
+  height: number
+  reportedCapturedAt?: number
+}
+export type ObservationMediaCaptureRequest =
+  | { source: 'host-view'; idempotencyKey: string }
+  | { source: 'project-export'; exportKey: string; idempotencyKey: string }
+export type ObservationMediaCaptureOptions = { hostView: boolean; projectExports: string[] }
+export type ObservationMediaCaptureResult = {
+  captureId: string
+  recordingId: string
+  stepKey: string
+  artifactId: string
+  versionId: string
+  checksum: string
+  sizeBytes: number
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  publication: 'published' | 'awaiting-publication'
+  capture: RunObservationMediaCapture
+}
+export type ObservationViewerCapture = ObservationMediaCaptureResult & {
+  /** Explicitly bound by the viewer that initiated the capture; unrelated viewer cursors differ. */
+  viewerEvidence?: { cursor: RunObservationCursor; observedAt: number; stepId: string }
+}
+export type ObservationCapturesRequest = { viewerId: string }
+export type ObservationCaptures = ObservationViewerCapture[]
+export type ObservationCaptureContentRequest = {
+  captureId: string
+  /** Integer byte offset; defaults to zero. */
+  offset?: number
+  /** Integer byte count from 1 to 1048576; defaults to 1048576. */
+  length?: number
+}
+export type ObservationViewerCaptureContentRequest = ObservationCaptureContentRequest & {
+  viewerId: string
+}
+export type ObservationCaptureContent = {
+  captureId: string
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  /** SHA-256 and byte size of the complete captured image. */
+  checksum: string
+  sizeBytes: number
+  offset: number
+  dataBase64: string
+  /** Absent after the last chunk. */
+  nextOffset?: number
+}
+export type RunObservationArchiveMedia = {
+  mediaKey: string
+  name: string
+  mimeType: string
+  checksum: string
+  sizeBytes: number
+  sourceVersionId?: string
+  stepKeys: string[]
+  capture?: RunObservationMediaCapture
+}
+export type RunObservationRecordingStatus = {
+  target: RunObservationTarget
+  state: 'not-recorded' | 'recording' | 'saving' | 'saved' | 'failed' | 'capacity'
+  archive?: RecordedObservationTarget
+  capacityLimit?: 'snapshots' | 'record-bytes' | 'global-bytes'
+}
+export type RunObservationArchive = {
+  format: 'open-science-run-observation'
+  version: 1
+  recordingId: string
+  capturedAt: number
+  coverage: {
+    kind: 'sampled-observations'
+    includesPreObservationHistory: false
+    firstObservedAt: number
+    lastObservedAt: number
+    droppedEarlierObservations: boolean
+    terminalRunObserved: boolean
+    stopReason:
+      'run-ended' | 'viewer-closed' | 'app-exit' | 'capture-failed' | 'manual' | 'capacity'
+    capacityLimit?: 'snapshots' | 'record-bytes' | 'global-bytes'
+    logTruncation: boolean
+    redactedContent: boolean
+    samplingFailures?: number
+    unavailableSamples?: number
+    sourceCursorGaps?: number
+    missingMediaKeys: string[]
+  }
+  records: Array<{
+    stepKey: string
+    observedAt: number
+    phase: RunObservationPhase
+    sourceEvidence: {
+      identity: RunObservationIdentity
+      cursor: RunObservationCursor
+      stepId: string
+    }
+    run: Omit<RunObservationRun, 'runId' | 'executionInvocationId'> | null
+    artifactEvidence: Array<
+      Omit<RunObservationArtifact, 'artifactId' | 'versionId' | 'producerRunId'> & {
+        sourceArtifactId?: string
+        sourceVersionId: string
+        sourceProducerRunId?: string
+      }
+    >
+    artifactsTruncated: boolean
+  }>
+  media: RunObservationArchiveMedia[]
+}
+export type ResolvedObservationMedia = {
+  mediaKey: string
+  artifactId: string
+  versionId: string
+  checksum: string
+  sizeBytes: number
+}
+export type RecordedObservationPayload = Readonly<{
+  receiving: RecordedObservationTarget
+  archive: RunObservationArchive
+  media: readonly ResolvedObservationMedia[]
+}>
+export type RecordedRunObservationSelection = Readonly<{
+  kind: 'recorded-run-observation'
+  /** Present on a server-captured selection; identifies each explicit Ask action. */
+  selectionId?: string
+  selectedAt?: number
+  recordingId: string
+  receiving: RecordedObservationTarget
+  stepKey: string
+  record: RunObservationArchive['records'][number]
+  mediaKeys: readonly string[]
+}>
+export type RecordedObservationView = Readonly<{
+  mode: 'recorded'
+  viewerId: string
+  target: RecordedObservationTarget
+  expiresAt: number
+  url: string
+}>
+export type RunObservationsClient = {
+  captureOptions(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<ObservationMediaCaptureOptions>
+  capture(
+    request: RunObservationViewerReference & { request: ObservationMediaCaptureRequest },
+    options?: RequestOptions
+  ): Promise<ObservationViewerCapture>
+  captures(
+    request: ObservationCapturesRequest,
+    options?: RequestOptions
+  ): Promise<ObservationCaptures>
+  captureContent(
+    request: ObservationViewerCaptureContentRequest,
+    options?: RequestOptions
+  ): Promise<ObservationCaptureContent>
+  recordingStatus(
+    request: { target: RunObservationTarget },
+    options?: RequestOptions
+  ): Promise<RunObservationRecordingStatus>
+  openRecorded(
+    request: { target: RecordedObservationTarget },
+    options?: RequestOptions
+  ): Promise<RecordedObservationView>
+  recording(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RecordedObservationPayload>
+  selectRecording(
+    request: RunObservationViewerReference & { stepKey: string },
+    options?: RequestOptions
+  ): Promise<RecordedRunObservationSelection>
+  recordingSelection(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RecordedRunObservationSelection | null>
+  open(request: OpenRunObservationRequest, options?: RequestOptions): Promise<RunObservationView>
+  snapshot(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RunObservationSnapshot>
+  history(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RunObservationHistory>
+  changes(
+    request: RunObservationViewerReference & { cursor: RunObservationCursor },
+    options?: RequestOptions
+  ): Promise<RunObservationChanges>
+  select(
+    request: RunObservationViewerReference & { cursor: RunObservationCursor; stepId: string },
+    options?: RequestOptions
+  ): Promise<RunObservationSelection>
+  selection(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RunObservationSelection | null>
+  revoke(request: RunObservationViewerReference, options?: RequestOptions): Promise<null>
+}
+
 export class OpenScienceClient {
   readonly execution: ManagedExecutionClient
+  readonly observations: RunObservationsClient
   readonly packages: SessionPackagesClient
   constructor(options: {
     baseUrl: string

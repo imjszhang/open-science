@@ -39,12 +39,15 @@ import type {
   NotebookSessionState
 } from '../../../../shared/notebook'
 import { isCurrentInFlight } from '../../../../shared/in-flight-promise'
+import { WEB_CALLER_LOCATION_ATTRIBUTE } from '../../../../shared/web-caller-location'
 import { resolveProjectId } from '../../../../shared/project-scope'
 import { EnvProvisionOverlay } from './EnvProvisionOverlay'
 import { shouldProvisionR } from './lazy-r'
 import { hasActiveRuntimeTarget, notebookGated } from './provisioning-view'
 import { NotebookCodeBlock } from './notebook-code'
 import { NotebookRunEvidence } from './NotebookRunEvidence'
+import { NotebookRunObservationActions } from './replay/NotebookRunObservationActions'
+import type { RunObservationTarget } from '../../../../shared/run-observation'
 import { NotebookRunOutputs } from './NotebookRunOutputs'
 import { NotebookInputDataStrip } from './NotebookInputDataStrip'
 import { isCurrentSessionNotebookView } from './follow-notebook-scroll'
@@ -217,13 +220,15 @@ const NotebookRunCell = ({
   index,
   staleness,
   causedByRunIndex,
-  allowFolderAccess
+  allowFolderAccess,
+  observationTarget
 }: {
   run: NotebookRunRecord
   index: number
   staleness?: NotebookRunStaleness
   causedByRunIndex?: number
   allowFolderAccess?: boolean
+  observationTarget?: RunObservationTarget
 }): React.JSX.Element => {
   const { t } = useTranslation()
   const isProblem = isProblemRunStatus(run.status)
@@ -279,6 +284,9 @@ const NotebookRunCell = ({
       />
       <NotebookRunOutputs run={run} allowFolderAccess={allowFolderAccess} />
       <NotebookRunEvidence run={run} />
+      {observationTarget ? (
+        <NotebookRunObservationActions target={observationTarget} runStatus={run.status} />
+      ) : null}
     </div>
   )
 }
@@ -1105,6 +1113,15 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
             <div key={run.runId} data-run-id={run.runId}>
               <NotebookRunCell
                 run={run}
+                observationTarget={
+                  !document.documentElement.hasAttribute(WEB_CALLER_LOCATION_ATTRIBUTE) &&
+                  run.submissionIdentity?.startsWith('managed-') &&
+                  session &&
+                  !session.packageOrigin &&
+                  !session.importedResearch
+                    ? { projectId: session.projectId, sessionId: session.id, runId: run.runId }
+                    : undefined
+                }
                 allowFolderAccess={Boolean(
                   session && session.contentLoaded !== false && !session.packageOrigin
                 )}

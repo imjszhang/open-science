@@ -46,6 +46,7 @@ vi.mock('electron', () => ({
 // No project-specific API, command, outcome or material path belongs in this generic harness.
 const materialsRoot = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_MATERIALS
 const evidenceRoot = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_OUTPUT
+const packageOnly = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_PACKAGE_ONLY === '1'
 const cleanups: Array<() => Promise<unknown>> = []
 async function disposeCleanups(from = 0): Promise<void> {
   const errors: unknown[] = []
@@ -232,7 +233,67 @@ async function publishMaterials(
   return path
 }
 
-it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
+it.skipIf(process.platform !== 'darwin' || !packageOnly || !materialsRoot || !evidenceRoot)(
+  'publishes reviewed materials and exports a package without starting engineering Runs or scientific trials',
+  async () => {
+    const root = await realpath(materialsRoot!)
+    const output = resolve(evidenceRoot!)
+    // A package-only receipt must never replace an earlier package or experiment's evidence.
+    await mkdir(output, { recursive: false })
+    const acceptance = JSON.parse(
+      await readFile(join(root, 'acceptance.json'), 'utf8')
+    ) as Acceptance
+    const startedAt = new Date().toISOString()
+    const forbidExecution = async (): Promise<never> => {
+      throw new Error('Materials-only packaging must not execute a research or engineering plan.')
+    }
+    const externalExecution = vi
+      .spyOn(ManagedExecutionService.prototype, 'execute')
+      .mockImplementation(forbidExecution)
+    const turnExecution = vi
+      .spyOn(ManagedExecutionService.prototype, 'executeInTurn')
+      .mockImplementation(forbidExecution)
+    try {
+      // publishMaterials runs only its fixed copying command. It never reads acceptance.command
+      // as executable code or launches the material driver, project service or research plan.
+      const archive = await publishMaterials(root, output, acceptance)
+      const bytes = await readFile(archive)
+      expect(bytes.byteLength).toBeGreaterThan(0)
+      expect(externalExecution).not.toHaveBeenCalled()
+      expect(turnExecution).not.toHaveBeenCalled()
+      await disposeCleanups()
+      await writeFile(
+        join(output, 'materials-package-receipt.json'),
+        JSON.stringify(
+          {
+            mode: 'materials-only',
+            status: 'packaged',
+            title: acceptance.title,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            packageFilename: basename(archive),
+            sourcePackageSha256: sha(bytes),
+            sizeBytes: bytes.byteLength,
+            materialIndexSha256: sha(await readFile(join(root, 'material-file-index.json'))),
+            publication: 'fixed-copy-command-only',
+            engineeringRunsStarted: 0,
+            scientificTrialsStarted: 0,
+            experimentAcceptance: 'not-performed'
+          },
+          null,
+          2
+        ) + '\n',
+        { flag: 'wx' }
+      )
+    } finally {
+      externalExecution.mockRestore()
+      turnExecution.mockRestore()
+    }
+  },
+  120_000
+)
+
+it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evidenceRoot)(
   'imports reviewed real research through the SDK and executes the same material plan through all three entries in the native sandbox',
   async () => {
     const root = await realpath(materialsRoot!)

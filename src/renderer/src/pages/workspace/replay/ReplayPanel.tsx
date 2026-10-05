@@ -46,6 +46,14 @@ import {
 import { createReplayPresentation } from './replay-presentation'
 import { ReplayStage } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
+import type { RunObservationSnapshot } from '../../../../../shared/run-observation'
+import {
+  isObservationTerminal,
+  observationRecordId,
+  type ReplayObservationMode
+} from '@/lib/replay/live-source'
+import { ReplayLiveRecord, type ReplayRuntimeSurface } from './ReplayLiveRecord'
+import { useObservationPhaseLabel } from './replay-observation-labels'
 import { ReplaySourceDetails } from './ReplaySourceDetails'
 import {
   captureDiscussionStep,
@@ -61,7 +69,24 @@ import {
   type ReplayResourceReader
 } from './replay-resources'
 
+export type ReplayLiveSource = {
+  sourceIdentity: string
+  snapshot: RunObservationSnapshot
+  // Actual retained observations only. Hosts must disclose missing/restarted history.
+  history?: readonly RunObservationSnapshot[]
+  connection: 'connected' | 'reconnecting' | 'disconnected'
+  runtimeSurface?: ReplayRuntimeSurface
+  renderActions?: (enabled: boolean) => React.ReactNode
+  renderRecordedSurface?: (snapshot: RunObservationSnapshot) => React.ReactNode | undefined
+  onAskSelection: (snapshot: RunObservationSnapshot) => void
+  onStop?: () => void
+  stopping?: boolean
+  recorded?: boolean
+  historyTruncated?: boolean
+}
+
 export type ReplayPanelProps = {
+  live?: ReplayLiveSource
   document: ReplayDocument
   initialView?: ReplayViewState
   active?: boolean
@@ -74,6 +99,7 @@ export type ReplayPanelProps = {
   onOpenEvidence: (resource: ReplayResource | undefined, step: ReplayStep) => void
   readResource?: ReplayResourceReader
   readNotebookRun?: ReplayNotebookRunReader
+  renderResource?: (resource: ReplayResource, onClose: () => void) => React.ReactNode
 }
 
 const restoredPosition = (
@@ -119,7 +145,8 @@ const defaultNotebookReader: ReplayNotebookRunReader = (source, index, options) 
   readReplayNotebookRun(window.api.notebook, source, index, options)
 
 const ReplayPanelContent = ({
-  document: replayDocument,
+  document: incomingDocument,
+  live,
   initialView,
   active = true,
   expanded = false,
@@ -130,9 +157,29 @@ const ReplayPanelContent = ({
   discussionPending = false,
   onOpenEvidence,
   readResource,
+  renderResource,
   readNotebookRun = defaultNotebookReader
 }: ReplayPanelProps): React.JSX.Element => {
   const { t, i18n } = useTranslation()
+  const phaseLabel = useObservationPhaseLabel()
+  // Inspecting freezes both record navigation and bounded evidence. New logs never replace
+  // the evidence a user is reading or about to reference in a question.
+  const [inspection, setInspection] = useState<{
+    document: ReplayDocument
+    snapshots: readonly RunObservationSnapshot[]
+  }>()
+  const replayDocument = inspection?.document ?? incomingDocument
+  const observationHistory = useMemo(
+    () => inspection?.snapshots ?? live?.history ?? (live ? [live.snapshot] : []),
+    [inspection, live]
+  )
+  const observationMode: ReplayObservationMode | undefined = live
+    ? inspection
+      ? 'inspect'
+      : live.recorded || isObservationTerminal(live.snapshot)
+        ? 'history'
+        : 'follow'
+    : undefined
   const [presentation] = useState(() =>
     createReplayPresentation(
       i18n.resolvedLanguage ?? i18n.language ?? 'en',
@@ -164,8 +211,9 @@ const ReplayPanelContent = ({
   const [playing, setPlaying] = useState(false)
   const [ready, setReady] = useState(false)
   const [wide, setWide] = useState(false)
+  const [liveProjectTabActive, setLiveProjectTabActive] = useState(false)
   const [materialsOverride, setMaterialsOverride] = useState<boolean>()
-  const materialsOpen = materialsOverride ?? (expanded || wide)
+  const materialsOpen = materialsOverride ?? (!live && (expanded || wide))
   const [filesOverride, setFilesOverride] = useState<boolean>()
   const filesOpen = filesOverride ?? (expanded || wide)
   const [previousExpanded, setPreviousExpanded] = useState(expanded)
@@ -196,11 +244,43 @@ const ReplayPanelContent = ({
   const [runDetails, setRunDetails] = useState<Readonly<Record<string, ReplayNotebookRunDetails>>>(
     {}
   )
-  const scene = useMemo(
-    () => projectReplayScene(replayDocument, branchId, positionMs),
-    [replayDocument, branchId, positionMs]
-  )
+  const scene = useMemo(() => {
+    const target =
+      replayDocument.branches.find((item) => item.id === branchId) ?? replayDocument.branches[0]
+    const result = projectReplayScene(
+      replayDocument,
+      target.id,
+      live && !inspection ? target.durationMs : positionMs
+    )
+    // Observed snapshots expose only actual recorded data; never animate an imagined
+    // input/activity/result boundary within a snapshot.
+    return live
+      ? {
+          ...result,
+          phase: 'result' as const,
+          showResults: true,
+          stepProgress: 1,
+          visibleResourceIds: [...new Set(result.visibleSteps.flatMap((step) => step.resourceIds))]
+        }
+      : result
+  }, [replayDocument, branchId, positionMs, live, inspection])
   const branch = replayDocument.branches.find((item) => item.id === scene.branchId)
+  const currentObservation = live
+    ? observationHistory.find((snapshot) => observationRecordId(snapshot) === scene.step?.id)
+    : undefined
+  const inspect = useCallback(() => {
+    if (!live || inspection) return
+    setInspection({ document: replayDocument, snapshots: observationHistory })
+    setPositionMs(scene.positionMs)
+  }, [live, inspection, replayDocument, observationHistory, scene.positionMs])
+  const returnToLive = (): void => {
+    setInspection(undefined)
+    setPlaying(false)
+    setSelectedResourceId(undefined)
+    setNotebookFollowing(true)
+    setConversationFocusRequest((value) => value + 1)
+  }
+
   const materialCatalog = useMemo(() => {
     const steps = branch?.steps.slice(0, scene.stepIndex + 1) ?? []
     const runs = new Map<string, ReplayRunIndex>()
@@ -413,7 +493,10 @@ const ReplayPanelContent = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runKey, runCache])
 
-  const pause = useCallback(() => setPlaying(false), [setPlaying])
+  const pause = useCallback(() => {
+    setPlaying(false)
+    inspect()
+  }, [inspect])
   const selectResource = useCallback(
     (id?: string): void => {
       if (id && !materialCatalog.files.some((resource) => resource.id === id)) return
@@ -444,6 +527,7 @@ const ReplayPanelContent = ({
   )
   const seek = useCallback(
     (position: number) => {
+      inspect()
       setPlaying(false)
       setSelectedResourceId(undefined)
       setPositionMs(position)
@@ -453,9 +537,10 @@ const ReplayPanelContent = ({
       setNotebookLimit(undefined)
       setFilePage(0)
     },
-    [setPlaying, setPositionMs, setSelectedResourceId]
+    [setPlaying, setPositionMs, setSelectedResourceId, inspect]
   )
   useEffect(() => {
+    if (live) return
     const receive = (target: ReplaySeekTarget): void => {
       if (
         target.projectId !== replayDocument.source.projectId ||
@@ -482,7 +567,7 @@ const ReplayPanelContent = ({
     )
     if (pending) receive(pending)
     return unsubscribe
-  }, [replayDocument, seek])
+  }, [replayDocument, seek, live])
 
   // The live frame is available to replay consumers; explicit Ask actions capture their own snapshot.
   const captureCurrent = useRef(() =>
@@ -494,7 +579,7 @@ const ReplayPanelContent = ({
   })
   const hasStep = !!scene.step
   useEffect(() => {
-    if (!active || !hasStep) return
+    if (!active || !hasStep || live) return
     const playhead = {
       projectId: replayDocument.source.projectId,
       sourceSessionId: replayDocument.source.sessionId,
@@ -505,11 +590,14 @@ const ReplayPanelContent = ({
       if (useSessionReplayStore.getState().playhead === playhead)
         useSessionReplayStore.setState({ playhead: undefined })
     }
-  }, [active, hasStep, replayDocument])
+  }, [active, hasStep, replayDocument, live])
 
   const ask = (): void => {
     pause()
-    if (scene.step) onAskStep(captureDiscussionStep(replayDocument, scene, runDetails, resources))
+    if (live) {
+      if (currentObservation) live.onAskSelection(structuredClone(currentObservation))
+    } else if (scene.step)
+      onAskStep(captureDiscussionStep(replayDocument, scene, runDetails, resources))
   }
   const askSession = (): void => {
     pause()
@@ -517,6 +605,11 @@ const ReplayPanelContent = ({
     if (context) onAskStep({ ...context, stepTitle: t('Entire research') })
   }
   const toggle = (): void => {
+    if (live) {
+      if (inspection) returnToLive()
+      else pause()
+      return
+    }
     if (!branch?.steps.length) return
     setSelectedResourceId(undefined)
     setConversationFocusRequest((request) => request + 1)
@@ -623,7 +716,9 @@ const ReplayPanelContent = ({
                 {replayDocument.source.title}
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                {t('Reconstructed from archived records')}
+                {live
+                  ? t('Recorded execution observations')
+                  : t('Reconstructed from archived records')}
               </p>
               <p className="my-3 text-xs text-muted-foreground">
                 {t('Recorded steps: {{steps}}; files: {{files}}', {
@@ -632,7 +727,11 @@ const ReplayPanelContent = ({
                 })}
               </p>
               <p className="text-xs text-muted-foreground">
-                {t('Presentation timing is reconstructed; recorded results are unchanged.')}
+                {live
+                  ? t(
+                      'Only observed records are shown. Earlier activity may not have been captured.'
+                    )
+                  : t('Presentation timing is reconstructed; recorded results are unchanged.')}
               </p>
               {replayDocument.source.packageOrigin ? (
                 <div className="border-t border-border pt-3">
@@ -642,27 +741,29 @@ const ReplayPanelContent = ({
             </PopoverContent>
           </Popover>
         </div>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={askSession}
-                disabled={
-                  discussionPending || !replayDocument.branches.some((item) => item.steps.length)
-                }
-                aria-label={t('Discuss the entire research')}
-              >
-                <MessageSquare size={16} aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="end" collisionBoundary={tooltipBoundary}>
-              {t('Discuss the entire research')}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        {onChooseConversation ? (
+        {!live ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={askSession}
+                  disabled={
+                    discussionPending || !replayDocument.branches.some((item) => item.steps.length)
+                  }
+                  aria-label={t('Discuss the entire research')}
+                >
+                  <MessageSquare size={16} aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="end" collisionBoundary={tooltipBoundary}>
+                {t('Discuss the entire research')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
+        {onChooseConversation && !live ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -793,43 +894,45 @@ const ReplayPanelContent = ({
             </SelectContent>
           </Select>
         ) : null}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger
-              asChild
-              onFocus={(event) => {
-                if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
-              }}
-            >
-              <Button
-                ref={materialsTrigger}
-                variant={materialsOpen ? 'secondary' : 'ghost'}
-                size="icon"
-                aria-label={t('Notebook')}
-                aria-expanded={materialsOpen}
-                aria-controls={materialsId}
-                onClick={() => {
-                  setMaterialsOverride(!materialsOpen)
-                  if (!materialsOpen)
-                    requestAnimationFrame(() =>
-                      panel.current?.querySelector<HTMLElement>(`[id="${materialsId}"]`)?.focus()
-                    )
+        {!live ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                asChild
+                onFocus={(event) => {
+                  if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
                 }}
               >
-                <BookOpen size={16} aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              align="end"
-              sideOffset={6}
-              collisionBoundary={tooltipBoundary}
-              collisionPadding={8}
-            >
-              {t('Notebook')}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+                <Button
+                  ref={materialsTrigger}
+                  variant={materialsOpen ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label={t('Notebook')}
+                  aria-expanded={materialsOpen}
+                  aria-controls={materialsId}
+                  onClick={() => {
+                    setMaterialsOverride(!materialsOpen)
+                    if (!materialsOpen)
+                      requestAnimationFrame(() =>
+                        panel.current?.querySelector<HTMLElement>(`[id="${materialsId}"]`)?.focus()
+                      )
+                  }}
+                >
+                  <BookOpen size={16} aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                align="end"
+                sideOffset={6}
+                collisionBoundary={tooltipBoundary}
+                collisionPadding={8}
+              >
+                {t('Notebook')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger
@@ -899,11 +1002,67 @@ const ReplayPanelContent = ({
           </TooltipProvider>
         ) : null}
       </div>
+      {live ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-2 text-xs"
+          data-testid="replay-live-status"
+        >
+          <div className="min-w-0" role="status">
+            <span>
+              {observationMode === 'follow'
+                ? t('Following live')
+                : observationMode === 'inspect'
+                  ? t('Inspecting recorded evidence')
+                  : t('Run history')}
+            </span>
+            <span className="ml-2">
+              {live.recorded
+                ? t('Recorded run: {{status}}', { status: phaseLabel(live.snapshot.phase) })
+                : t('Current run: {{status}}', { status: phaseLabel(live.snapshot.phase) })}
+            </span>
+            {!live.recorded && live.connection !== 'connected' ? (
+              <span className="ml-2 text-status-warning-foreground">
+                {live.connection === 'reconnecting'
+                  ? t('Reconnecting to the run…')
+                  : t('Live connection unavailable')}
+              </span>
+            ) : null}
+          </div>
+          {inspection || (!live.recorded && !isObservationTerminal(live.snapshot)) ? (
+            <Button variant="secondary" size="sm" onClick={inspection ? returnToLive : pause}>
+              {inspection
+                ? live.recorded || isObservationTerminal(live.snapshot)
+                  ? t('Show latest record')
+                  : t('Back to live')
+                : t('Pause following')}
+            </Button>
+          ) : null}
+          {live.onStop && !live.recorded && !isObservationTerminal(live.snapshot) ? (
+            <Button variant="outline" size="sm" disabled={live.stopping} onClick={live.onStop}>
+              {live.stopping ? t('Waiting for the run to stop…') : t('Stop run')}
+            </Button>
+          ) : null}
+          {inspection ? (
+            <p className="w-full text-muted-foreground">
+              {live.recorded
+                ? t('Inspecting archived evidence. No live execution is connected.')
+                : isObservationTerminal(live.snapshot)
+                  ? t('Inspecting an earlier recorded state. The run has ended.')
+                  : t('Viewing is paused. The experiment continues independently.')}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {replayDocument.issues.some((issue) => issue.code === 'review-unavailable') ? (
         <p role="status" className="border-b border-border-200 px-3 py-2 text-xs text-text-300">
           {t('Session Reviewer')}: {t('The recorded evidence is unavailable.')}
         </p>
       ) : null}
+      {live?.renderActions?.(
+        observationMode === 'follow' &&
+          live.connection === 'connected' &&
+          live.snapshot.run?.status === 'running'
+      )}
       {initial.relocated || seekMissing ? (
         <p
           role="status"
@@ -916,6 +1075,32 @@ const ReplayPanelContent = ({
       ) : null}
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <ReplayStage
+          sourceIdentity={live?.sourceIdentity}
+          renderResource={renderResource}
+          followPrimary={
+            !live || (!live.recorded && !inspection && active && !liveProjectTabActive)
+          }
+          primaryMode={liveProjectTabActive ? 'project' : 'record'}
+          primaryLabel={live ? t('Execution record') : undefined}
+          primaryContent={
+            live && currentObservation ? (
+              <ReplayLiveRecord
+                snapshot={currentObservation}
+                mode={observationMode!}
+                recordedSurface={live.renderRecordedSurface?.(currentObservation)}
+                historyTruncated={live.historyTruncated}
+                onProjectActiveChange={setLiveProjectTabActive}
+                runtimeSurface={
+                  live.connection === 'connected' &&
+                  !live.recorded &&
+                  live.snapshot.phase === 'running' &&
+                  live.snapshot.run?.status === 'running'
+                    ? live.runtimeSurface
+                    : undefined
+                }
+              />
+            ) : undefined
+          }
           fitContainer
           selectedResource={selectedResource}
           onSelectResource={selectResource}
@@ -1003,6 +1188,7 @@ const ReplayPanelContent = ({
       <ReplayControls
         key={scene.branchId}
         playing={playing}
+        recordNavigation={Boolean(live)}
         ready={ready}
         positionMs={scene.positionMs}
         durationMs={scene.durationMs}
@@ -1010,7 +1196,7 @@ const ReplayPanelContent = ({
         steps={branch?.steps ?? EMPTY_STEPS}
         resources={replayDocument.resources}
         onPause={pause}
-        onOpenEvidence={(step) => onOpenEvidence(undefined, step)}
+        onOpenEvidence={(step) => (live ? seek(step.startMs) : onOpenEvidence(undefined, step))}
         speed={speed}
         onToggle={toggle}
         onPrevious={() => seek(branch?.steps[Math.max(0, scene.stepIndex - 1)]?.startMs ?? 0)}
@@ -1035,7 +1221,7 @@ export const ReplayPanel = (props: ReplayPanelProps): React.JSX.Element => (
     key={JSON.stringify([
       props.document.source.projectId,
       props.document.source.sessionId,
-      props.document.source.fingerprint
+      props.live?.sourceIdentity ?? props.document.source.fingerprint
     ])}
     {...props}
   />

@@ -137,6 +137,71 @@ const sleepWithSignal = async (sleep, milliseconds, signal) => {
   })
 }
 
+const validateObservationOpen = (input) => {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const targetKeys = ['projectId', 'sessionId', 'operationId', 'executionInvocationId', 'runId']
+  if (
+    !object(input) ||
+    Object.keys(input).some(
+      (key) => !['target', 'allowInteraction', 'allowCancel', 'allowCapture'].includes(key)
+    ) ||
+    !object(input.target) ||
+    Object.keys(input.target).some((key) => !targetKeys.includes(key)) ||
+    !['projectId', 'sessionId'].every((key) => typeof input.target[key] === 'string') ||
+    !['operationId', 'executionInvocationId', 'runId'].some((key) => input.target[key]) ||
+    targetKeys.some(
+      (key) =>
+        input.target[key] !== undefined &&
+        (typeof input.target[key] !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(input.target[key]))
+    ) ||
+    ['allowInteraction', 'allowCancel', 'allowCapture'].some(
+      (key) => input[key] !== undefined && typeof input[key] !== 'boolean'
+    )
+  )
+    throw new TypeError(
+      'Observation open requires an exact target and optional allowInteraction/allowCancel/allowCapture booleans.'
+    )
+}
+
+const validateRecordedObservationOpen = (input) => {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const keys = ['projectId', 'sessionId', 'artifactId', 'versionId']
+  if (
+    !object(input) ||
+    Object.keys(input).some((key) => key !== 'target') ||
+    !object(input.target) ||
+    Object.keys(input.target).some((key) => !keys.includes(key)) ||
+    !keys.every(
+      (key) =>
+        typeof input.target[key] === 'string' &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(input.target[key])
+    )
+  )
+    throw new TypeError('Recorded observation open requires an exact receiving Artifact Version.')
+}
+
+const validateObservationCaptureRead = (input, content) => {
+  const keys = content ? ['viewerId', 'captureId', 'offset', 'length'] : ['viewerId']
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).some((key) => !keys.includes(key)) ||
+    typeof input.viewerId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.viewerId) ||
+    (content &&
+      (typeof input.captureId !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(input.captureId) ||
+        (input.offset !== undefined && (!Number.isSafeInteger(input.offset) || input.offset < 0)) ||
+        (input.length !== undefined &&
+          (!Number.isInteger(input.length) || input.length < 1 || input.length > 1048576))))
+  )
+    throw new TypeError(
+      'Capture reads require a viewerId, an exact captureId for content, and optional bounded offset/length.'
+    )
+}
+
 export class OpenScienceClient {
   constructor({
     baseUrl,
@@ -193,6 +258,41 @@ export class OpenScienceClient {
               options = { timeoutMs: Math.max(this.requestTimeoutMs, waitMs + 5_000), ...options }
             }
             return this.request(`/api/v1/execution/${method}`, {
+              ...options,
+              method: 'POST',
+              body: payload
+            })
+          }
+        ])
+      )
+    )
+    this.observations = Object.freeze(
+      Object.fromEntries(
+        [
+          'open',
+          'snapshot',
+          'history',
+          'changes',
+          'select',
+          'selection',
+          'revoke',
+          'openRecorded',
+          'recording',
+          'selectRecording',
+          'recordingSelection',
+          'recordingStatus',
+          'captureOptions',
+          'capture',
+          'captures',
+          'captureContent'
+        ].map((method) => [
+          method,
+          (payload, options = {}) => {
+            if (method === 'open') validateObservationOpen(payload)
+            if (method === 'openRecorded') validateRecordedObservationOpen(payload)
+            if (method === 'captures' || method === 'captureContent')
+              validateObservationCaptureRead(payload, method === 'captureContent')
+            return this.request(`/api/v1/observations/${method}`, {
               ...options,
               method: 'POST',
               body: payload

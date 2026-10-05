@@ -24,6 +24,15 @@ export type ManagedShellCleanupResult = Readonly<{
   proof?: 'never-dispatched' | 'process-owner' | 'startup-recovery'
 }>
 
+/** Main-only observations of actual process output. These callbacks confer no execution rights. */
+export type ManagedShellOutput = Readonly<{
+  runId: string
+  stream: 'stdout' | 'stderr'
+  text: string
+}>
+
+export type ManagedServiceProof = Readonly<{ value: string; path: string }>
+
 export type ManagedShellExecutionPolicy = ManagedShellExecutionScope &
   Readonly<{
     cwd: string
@@ -33,8 +42,11 @@ export type ManagedShellExecutionPolicy = ManagedShellExecutionScope &
     filesystem: NotebookSandboxInvocation['filesystem']
     fingerprint: string
     signal?: AbortSignal
+    onOutput?: (output: ManagedShellOutput) => void
     localService?: Readonly<{
       logicalPort: number
+      /** Ephemeral private startup data, excluded from the frozen environment and fingerprint. */
+      proof?: ManagedServiceProof
       /** The resource owner journals intent before allocation and retains cleanup authority. */
       prepareSocket(context: { runId: string; signal?: AbortSignal }): Promise<string>
     }>
@@ -102,7 +114,14 @@ export const createManagedShellExecutionCapability = (
       throw new Error('Managed Shell environment must contain explicit string values.')
     }
     // These values are created only after durable Run admission and must never be frozen on disk.
-    if (key === 'OPEN_SCIENCE_SERVICE_SOCKET' || key === 'OPEN_SCIENCE_SERVICE_PORT') {
+    if (
+      [
+        'OPEN_SCIENCE_SERVICE_SOCKET',
+        'OPEN_SCIENCE_SERVICE_PORT',
+        'OPEN_SCIENCE_SERVICE_PROOF',
+        'OPEN_SCIENCE_SERVICE_PROOF_PATH'
+      ].includes(key)
+    ) {
       throw new Error('Managed Shell service environment is execution-owned.')
     }
     environment[key] = value
@@ -115,6 +134,14 @@ export const createManagedShellExecutionCapability = (
       typeof input.localService.prepareSocket !== 'function')
   )
     throw new Error('Invalid managed Shell local service policy.')
+  if (
+    input.localService?.proof &&
+    (!/^[a-f0-9]{64}$/.test(input.localService.proof.value) ||
+      !/^\/__open_science_proof_[a-f0-9]{32}$/.test(input.localService.proof.path))
+  )
+    throw new Error('Invalid managed Shell service proof.')
+  if (input.onOutput !== undefined && typeof input.onOutput !== 'function')
+    throw new Error('Invalid managed Shell output observer.')
   const filesystem = Object.freeze({
     readOnlyRoots,
     readWriteRoots,
@@ -151,7 +178,17 @@ export const createManagedShellExecutionCapability = (
       ...snapshot,
       fingerprint,
       ...(input.signal ? { signal: input.signal } : {}),
-      ...(input.localService ? { localService: Object.freeze({ ...input.localService }) } : {})
+      ...(input.onOutput ? { onOutput: input.onOutput } : {}),
+      ...(input.localService
+        ? {
+            localService: Object.freeze({
+              ...input.localService,
+              ...(input.localService.proof
+                ? { proof: Object.freeze({ ...input.localService.proof }) }
+                : {})
+            })
+          }
+        : {})
     })
   )
   return capability

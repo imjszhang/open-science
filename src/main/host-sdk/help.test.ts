@@ -540,7 +540,9 @@ it('documents every managed request boundary without accepting Session or turn a
     'requestId',
     'command',
     'outputs',
-    'timeoutMs'
+    'timeoutMs',
+    'recordObservation',
+    'projectView'
   ])
     expect(named(request, key)).toBeDefined()
   expect(help.constraints.join(' ')).toContain('does not create another Session')

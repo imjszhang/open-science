@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { request as httpRequest } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_NOTEBOOK_NETWORK_SETTINGS } from '../../shared/notebook-network'
 import type { ManagedEnvironmentReference } from '../../shared/managed-execution'
@@ -21,6 +22,8 @@ import { NotebookNetworkSandboxOwner } from './network-sandbox-owner'
 import { getNotebookDataRoot, NotebookRunRepository } from './repository'
 import { NotebookRuntimeService } from './runtime-service'
 import { SessionOperationOwner, type SessionOperationDependencies } from './session-operation-owner'
+import { ManagedRuntimeViews } from '../managed-runtime-views'
+import type { RuntimeViewAccess } from '../../shared/runtime-view'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -70,13 +73,14 @@ type Harness = {
   environments: ManagedResearchEnvironmentOwner
   operations: SessionOperationOwner
   service: ManagedExecutionService
+  views: ManagedRuntimeViews
   environment: ManagedEnvironmentReference
   read: SessionOperationDependencies['sessions']['read']
   kernelExecute: ReturnType<typeof vi.fn>
   globalGrants: ReturnType<typeof vi.fn>
 }
 
-async function setup(): Promise<Harness> {
+async function setup(materialScript = script): Promise<Harness> {
   const fixture = await createProvenanceTestFixture()
   const root = await realpath(fixture.storageRoot)
   // Reproduce mixed logical/canonical storage roots even when TMPDIR has no /var alias.
@@ -200,6 +204,7 @@ async function setup(): Promise<Harness> {
       verified: (await notebook.confirmManagedShellCleanup(request, { retry: true })).reaped
     })
   })
+  const views = new ManagedRuntimeViews()
   const service = new ManagedExecutionService({
     artifacts,
     dataRoot: root,
@@ -208,19 +213,24 @@ async function setup(): Promise<Harness> {
     operations,
     runtime: notebook,
     runtimes,
+    registerProjectService: (registration) => views.register(registration),
     // A synthetic immutable material authority; the real import/selection bridge has separate tests.
     materials: async () => ({
-      source: { projectId: scope.projectId, sessionId: 'synthetic-source', identity: sha(script) },
+      source: {
+        projectId: scope.projectId,
+        sessionId: 'synthetic-source',
+        identity: sha(materialScript)
+      },
       versions: [
         {
           versionId: 'generic-node-script',
-          sourceIdentity: sha(script),
+          sourceIdentity: sha(materialScript),
           filename: 'main.mjs',
-          sha256: sha(script),
-          sizeBytes: Buffer.byteLength(script)
+          sha256: sha(materialScript),
+          sizeBytes: Buffer.byteLength(materialScript)
         }
       ],
-      readVersion: async () => Buffer.from(script)
+      readVersion: async () => Buffer.from(materialScript)
     }),
     resolvePreparedInputs: async () => [],
     createSession: async () => {
@@ -232,7 +242,7 @@ async function setup(): Promise<Harness> {
     ...scope,
     requestId: 'prepare-node',
     sourceSessionId: 'synthetic-source',
-    sourceIdentity: sha(script),
+    sourceIdentity: sha(materialScript),
     runtimeId: discovered.runtimes[0].runtimeId,
     materials: { files: [{ versionId: 'generic-node-script', restorePath: 'main.mjs' }] }
   })) as { environmentId: string }
@@ -246,6 +256,7 @@ async function setup(): Promise<Harness> {
     environments,
     operations,
     service,
+    views,
     environment: { ...scope, environmentId: prepared.environmentId },
     read,
     kernelExecute,
@@ -391,6 +402,7 @@ describe.skipIf(process.platform !== 'darwin')(
             { cause: error }
           )
         } finally {
+          h.views.close()
           await h.operations.close()
           await h.environments.close()
           const shutdown = await h.notebook.shutdownAll()
@@ -404,4 +416,166 @@ describe.skipIf(process.platform !== 'darwin')(
       40_000
     )
   }
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'observes and operates a real sandboxed project service, then revokes it on completion',
+  async () => {
+    const source = String.raw`
+import fs from 'node:fs'; import http from 'node:http'; import net from 'node:net';
+import path from 'node:path'; import {fileURLToPath} from 'node:url';
+const denied = async () => await new Promise(resolve => {
+  const s = net.createServer(); s.once('error', e => resolve(e.code));
+  s.listen({host:'127.0.0.1',port:0}, () => s.close(() => resolve('allowed')));
+});
+const result = {pid:process.pid,tcp:await denied(),actions:0};
+try {fs.writeFileSync(fileURLToPath(process.env.NODE_OPTIONS.slice('--import='.length)), 'changed'); result.adapterWrite='allowed'}
+catch(e) {result.adapterWrite=e.code}
+const server = http.createServer((req,res) => {
+  if(req.url==='/act' && req.method==='POST') {
+    if(req.headers.host!=='127.0.0.1:4173' || req.headers.origin!=='http://127.0.0.1:4173' || req.headers['x-fixture-token']!=='project-token') {
+      res.writeHead(403); res.end('denied'); return;
+    }
+    result.actions++; console.log('action '+result.actions); res.end(JSON.stringify(result)); return;
+  }
+  if(req.url==='/stop' && req.method==='POST') {
+    fs.writeFileSync(path.join(process.env.OPEN_SCIENCE_OUTPUT_DIR,'result.json'),JSON.stringify(result));
+    res.end('stopping'); setImmediate(()=>server.close()); return;
+  }
+  res.setHeader('content-type','text/html');
+  res.setHeader('content-security-policy',"default-src 'self'; frame-ancestors 'none'");
+  res.end('<main>Generic project</main>');
+});
+server.listen(4173,'127.0.0.1',()=>console.log('project ready'));
+`
+    const h = await setup(source)
+    const operation = { ...scope, requestId: 'interactive-native' }
+    let access: RuntimeViewAccess | undefined
+    let stage = 'admission'
+    const http = (
+      url: string,
+      method = 'GET',
+      headers: Record<string, string> = {}
+    ): Promise<{
+      status: number
+      headers: import('node:http').IncomingHttpHeaders
+      body: string
+    }> =>
+      new Promise((resolve, reject) => {
+        const req = httpRequest(
+          url,
+          {
+            method,
+            headers,
+            family: 4,
+            lookup: (_hostname, _options, callback) => callback(null, '127.0.0.1', 4)
+          },
+          (res) => {
+            let body = ''
+            res.setEncoding('utf8')
+            res.on('data', (value) => {
+              body += value
+            })
+            res.once('end', () => resolve({ status: res.statusCode!, headers: res.headers, body }))
+            res.once('error', reject)
+          }
+        )
+        req.setTimeout(2000, () => req.destroy(new Error('Fixture HTTP timeout')))
+        req.once('error', reject)
+        req.end()
+      })
+    try {
+      const admitted = await h.service.execute({
+        ...h.environment,
+        requestId: operation.requestId,
+        command: 'node "$OPEN_SCIENCE_INPUT_DIR/main.mjs"',
+        localServicePort: 4173,
+        timeoutMs: 20000,
+        projectView: {
+          title: 'Generic project',
+          adaptFrameAncestors: true,
+          allowedRequestHeaders: ['x-fixture-token']
+        },
+        outputs: [{ path: 'result.json', filename: 'result.json', contentType: 'application/json' }]
+      })
+      await vi.waitFor(
+        async () => {
+          const active = await h.service.inspectExecution({
+            ...scope,
+            operationId: admitted.operationId
+          })
+          expect(active?.run?.status).toBe('running')
+          expect(active?.run?.text.stdout).toContain('project ready')
+          expect((await h.service.getOperation(operation))?.notebookRunIds).toEqual([])
+          access = await h.views.open(
+            { ...scope, runId: active!.identity.runId! },
+            'native-viewer',
+            ['http://127.0.0.1:4111']
+          )
+        },
+        { timeout: 15000 }
+      )
+      stage = 'viewer bootstrap'
+      const bootstrap = await http(access!.url)
+      expect(bootstrap.status).toBe(303)
+      const origin = new URL(access!.url).origin
+      const cookie = bootstrap.headers['set-cookie']![0].split(';')[0]
+      stage = 'project page'
+      const page = await http(origin + '/', 'GET', { cookie })
+      expect(page.status).toBe(200)
+      expect(page.body).toContain('Generic project')
+      stage = 'project action'
+      const action = await http(origin + '/act', 'POST', {
+        cookie,
+        origin,
+        'x-fixture-token': 'project-token'
+      })
+      expect(action.status).toBe(200)
+      const result = JSON.parse(action.body)
+      expect(result.actions).toBe(1)
+      expect(['EACCES', 'EPERM']).toContain(result.tcp)
+      expect(['EACCES', 'EPERM']).toContain(result.adapterWrite)
+      stage = 'project stop'
+      // The owning process may finish and revoke its transport before its last response is flushed.
+      // Do not repeat a possibly committed action; confirm its outcome through the execution owner.
+      const stopping = await http(origin + '/stop', 'POST', { cookie, origin }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ECONNRESET') throw error
+          return undefined
+        }
+      )
+      if (stopping) expect(stopping.status).toBe(200)
+      const done = await h.operations.wait(operation)
+      expect(done).toMatchObject({ status: 'completed' })
+      expect(done!.notebookRunIds).toHaveLength(1)
+      expect(h.views.describe({ ...scope, runId: done!.notebookRunIds[0] })[0]?.state).toBe(
+        'closed'
+      )
+      expect(() => process.kill(result.pid, 0)).toThrow()
+      const terminal = await h.service.inspectExecution({
+        ...scope,
+        operationId: admitted.operationId
+      })
+      expect(terminal?.run?.text.stdout).toContain('action 1')
+      expect(terminal?.artifacts).toHaveLength(2)
+      expect(h.kernelExecute).not.toHaveBeenCalled()
+      await expect(h.service.releaseEnvironment(h.environment)).resolves.toMatchObject({
+        state: 'released'
+      })
+    } catch (error) {
+      throw new Error(`Native interactive acceptance failed during ${stage}: ${String(error)}`, {
+        cause: error
+      })
+    } finally {
+      h.views.close()
+      await h.operations.close()
+      await h.environments.close()
+      const stopped = await h.notebook.shutdownAll()
+      await h.notebook.dispose()
+      await h.sandbox.dispose()
+      if (stopped.reaped) await h.fixture.dispose()
+      expect(stopped.reaped).toBe(true)
+    }
+  },
+  40000
 )

@@ -65,6 +65,10 @@ import {
   type SessionPackageExternalMethod
 } from '../session-package-external-port'
 import { PublicTaskEventStream } from './public-task-event-stream'
+import {
+  RUN_OBSERVATION_EXTERNAL_METHODS,
+  type RunObservationExternalMethod
+} from '../run-observation-external-port'
 
 const MAX_RPC_BODY_BYTES = 64 * 1024 * 1024
 // Preserve one maximum-size request per logical client while leaving the same amount of capacity
@@ -161,6 +165,7 @@ type WebServerOptions = {
       Pick<
         HeadlessTaskApi,
         | 'callManagedExecution'
+        | 'callRunObservation'
         | 'callSessionPackages'
         | 'getSessionPlan'
         | 'respondSessionPlan'
@@ -1065,6 +1070,46 @@ const handleTaskApiRequest = async (
         return true
       }
       const executionMatch = url.pathname.match(/^\/api\/v1\/execution\/([^/]+)$/)
+      const observationMatch = url.pathname.match(/^\/api\/v1\/observations\/([^/]+)$/)
+      if (
+        observationMatch &&
+        request.method === 'POST' &&
+        RUN_OBSERVATION_EXTERNAL_METHODS.includes(
+          observationMatch[1] as RunObservationExternalMethod
+        )
+      ) {
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '') ?? ''
+        if (
+          callerContext.location !== 'local' ||
+          !(peer === '::1' || (isIP(peer) === 4 && peer.startsWith('127.')))
+        )
+          throw new ManagedExecutionExternalError(
+            'unsupported_location',
+            'Run observation is local to this device.'
+          )
+        if (!tasks.callRunObservation)
+          throw new ManagedExecutionExternalError('unavailable', 'Run observation is unavailable.')
+        const body = await readJsonBody(
+          request,
+          response,
+          requestBodyBudgetRegistry,
+          requestBodyClientId
+        )
+        if (!body || typeof body !== 'object' || Array.isArray(body))
+          throw new ManagedExecutionExternalError(
+            'invalid_request',
+            'Observation input must be a JSON object.'
+          )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const data = await tasks.callRunObservation(
+          observationMatch[1] as RunObservationExternalMethod,
+          body
+        )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        json(response, 200, { data })
+        return true
+      }
       if (
         executionMatch &&
         MANAGED_EXECUTION_EXTERNAL_METHODS.includes(

@@ -104,6 +104,7 @@ import { getVisiblePermissionRequests } from './session-permissions'
 import { WorkspaceSidebarContainer } from './WorkspaceSidebarContainer'
 import { WorkspacePanelLayout } from './workspace-panel-layout'
 import { useWorkspaceComposerController } from './workspace-composer-controller'
+import { useRunObservationQuestion } from './use-run-observation-question'
 import { useWorkspaceConversationController } from './workspace-conversation-controller'
 import { useWorkspaceSessionController } from './workspace-session-controller'
 import { useWorkspaceBranchSwitchGuard } from './use-workspace-branch-switch-guard'
@@ -590,6 +591,14 @@ const WorkspacePage = ({
   })
   const { doc: draftDoc, error: attachmentError } = composer.view
   const { changeDoc: changeComposerDraftDoc, setError: setAttachmentError } = composer.actions
+  useRunObservationQuestion({
+    projectId: activeProjectId,
+    sessionId: activeSession?.id,
+    draftKey: currentDraftKey,
+    editable: canEditDraft,
+    doc: draftDoc,
+    changeDoc: changeComposerDraftDoc
+  })
   useWorkspaceSessionDiscussion({ composer, draftKey: currentDraftKey, editable: canEditDraft })
   const delegationControl = useWorkspaceSessionDelegationControlOwner({
     activeSession,

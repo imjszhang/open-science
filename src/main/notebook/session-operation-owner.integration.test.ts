@@ -936,3 +936,317 @@ it.each(['without-receipt', 'different-prompt', 'different-outcome', 'interrupte
     expect(await h.read(scope)).toEqual(before)
   }
 )
+
+it('keeps optional inline publication failure separate from the real operation and finalizes its required Artifact', async () => {
+  const h = await harness()
+  const saved = h.artifacts.saveVersion.bind(h.artifacts)
+  vi.spyOn(h.artifacts, 'saveVersion').mockImplementation(async (...args) => {
+    const artifact = await saved(...args)
+    if (args[0].filename === 'optional-capture.json')
+      throw new Error('response lost after actual auxiliary save')
+    return artifact
+  })
+  let observedIntent: import('./managed-output-publication').ManagedOutputWriteAttempt | undefined
+  let auxiliary:
+    Awaited<ReturnType<NonNullable<SessionOperationContext['saveAuxiliaryOutput']>>> | undefined
+  await h.owner.start(
+    request(async (context) => {
+      await context.saveOutput({
+        filename: 'required.json',
+        source: { kind: 'inline', content: '{"result":42}' }
+      })
+      auxiliary = await context.saveAuxiliaryOutput!({
+        filename: 'optional-capture.json',
+        source: { kind: 'inline', content: '{"observed":true}' },
+        publication: {
+          beforeWrite: async (attempt) => {
+            observedIntent = attempt
+          }
+        }
+      })
+      return {
+        text: 'The experiment completed; optional capture publication needs reconciliation.'
+      }
+    })
+  )
+  const operation = await h.owner.wait(scope)
+  expect(operation).toMatchObject({ status: 'completed' })
+  expect(auxiliary).toEqual({ status: 'failed', code: 'artifact-save-failed' })
+  expect(observedIntent).toMatchObject({
+    request: {
+      projectId: scope.projectId,
+      appSessionId: scope.sessionId,
+      filename: 'optional-capture.json'
+    },
+    source: {
+      kind: 'inline',
+      sha256: createHash('sha256').update('{"observed":true}').digest('hex')
+    }
+  })
+  expect(observedIntent!.request).not.toHaveProperty('producerRunId')
+  const session = (await h.read(scope))!
+  expect(session.artifacts?.map((artifact) => artifact.name)).toEqual(
+    expect.arrayContaining(['required.json', 'optional-capture.json'])
+  )
+  const replayed = await h.artifacts.replayVersion(observedIntent!.request)
+  expect(replayed).toMatchObject({ name: 'optional-capture.json', isPublished: true })
+  expect(replayed?.producerRunId).toBeUndefined()
+})
+
+it.each(['saved', 'response-lost'] as const)(
+  'stores actual PNG bytes in SQLite-backed Artifacts with optional result %s and preserves UTF-8 outputs',
+  async (result) => {
+    const h = await harness()
+    const content =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cVZ0AAAAASUVORK5CYII='
+    const bytes = Buffer.from(content, 'base64')
+    const checksum = createHash('sha256').update(bytes).digest('hex')
+    const save = h.artifacts.saveVersion.bind(h.artifacts)
+    vi.spyOn(h.artifacts, 'saveVersion').mockImplementation(async (...args) => {
+      const artifact = await save(...args)
+      if (result === 'response-lost' && args[0].filename === 'observed-frame.png')
+        throw new Error('response lost after actual binary save')
+      return artifact
+    })
+    let intent: import('./managed-output-publication').ManagedOutputWriteAttempt | undefined
+    await h.owner.start(
+      request(async (context) => {
+        await context.saveOutput({
+          filename: 'normal.txt',
+          source: { kind: 'inline', content: '研究 Ω😀\n' }
+        })
+        const auxiliary = await context.saveAuxiliaryOutput!({
+          filename: 'observed-frame.png',
+          contentType: 'image/png',
+          source: { kind: 'inline', content, encoding: 'base64' },
+          publication: {
+            beforeWrite: async (attempt) => {
+              intent = attempt
+              expect(attempt.source).toEqual({
+                kind: 'inline',
+                sha256: checksum,
+                sizeBytes: bytes.byteLength
+              })
+              expect(attempt.request).not.toHaveProperty('producerRunId')
+              expect(attempt.destination.provenanceContext).toMatchObject(context.provenanceContext)
+            }
+          }
+        })
+        expect(auxiliary.status).toBe(result === 'saved' ? 'saved' : 'failed')
+        if (result === 'response-lost')
+          expect(auxiliary).toEqual({ status: 'failed', code: 'artifact-save-failed' })
+        return { text: 'Original operation completed independently of optional frame delivery.' }
+      })
+    )
+    expect(await h.owner.wait(scope)).toMatchObject({ status: 'completed', notebookRunIds: [] })
+    const replayed = await h.artifacts.replayVersion(intent!.request)
+    expect(replayed).toMatchObject({
+      name: 'observed-frame.png',
+      checksum,
+      size: bytes.byteLength,
+      isPublished: true
+    })
+    expect(replayed?.producerRunId).toBeUndefined()
+    const version = await h.fixture.client.artifactVersion.findUniqueOrThrow({
+      where: { id: replayed!.versionId }
+    })
+    const stored = await readFile(join(h.fixture.storageRoot, version.contentStorageKey))
+    expect(stored).toEqual(bytes)
+    expect(stored.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    expect(createHash('sha256').update(stored).digest('hex')).toBe(checksum)
+    expect(stored.toString('utf8')).not.toBe(content)
+    const normal = (await h.read(scope))!.artifacts!.find((item) => item.name === 'normal.txt')!
+    const normalVersion = await h.fixture.client.artifactVersion.findUniqueOrThrow({
+      where: { id: normal.versionId }
+    })
+    expect(
+      await readFile(join(h.fixture.storageRoot, normalVersion.contentStorageKey), 'utf8')
+    ).toBe('研究 Ω😀\n')
+  }
+)
+
+it('drains unawaited auxiliary writes and retains ordinary required-output failure semantics', async () => {
+  const h = await harness()
+  let enter!: () => void
+  let release!: () => void
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await h.owner.start(
+    request(async (context) => {
+      void context.saveAuxiliaryOutput!({
+        filename: 'optional.json',
+        source: { kind: 'inline', content: '{}' },
+        publication: {
+          beforeWrite: async () => {
+            enter()
+            await gate
+            throw new Error('optional write failed')
+          }
+        }
+      })
+      return { text: 'The original operation is complete.' }
+    })
+  )
+  await entered
+  expect(await h.owner.get(scope)).toMatchObject({ status: 'running' })
+  release()
+  expect(await h.owner.wait(scope)).toMatchObject({ status: 'completed' })
+  expect(await h.fixture.client.artifactVersion.count()).toBe(0)
+  const second = { ...scope, requestId: 'required-failure' }
+  await h.owner.start({
+    ...request(async (context) => {
+      await context
+        .saveOutput({
+          filename: 'required.json',
+          source: { kind: 'inline', content: '{}' },
+          publication: {
+            beforeWrite: async () => {
+              throw new Error('required output failed')
+            }
+          }
+        })
+        .catch(() => undefined)
+      return { text: 'Catching a required output error cannot suppress the owner failure.' }
+    }),
+    requestId: second.requestId
+  })
+  expect(await h.owner.wait(second)).toMatchObject({ status: 'failed' })
+})
+
+it('does not let the auxiliary capability import paths or claim Notebook producer authority', async () => {
+  const h = await harness()
+  await h.owner.start(
+    request(async (context) => {
+      for (const output of [
+        { filename: 'bad.json', source: { kind: 'localPath', path: 'private.json' } },
+        {
+          filename: 'bad.json',
+          source: { kind: 'inline', content: '{}' },
+          producerRunId: 'foreign-run'
+        },
+        { filename: 'bad.json', source: { kind: 'inline', content: '{}' }, failurePolicy: 'ignore' }
+      ]) {
+        expect(await context.saveAuxiliaryOutput!(output as never)).toEqual({
+          status: 'failed',
+          code: 'invalid-output'
+        })
+      }
+      return {
+        text: 'Invalid auxiliary requests were rejected without acquiring producer authority.'
+      }
+    })
+  )
+  expect(await h.owner.wait(scope)).toMatchObject({ status: 'completed' })
+  expect(await h.fixture.client.artifactVersion.count()).toBe(0)
+})
+
+it.skipIf(process.platform === 'win32')(
+  'ordinary Main port preserves a real completed Run when optional publication fails',
+  async () => {
+    const h = await harness()
+    let notebookRunId: string | undefined
+    await h.owner.start(
+      request(async (outer, signal) => {
+        const handle = h.artifactTurns.handleForExecution(outer.operationId)
+        const artifactRunId = h.artifactTurns.snapshot(handle).runId
+        const port = createManagedExecutionTurnPort({
+          dataRoot: h.fixture.storageRoot,
+          artifacts: h.artifacts,
+          notebooks: h.fixture.notebookRepository,
+          trackArtifactWrite: (_sessionId, _owner, write) =>
+            h.artifactTurns.trackWrite(handle, write),
+          service: {
+            runtimes: () => [],
+            inspectMaterials: async () => ({}),
+            prepare: async () => ({}),
+            getEnvironment: async () => ({}),
+            releaseEnvironment: async () => ({}),
+            discardOutputs: async () => ({}),
+            collectOutputsInTurn: async () => ({}),
+            executeInTurn: async (_request, context) => {
+              await h.notebook.executeShell(
+                {
+                  ...scope,
+                  workspaceCwd: context.workspaceCwd,
+                  command: 'printf observed',
+                  provenanceContext: context.provenanceContext,
+                  executionInvocationId: context.executionInvocationId
+                },
+                signal
+              )
+              const run = (
+                await h.fixture.notebookRepository.readSessionRuns(scope.projectId, scope.sessionId)
+              ).find((run) => run.executionInvocationId === context.executionInvocationId)!
+              notebookRunId = run.runId
+              await context.recordRun(run.runId)
+              await context.saveOutput({
+                filename: 'result.json',
+                source: { kind: 'inline', content: '{"completed":true}' }
+              })
+              const auxiliary = await context.saveAuxiliaryOutput!({
+                filename: 'capture.png',
+                contentType: 'image/png',
+                source: { kind: 'inline', content: 'iVBORw0KGgo=', encoding: 'base64' },
+                publication: {
+                  beforeWrite: async (attempt) => {
+                    expect(attempt.request.artifactRunId).toBe(artifactRunId)
+                    expect(attempt.source).toEqual({
+                      kind: 'inline',
+                      sizeBytes: 8,
+                      sha256: createHash('sha256')
+                        .update(Buffer.from('iVBORw0KGgo=', 'base64'))
+                        .digest('hex')
+                    })
+                    expect(attempt.destination.provenanceContext).toEqual(context.provenanceContext)
+                    throw new Error('optional capture unavailable')
+                  }
+                }
+              })
+              expect(auxiliary).toEqual({ status: 'failed', code: 'artifact-save-failed' })
+              return { status: 'completed', observation: { status: 'pending' } }
+            }
+          }
+        })
+        const result = await port.call(
+          'execute',
+          {
+            environmentId: 'a'.repeat(64),
+            requestId: 'port-observed',
+            command: 'printf observed',
+            recordObservation: true
+          },
+          {
+            ...scope,
+            ownerExecutionId: outer.operationId,
+            artifactRunId,
+            artifactStorageSessionId: scope.sessionId,
+            workspaceCwd: outer.workspaceCwd,
+            invocationId: 'main-port-observation',
+            signal,
+            provenanceContext:
+              outer.provenanceContext as import('./managed-execution-output').ManagedExecutionProvenance,
+            assertActive: () => signal.throwIfAborted()
+          }
+        )
+        expect(result).toEqual({ status: 'completed', observation: { status: 'pending' } })
+        return { text: 'Run completed; the optional recording remains pending.' }
+      })
+    )
+    expect(await h.owner.wait(scope)).toMatchObject({ status: 'completed' })
+    const runs = await h.fixture.notebookRepository.readSessionRuns(
+      scope.projectId,
+      scope.sessionId
+    )
+    expect(runs.find((run) => run.runId === notebookRunId)).toMatchObject({
+      status: 'completed',
+      text: { stdout: 'observed' }
+    })
+    expect((await h.read(scope))?.artifacts?.map((artifact) => artifact.name)).toContain(
+      'result.json'
+    )
+  }
+)

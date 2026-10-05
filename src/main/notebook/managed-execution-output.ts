@@ -31,12 +31,38 @@ export type ManagedExecutionOutput = {
   filename: string
   contentType?: string
   source:
-    | { kind: 'inline'; content: string }
+    | { kind: 'inline'; content: string; encoding?: 'base64' }
     | { kind: 'localPath'; path: string; root?: 'workspace' | 'notebook' }
     | { kind: 'managedOutput'; path: string; authority: ManagedOutputAuthority }
   producerRunId?: string
   publication?: ManagedOutputPublication
 }
+/** Main-only inline byte limit. Public execution requests do not expose this writer capability. */
+export const MAX_MANAGED_INLINE_BINARY_BYTES = 16 * 1024 * 1024
+export const MAX_MANAGED_INLINE_BASE64_CHARACTERS =
+  Math.ceil(MAX_MANAGED_INLINE_BINARY_BYTES / 3) * 4
+
+/** Standard, padded, canonical base64 only: no whitespace, URL alphabet or ignored trailing bits.
+ * Validate before allocating decoded bytes; Buffer.from alone silently accepts malformed input. */
+export function isCanonicalManagedInlineBase64(content: string): boolean {
+  if (content.length > MAX_MANAGED_INLINE_BASE64_CHARACTERS || content.length % 4 !== 0)
+    return false
+  const padding = content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0
+  const body = content.slice(0, content.length - padding)
+  if (
+    /[^A-Za-z0-9+/]/.test(body) ||
+    (content.length / 4) * 3 - padding > MAX_MANAGED_INLINE_BINARY_BYTES
+  )
+    return false
+  if (padding) {
+    const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(
+      body.at(-1) ?? ''
+    )
+    if (last < 0 || (last & (padding === 2 ? 15 : 3)) !== 0) return false
+  }
+  return true
+}
+
 export type ManagedExecutionRecoveryOutput = Omit<
   ManagedExecutionOutput,
   'source' | 'producerRunId' | 'publication'
@@ -145,13 +171,23 @@ export function createManagedExecutionOutputWriter(
     let writeSignal = recovery ? AbortSignal.any([signal, recovery.signal]) : signal
     let artifactSource:
       { kind: 'inline'; content: string; encoding: 'base64' } | { kind: 'localPath'; path: string }
-    if (output.source.kind === 'inline')
+    if (output.source.kind === 'inline') {
+      if (output.source.encoding !== undefined && output.source.encoding !== 'base64')
+        throw new Error('Unsupported inline Artifact encoding.')
+      if (
+        output.source.encoding === 'base64' &&
+        !isCanonicalManagedInlineBase64(output.source.content)
+      )
+        throw new Error('Inline Artifact binary content must be canonical base64 within 16 MiB.')
       artifactSource = {
         kind: 'inline',
-        content: Buffer.from(output.source.content, 'utf8').toString('base64'),
+        content:
+          output.source.encoding === 'base64'
+            ? output.source.content
+            : Buffer.from(output.source.content, 'utf8').toString('base64'),
         encoding: 'base64'
       }
-    else if (output.source.kind === 'managedOutput') {
+    } else if (output.source.kind === 'managedOutput') {
       const managed = await resolveManagedOutputAuthority(
         output.source.authority,
         scope,

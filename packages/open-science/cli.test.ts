@@ -388,7 +388,7 @@ describe('task CLI', () => {
     expect(() => parseCliArgs(['run', '--jsonl'])).toThrow('--jsonl requires run --wait.')
     expect(() => parseCliArgs(['run', '--timeout-ms', '0', '--wait'])).toThrow('Invalid timeout: 0')
     expect(() => parseCliArgs(['run', '--timeout-ms', '1000'])).toThrow(
-      '--timeout-ms requires run --wait or package.'
+      '--timeout-ms requires run --wait, package or observations.'
     )
     expect(() => parseCliArgs(['run', '--cancel-on-timeout', '--wait'])).toThrow(
       '--cancel-on-timeout requires --timeout-ms.'

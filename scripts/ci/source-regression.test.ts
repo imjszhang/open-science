@@ -50,8 +50,21 @@ const resolvePlan = (paths: string[]): ReturnType<typeof classifyChanges> => {
 it('uses the packaging heap budget for Web builds in every workflow', () => {
   const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts
   expect(scripts['build:web']).toBe(
-    'npm run gen:web-api-map && node --max-old-space-size=8192 node_modules/vite/bin/vite.js build --config vite.web.config.ts'
+    'npm run gen:web-api-map && npm run build:replay-viewer && node --max-old-space-size=8192 node_modules/vite/bin/vite.js build --config vite.web.config.ts'
   )
+})
+
+it('builds the scoped Replay viewer for desktop regression and every packaged platform', () => {
+  const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts
+  expect(scripts['build:replay-viewer']).toBe('vite build --config vite.replay-viewer.config.ts')
+  expect(scripts['build:e2e']).toBe(
+    'node --max-old-space-size=4096 node_modules/electron-vite/bin/electron-vite.js build && npm run build:replay-viewer'
+  )
+  for (const platform of ['mac', 'win', 'linux'])
+    expect(scripts[`build:${platform}`]).toBe(
+      `npm run build:web && electron-vite build && electron-builder --${platform}`
+    )
+  expect(scripts.build).toBe('npm run typecheck && electron-vite build && npm run build:web')
 })
 
 it('checks the reported Windows failures in the blocking PR core job', () => {

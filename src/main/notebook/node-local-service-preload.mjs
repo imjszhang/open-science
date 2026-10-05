@@ -41,6 +41,15 @@ if (typeof portText !== 'string' || !/^[1-9]\d{0,4}$/u.test(portText)) {
 }
 const logicalPort = Number(portText)
 if (logicalPort < 1024 || logicalPort > 65535) fail('logical port must be 1024..65535')
+const serviceProof = process.env.OPEN_SCIENCE_SERVICE_PROOF
+const serviceProofPath = process.env.OPEN_SCIENCE_SERVICE_PROOF_PATH
+if (
+  (serviceProof !== undefined || serviceProofPath !== undefined) &&
+  (!/^[a-f0-9]{64}$/.test(serviceProof ?? '') ||
+    !/^\/__open_science_proof_[a-f0-9]{32}$/.test(serviceProofPath ?? ''))
+) {
+  fail('service proof must be a private generation value and reserved path')
+}
 
 const parent = dirname(socketPath)
 const directory = lstatSync(parent)
@@ -52,11 +61,13 @@ if (
 ) {
   fail('socket parent must be an existing private directory owned by this user without symlinks')
 }
-try {
-  lstatSync(socketPath)
-  fail('socket destination already exists')
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error
+const assertSocketUnbound = () => {
+  try {
+    lstatSync(socketPath)
+    fail('socket destination already exists')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
 }
 
 const originalListen = Server.prototype.listen
@@ -89,7 +100,32 @@ Server.prototype.listen = function (...args) {
   ) {
     fail('listen must use the declared logical port, loopback host and optional callback')
   }
+  // Node helpers may inherit the preload after the service starts. Only an attempted listener
+  // consumes its socket; a helper that never listens must remain usable in the same sandbox.
+  assertSocketUnbound()
   consumed = true
+  if (serviceProof !== undefined) {
+    // The proof is served by the declared transport adapter on the same connection as business
+    // requests. It never passes through application request handlers or a public readiness route.
+    const originalEmit = this.emit
+    this.emit = function (event, ...values) {
+      if (event === 'request') {
+        const [request, response] = values
+        if (request.url === serviceProofPath) {
+          response.writeHead(request.method === 'GET' ? 200 : 405, {
+            'content-type': 'text/plain',
+            'cache-control': 'no-store',
+            'content-length': request.method === 'GET' ? '64' : '0'
+          })
+          response.end(request.method === 'GET' ? serviceProof : undefined)
+          return true
+        }
+      }
+      return originalEmit.call(this, event, ...values)
+    }
+    delete process.env.OPEN_SCIENCE_SERVICE_PROOF
+    delete process.env.OPEN_SCIENCE_SERVICE_PROOF_PATH
+  }
   return callback === undefined
     ? originalListen.call(this, socketPath)
     : originalListen.call(this, socketPath, callback)

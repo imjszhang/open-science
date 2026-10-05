@@ -45,6 +45,69 @@ afterEach(async () => {
 
 const previewAvailable = (): boolean => true
 
+it.skipIf(process.platform === 'win32')(
+  'reports actual bounded managed output before exit and isolates observer failures',
+  async () => {
+    const chunks: Array<{ runId: string; stream: string; text: string }> = []
+    const early = Promise.withResolvers<void>()
+    const capability = createManagedShellExecutionCapability({
+      projectId: 'project',
+      sessionId: 'session',
+      executionInvocationId: 'live-output',
+      cwd: portableRuntimeRoot,
+      environment: { HOME: portableRuntimeRoot, PATH: '/usr/bin:/bin' },
+      filesystem: { readOnlyRoots: [], readWriteRoots: [portableRuntimeRoot] },
+      onOutput: (chunk) => {
+        chunks.push(chunk)
+        if (chunk.stream === 'stdout') {
+          early.resolve()
+          throw new Error('observer failed')
+        }
+      }
+    })
+    let settled = false
+    const execution = runShellCommand({
+      projectId: 'project',
+      sessionId: 'session',
+      runId: 'live-run',
+      executionInvocationId: 'live-output',
+      managedExecution: capability,
+      command: "printf 'early\\n'; sleep 0.1; printf 'late\\n' >&2",
+      cwd: portableRuntimeRoot,
+      handoffDir: portableRuntimeRoot,
+      runtimeRoot: portableRuntimeRoot,
+      processSandbox: {
+        wrap: async (invocation) => ({
+          executable: invocation.executable,
+          args: invocation.args,
+          env: invocation.env,
+          annotateStderr: (text) => text,
+          cleanup: async () => ({
+            processesTerminated: true,
+            networkClosed: true,
+            temporaryResourcesRemoved: true
+          })
+        })
+      },
+      timeoutMs: 5000
+    }).finally(() => {
+      settled = true
+    })
+    await Promise.race([
+      early.promise,
+      execution.then((result) => {
+        throw new Error('The process ended before live output: ' + JSON.stringify(result))
+      })
+    ])
+    expect(settled).toBe(false)
+    expect(await execution).toMatchObject({ stdout: 'early\n', stderr: 'late\n', exitCode: 0 })
+    expect(chunks).toEqual([
+      { runId: 'live-run', stream: 'stdout', text: 'early\n' },
+      { runId: 'live-run', stream: 'stderr', text: 'late\n' }
+    ])
+  }
+)
+
 describe('bounded Shell adapter lifecycle', () => {
   const request = (
     overrides: Partial<NotebookShellProcessRequest> = {}

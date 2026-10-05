@@ -19,6 +19,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronLeft,
@@ -52,6 +53,8 @@ import {
 
 export type ReplayControlsProps = {
   playing: boolean
+  // Observation steps are recorded snapshots, without a reconstructed presentation clock.
+  recordNavigation?: boolean
   ready: boolean
   positionMs: number
   durationMs: number
@@ -107,6 +110,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
     setNavigation(null)
   }
   const [page, setPage] = useState(0)
+  const [stepNumber, setStepNumber] = useState('')
   const [detail, setDetail] = useState<number | null>(null)
   const track = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLOListElement>(null)
@@ -196,6 +200,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
     if (value) {
       props.onPause()
       setPage(Math.floor(Math.max(0, props.stepIndex) / PAGE_SIZE))
+      setStepNumber(String(props.stepIndex + 1))
       setDetail(null)
       detailTrigger.current = null
     }
@@ -223,6 +228,9 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
   const hoveredStep =
     hoverTime === null ? undefined : props.steps[replayStepAtTime(props.steps, hoverTime)]
   const ended = !empty && props.positionMs >= props.durationMs
+  const requestedStep = Number(stepNumber)
+  const validRequestedStep =
+    Number.isSafeInteger(requestedStep) && requestedStep >= 1 && requestedStep <= count
   const playLabel = ended ? t('Watch again') : props.playing ? t('Pause replay') : t('Play replay')
   return (
     <div
@@ -278,94 +286,97 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
             </TooltipProvider>
           </div>
         </div>
-        <div
-          ref={track}
-          className="group/timeline relative flex h-6 items-center"
-          data-testid="replay-timeline"
-          onPointerMove={(event) => {
-            if (empty) return
-            const rect = event.currentTarget.getBoundingClientRect()
-            setHoverTime(
-              Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * props.durationMs
-            )
-          }}
-          onPointerLeave={() => setHoverTime(null)}
-          onPointerUp={(event) => {
-            if (event.pointerType === 'touch') setHoverTime(null)
-          }}
-        >
-          <Slider.Root
-            data-testid="replay-progress-track"
-            min={0}
-            max={Math.max(1, props.durationMs)}
-            step={1}
-            onKeyDown={(event) => {
-              const direction = ['ArrowRight', 'ArrowUp', 'PageUp'].includes(event.key)
-                ? 1
-                : ['ArrowLeft', 'ArrowDown', 'PageDown'].includes(event.key)
-                  ? -1
-                  : 0
-              if (!direction || empty) return
-              event.preventDefault()
-              props.onSeek(
-                Math.max(
-                  0,
-                  Math.min(
-                    props.durationMs,
-                    props.positionMs + direction * (event.key.startsWith('Page') ? 10000 : 5000)
-                  )
-                )
+        {!props.recordNavigation ? (
+          <div
+            ref={track}
+            className="group/timeline relative flex h-6 items-center"
+            data-testid="replay-timeline"
+            onPointerMove={(event) => {
+              if (empty) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              setHoverTime(
+                Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) *
+                  props.durationMs
               )
             }}
-            value={[props.positionMs]}
-            onValueChange={([value]) => props.onSeek(value)}
-            disabled={empty}
-            className="relative flex h-6 w-full touch-none select-none items-center data-[disabled]:opacity-40"
+            onPointerLeave={() => setHoverTime(null)}
+            onPointerUp={(event) => {
+              if (event.pointerType === 'touch') setHoverTime(null)
+            }}
           >
-            <Slider.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-muted transition-[height] group-hover/timeline:h-1.5 group-focus-within/timeline:h-1.5 motion-reduce:transition-none">
-              <Slider.Range className="absolute h-full bg-primary" />
-              {breaks.map((percent) => (
-                <span
-                  key={percent}
-                  aria-hidden="true"
-                  data-replay-chapter-break
-                  className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-bg-000"
-                  style={{ left: `${percent}%` }}
-                />
-              ))}
-            </Slider.Track>
-            <Slider.Thumb
-              aria-label={t('Replay progress')}
-              aria-valuetext={`${t('{{current}} of {{duration}}', { current: formatReplayTime(props.positionMs), duration: formatReplayTime(props.durationMs) })}${current ? ` · ${label(current)}` : ''}`}
-              className="relative z-10 block size-3 rounded-full bg-primary opacity-0 transition-opacity hover:opacity-100 group-hover/timeline:opacity-100 group-focus-within/timeline:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:keyboard-focus motion-reduce:transition-none"
-            />
-          </Slider.Root>
-          <TooltipProvider>
-            <Tooltip open={hoveredStep !== undefined && !open}>
-              <TooltipTrigger asChild>
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute top-0 h-px w-px"
-                  style={{ left: `${((hoverTime ?? 0) / Math.max(1, props.durationMs)) * 100}%` }}
-                />
-              </TooltipTrigger>
-              <TooltipContent
-                side="top"
-                sideOffset={8}
-                className="max-w-64"
-                data-testid="replay-seek-preview"
-              >
-                {hoveredStep ? (
-                  <div className="flex items-center gap-2">
-                    <StepIcon step={hoveredStep} />
-                    <span className="truncate">{label(hoveredStep)}</span>
-                  </div>
-                ) : null}
-                <p className="mt-1 font-mono text-xs">{formatReplayTime(hoverTime ?? 0)}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+            <Slider.Root
+              data-testid="replay-progress-track"
+              min={0}
+              max={Math.max(1, props.durationMs)}
+              step={1}
+              onKeyDown={(event) => {
+                const direction = ['ArrowRight', 'ArrowUp', 'PageUp'].includes(event.key)
+                  ? 1
+                  : ['ArrowLeft', 'ArrowDown', 'PageDown'].includes(event.key)
+                    ? -1
+                    : 0
+                if (!direction || empty) return
+                event.preventDefault()
+                props.onSeek(
+                  Math.max(
+                    0,
+                    Math.min(
+                      props.durationMs,
+                      props.positionMs + direction * (event.key.startsWith('Page') ? 10000 : 5000)
+                    )
+                  )
+                )
+              }}
+              value={[props.positionMs]}
+              onValueChange={([value]) => props.onSeek(value)}
+              disabled={empty}
+              className="relative flex h-6 w-full touch-none select-none items-center data-[disabled]:opacity-40"
+            >
+              <Slider.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-muted transition-[height] group-hover/timeline:h-1.5 group-focus-within/timeline:h-1.5 motion-reduce:transition-none">
+                <Slider.Range className="absolute h-full bg-primary" />
+                {breaks.map((percent) => (
+                  <span
+                    key={percent}
+                    aria-hidden="true"
+                    data-replay-chapter-break
+                    className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-bg-000"
+                    style={{ left: `${percent}%` }}
+                  />
+                ))}
+              </Slider.Track>
+              <Slider.Thumb
+                aria-label={t('Replay progress')}
+                aria-valuetext={`${t('{{current}} of {{duration}}', { current: formatReplayTime(props.positionMs), duration: formatReplayTime(props.durationMs) })}${current ? ` · ${label(current)}` : ''}`}
+                className="relative z-10 block size-3 rounded-full bg-primary opacity-0 transition-opacity hover:opacity-100 group-hover/timeline:opacity-100 group-focus-within/timeline:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:keyboard-focus motion-reduce:transition-none"
+              />
+            </Slider.Root>
+            <TooltipProvider>
+              <Tooltip open={hoveredStep !== undefined && !open}>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-0 h-px w-px"
+                    style={{ left: `${((hoverTime ?? 0) / Math.max(1, props.durationMs)) * 100}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent
+                  side="top"
+                  sideOffset={8}
+                  className="max-w-64"
+                  data-testid="replay-seek-preview"
+                >
+                  {hoveredStep ? (
+                    <div className="flex items-center gap-2">
+                      <StepIcon step={hoveredStep} />
+                      <span className="truncate">{label(hoveredStep)}</span>
+                    </div>
+                  ) : null}
+                  <p className="mt-1 font-mono text-xs">{formatReplayTime(hoverTime ?? 0)}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        ) : null}
         <PopoverContent
           side="top"
           align="start"
@@ -400,6 +411,29 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
               </Button>
             </PopoverClose>
           </div>
+          {props.recordNavigation && !selected && lastPage > 0 ? (
+            <form
+              className="mb-2 flex shrink-0 items-center gap-2 px-1"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (validRequestedStep) jump(requestedStep - 1)
+              }}
+            >
+              <Input
+                type="number"
+                min={1}
+                max={count}
+                step={1}
+                aria-label={t('Step number')}
+                value={stepNumber}
+                onChange={(event) => setStepNumber(event.currentTarget.value)}
+                className="w-24 text-xs"
+              />
+              <Button type="submit" size="sm" variant="outline" disabled={!validRequestedStep}>
+                {t('Go to step')}
+              </Button>
+            </form>
+          ) : null}
           {selected ? (
             <div className="min-h-0 space-y-3 overflow-auto p-2 text-xs">
               <p className="text-muted-foreground">
@@ -473,7 +507,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
                         onClick={() => jump(index)}
                       >
                         <span className="w-10 shrink-0 font-mono tabular-nums text-muted-foreground">
-                          {formatReplayTime(step.startMs)}
+                          {props.recordNavigation ? index + 1 : formatReplayTime(step.startMs)}
                         </span>
                         <StepIcon step={step} />
                         <span className="min-w-0 truncate">{name}</span>
@@ -579,26 +613,28 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
         >
           <SkipBack size={16} />
         </Button>
-        <Button
-          variant="secondary"
-          type="button"
-          className={controlClass}
-          onClick={props.onToggle}
-          disabled={empty}
-          aria-label={playLabel}
-        >
-          {ended ? (
-            <RotateCcw size={16} />
-          ) : props.playing ? (
-            <Pause size={16} />
-          ) : (
-            <Play size={16} />
-          )}
-          <span className="sr-only">{playLabel}</span>
-          <span role="status" className="sr-only">
-            {props.playing && !props.ready ? t('Preparing recorded material…') : null}
-          </span>
-        </Button>
+        {!props.recordNavigation ? (
+          <Button
+            variant="secondary"
+            type="button"
+            className={controlClass}
+            onClick={props.onToggle}
+            disabled={empty}
+            aria-label={playLabel}
+          >
+            {ended ? (
+              <RotateCcw size={16} />
+            ) : props.playing ? (
+              <Pause size={16} />
+            ) : (
+              <Play size={16} />
+            )}
+            <span className="sr-only">{playLabel}</span>
+            <span role="status" className="sr-only">
+              {props.playing && !props.ready ? t('Preparing recorded material…') : null}
+            </span>
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           type="button"
@@ -610,35 +646,39 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
         >
           <SkipForward size={16} />
         </Button>
-        <div className="ml-auto flex min-w-0 flex-1 justify-end">
-          <span className="truncate px-1 text-xs text-muted-foreground">
-            {empty ? (
-              t('No steps')
-            ) : ended ? (
-              t('Completed')
-            ) : (
-              <span className="font-mono tabular-nums">
-                {formatReplayTime(props.positionMs)}
-                {' / '}
-                {formatReplayTime(props.durationMs)}
+        {!props.recordNavigation ? (
+          <>
+            <div className="ml-auto flex min-w-0 flex-1 justify-end">
+              <span className="truncate px-1 text-xs text-muted-foreground">
+                {empty ? (
+                  t('No steps')
+                ) : ended ? (
+                  t('Completed')
+                ) : (
+                  <span className="font-mono tabular-nums">
+                    {formatReplayTime(props.positionMs)}
+                    {' / '}
+                    {formatReplayTime(props.durationMs)}
+                  </span>
+                )}
               </span>
-            )}
-          </span>
-        </div>
-        <Select
-          value={String(props.speed)}
-          onValueChange={(value) => props.onSpeed(Number(value) as ReplaySpeed)}
-          disabled={empty}
-        >
-          <SelectTrigger aria-label={t('Playback speed')} className="h-8 w-16 shrink-0 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REPLAY_SPEEDS.map((speed) => (
-              <SelectItem key={speed} value={String(speed)}>{`${speed}×`}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            </div>
+            <Select
+              value={String(props.speed)}
+              onValueChange={(value) => props.onSpeed(Number(value) as ReplaySpeed)}
+              disabled={empty}
+            >
+              <SelectTrigger aria-label={t('Playback speed')} className="h-8 w-16 shrink-0 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {REPLAY_SPEEDS.map((speed) => (
+                  <SelectItem key={speed} value={String(speed)}>{`${speed}×`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
       </div>
     </div>
   )

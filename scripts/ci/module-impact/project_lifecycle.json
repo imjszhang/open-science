@@ -270,7 +270,11 @@
       "src/main/notebook/local-rpc-server.artifacts.test.ts",
       "src/main/notebook/managed-execution-collection.integration.test.ts",
       "src/main/notebook/managed-output-publication.integration.test.ts",
-      "src/main/composition/artifact-surfaces.test.ts"
+      "src/main/composition/artifact-surfaces.test.ts",
+      "src/main/run-observation/recorded-reader.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/run-observation/capture-package.integration.test.ts",
+      "src/main/run-observation/media-collector.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

@@ -1773,6 +1773,21 @@ class NotebookRuntimeService {
     }
   }
 
+  /** Main-only cancellation for an exact admitted managed Run. No Session-wide fallback. */
+  async cancelManagedShellRun(
+    scope: ManagedShellExecutionScope & { runId: string }
+  ): Promise<void> {
+    const call = this.managedShellCalls.get(
+      JSON.stringify([scope.projectId, scope.sessionId, scope.executionInvocationId])
+    )
+    if (!call?.runIds.has(scope.runId)) throw new Error('The managed Run is unavailable.')
+    const result = await this.executionOwner.cancelShellRuns(
+      { projectId: scope.projectId, sessionId: scope.sessionId, runId: scope.runId },
+      new Error('Managed Run cancelled explicitly from Replay.')
+    )
+    if (!result.reaped) throw new Error('The managed Run has not confirmed process cleanup.')
+  }
+
   /** Retires this invocation before checking proof. Never shuts down another Run or interpreter. */
   async confirmManagedShellCleanup(
     scope: ManagedShellExecutionScope,

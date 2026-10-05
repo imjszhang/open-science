@@ -2,7 +2,9 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, realpath, rename } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
+import serviceAdapterSource from './node-local-service-preload.mjs?raw'
 import {
   compareResearchReproductionArchiveEntries,
   type ResearchReproductionArchiveEntry
@@ -165,6 +167,10 @@ export type ManagedEnvironmentExecution = EnvironmentReference & {
   retainCollection?: boolean
   environment?: Readonly<Record<string, string>>
   localServicePort?: number
+  /** Trusted observers only; neither callback nor proof comes from the public request payload. */
+  onOutput?: import('./managed-shell-execution').ManagedShellExecutionPolicy['onOutput']
+  serviceProof?: import('./managed-shell-execution').ManagedServiceProof
+  onServiceAllocated?: (service: { runId: string; socketPath: string; signal: AbortSignal }) => void
   signal?: AbortSignal
 }
 export type ManagedEnvironmentExecutionContext = Readonly<{
@@ -665,6 +671,40 @@ export class ManagedResearchEnvironmentOwner {
       const inputRoot = join(this.root(receipt.environmentId), 'inputs')
       const workRoot = join(this.root(receipt.environmentId), 'work')
       const outputRoot = join(this.outputContainer(receipt), 'files')
+      let serviceAdapter: string | undefined
+      if (request.serviceProof) {
+        if (request.localServicePort === undefined)
+          throw new Error('An interactive service requires its declared local service port.')
+        // The application-owned adapter is outside all workload write roots. Never replace or
+        // trust an adapter from imported materials; the selected version is part of this runtime.
+        serviceAdapter = join(this.root(receipt.environmentId), 'service-adapter.mjs')
+        let handle: Awaited<ReturnType<typeof open>> | undefined
+        try {
+          handle = await open(
+            serviceAdapter,
+            constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+            0o400
+          )
+          await handle.writeFile(serviceAdapterSource)
+          await handle.sync()
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+          const existing = await open(serviceAdapter, constants.O_RDONLY | constants.O_NOFOLLOW)
+          try {
+            const stat = await existing.stat()
+            if (
+              !stat.isFile() ||
+              stat.size !== Buffer.byteLength(serviceAdapterSource) ||
+              hash(await existing.readFile('utf8')) !== hash(serviceAdapterSource)
+            )
+              throw new Error('The managed service adapter has changed.')
+          } finally {
+            await existing.close()
+          }
+        } finally {
+          await handle?.close()
+        }
+      }
       const environment: Record<string, string> = {
         PATH:
           dirname(receipt.runtime.executable) +
@@ -674,7 +714,13 @@ export class ManagedResearchEnvironmentOwner {
         TMPDIR: join(workRoot, 'tmp'),
         OPEN_SCIENCE_INPUT_DIR: inputRoot,
         OPEN_SCIENCE_OUTPUT_DIR: outputRoot,
-        OPEN_SCIENCE_NODE: receipt.runtime.executable
+        OPEN_SCIENCE_NODE: receipt.runtime.executable,
+        ...(serviceAdapter
+          ? {
+              NODE_OPTIONS: `--import=${pathToFileURL(serviceAdapter).href}`,
+              OPEN_SCIENCE_SERVICE_ADAPTER_SHA256: hash(serviceAdapterSource)
+            }
+          : {})
       }
       for (const [key, value] of Object.entries(request.environment ?? {})) {
         if (/^(?:OPEN_SCIENCE_|NODE_|DYLD_|LD_)/.test(key) || key in environment) {
@@ -693,16 +739,22 @@ export class ManagedResearchEnvironmentOwner {
         outputRoot,
         environment,
         filesystem: {
-          readOnlyRoots: [inputRoot, ...receipt.runtime.readOnlyRoots],
+          readOnlyRoots: [
+            inputRoot,
+            ...receipt.runtime.readOnlyRoots,
+            ...(serviceAdapter ? [serviceAdapter] : [])
+          ],
           readWriteRoots: [workRoot, outputRoot]
         },
         fingerprint: receipt.fingerprint,
         signal,
+        ...(request.onOutput ? { onOutput: request.onOutput } : {}),
         ...(request.localServicePort === undefined
           ? {}
           : {
               localService: {
                 logicalPort: request.localServicePort,
+                ...(request.serviceProof ? { proof: request.serviceProof } : {}),
                 prepareSocket: async ({ runId }): Promise<string> => {
                   identity.parse(runId)
                   signal.throwIfAborted()
@@ -722,7 +774,9 @@ export class ManagedResearchEnvironmentOwner {
                     )
                   await this.write(receipt)
                   signal.throwIfAborted()
-                  return join(path, 'service.sock')
+                  const socketPath = join(path, 'service.sock')
+                  request.onServiceAllocated?.({ runId, socketPath, signal })
+                  return socketPath
                 }
               }
             })
