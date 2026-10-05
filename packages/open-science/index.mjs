@@ -179,7 +179,9 @@ export class OpenScienceClient {
           'cancelOperation',
           'waitOperation',
           'getEnvironment',
-          'releaseEnvironment'
+          'releaseEnvironment',
+          'collectOutputs',
+          'discardOutputs'
         ].map((method) => [
           method,
           (payload = {}, options = {}) => {

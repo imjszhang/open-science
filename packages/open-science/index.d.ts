@@ -520,6 +520,8 @@ export type PrepareManagedEnvironmentRequest = ManagedSessionScope & {
       }
 }
 export type ManagedEnvironmentReference = ManagedSessionScope & { environmentId: string }
+export type ManagedCollectionReference = ManagedEnvironmentReference & { collectionId: string }
+export type CollectManagedOutputsRequest = ManagedCollectionReference & { requestId: string }
 export type ExecuteManagedEnvironmentRequest = ManagedEnvironmentReference & {
   requestId: string
   command: string
@@ -586,6 +588,13 @@ export type ManagedEnvironment = ManagedEnvironmentReference & {
   state: 'preparing' | 'ready' | 'releasing' | 'cleanup-pending' | 'released' | 'failed'
   runtime: ManagedRuntime
   inputs: Array<ManagedMaterialVersion & { materialKey?: string; restorePath?: string }>
+  /** Retained outputs await collection or publication; release preserves them until resolved. */
+  pendingCollection?: { collectionId: string; executionInvocationId: string }
+  discardedCollections?: Array<{
+    collectionId: string
+    executionInvocationId: string
+    discardedAt: number
+  }>
   error?: string
 }
 export type SessionOperationSnapshot = ManagedOperationReference & {
@@ -650,8 +659,19 @@ export type ManagedExecutionClient = {
     request: ManagedEnvironmentReference,
     options?: RequestOptions
   ): Promise<ManagedEnvironment>
+  /** Request cleanup; pending outputs remain until their exact Versions and receipt are published. */
   releaseEnvironment(
     request: ManagedEnvironmentReference,
+    options?: RequestOptions
+  ): Promise<ManagedEnvironment>
+  /** Save retained outputs without rerunning the command; observe this operation by requestId. */
+  collectOutputs(
+    request: CollectManagedOutputsRequest,
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot>
+  /** Explicitly abandon this pending collection; already published Artifacts remain immutable. */
+  discardOutputs(
+    request: ManagedCollectionReference,
     options?: RequestOptions
   ): Promise<ManagedEnvironment>
 }

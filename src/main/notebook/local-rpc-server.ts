@@ -27,6 +27,7 @@ import {
   type NotebookRunProvenanceContext
 } from '../../shared/notebook'
 import type { HostArtifactCatalogItem } from '../../shared/project-files'
+import type { ArtifactProducerInputScope } from '../managed-file-versions/service'
 import {
   createArtifactVersionLocator,
   parseArtifactVersionLocator
@@ -279,7 +280,8 @@ type NotebookLocalRpcServerOptions = {
     list(options: unknown, context: { projectId: string; sessionId: string }): Promise<unknown>
     resolvePath(
       versionId: unknown,
-      context: { projectId: string; sessionId: string }
+      context: { projectId: string; sessionId: string },
+      producerScope?: ArtifactProducerInputScope
     ): Promise<string>
   }
   delegationInputCatalog?: {
@@ -2381,6 +2383,48 @@ class NotebookLocalRpcServer {
               }
             })
           : undefined
+      // A catalog read never gains unpublished access from request parameters. Only the exact
+      // live foreground Main invocation may read back a version from its own Artifact turn.
+      let artifactProducerScope: ArtifactProducerInputScope | undefined
+      if (
+        method === 'artifactsCall' &&
+        resolvedParams.op === 'path' &&
+        initialSessionBinding === authenticatedBinding &&
+        initialSessionBinding?.isControl &&
+        !initialSessionBinding.delegatedNotebook &&
+        initialSessionBinding.delegatedWorkRole === 'main' &&
+        initialControlInvocation &&
+        initialControlInvocation.executionMode !== 'background' &&
+        initialControlInvocation.rootExecutionId === initialTurn?.ownerExecutionId &&
+        initialSessionBinding.activeControlInvocation === initialControlInvocation &&
+        initialControlLifetime &&
+        initialTurn?.artifactRunId &&
+        initialSessionId &&
+        initialSessionId === resolvedParams.sessionId &&
+        initialTurn.projectId === resolvedParams.projectId &&
+        initialSessionBinding.agentFrameId === initialTurn.provenanceContext.agentFrameId &&
+        initialTurn.provenanceContext.agentFrameId === initialTurn.provenanceContext.rootFrameId
+      ) {
+        const provenance = managedExecutionProvenanceSchema.safeParse(initialTurn.provenanceContext)
+        if (provenance.success) {
+          const producerSignal = AbortSignal.any([dispatchSignal, initialControlLifetime.signal])
+          artifactProducerScope = Object.freeze({
+            ...provenance.data,
+            appSessionId: initialSessionId,
+            artifactRunId: initialTurn.artifactRunId,
+            assertActive: () => {
+              producerSignal.throwIfAborted()
+              if (
+                lifecycle.closing ||
+                this.sessionRpcCapabilities.get(bearerToken) !== initialSessionBinding ||
+                this.activeArtifactTurnBindings.get(initialSessionId) !== initialTurn ||
+                initialSessionBinding.activeControlInvocation !== initialControlInvocation
+              )
+                throw new RpcHttpError(409, 'Artifact producer input turn is no longer active.')
+            }
+          })
+        }
+      }
       const result =
         managedCall && managedContext
           ? await withDataRootWrite(async () => {
@@ -2416,7 +2460,9 @@ class NotebookLocalRpcServer {
                   resolvedParams,
                   dispatchSignal,
                   checkMemoryAccess,
-                  artifactAdmission?.addBytes
+                  artifactAdmission?.addBytes,
+                  undefined,
+                  artifactProducerScope
                 )
 
       writeJson(response, 200, { result })
@@ -2493,7 +2539,8 @@ class NotebookLocalRpcServer {
     signal: AbortSignal,
     checkMemoryAccess?: () => Promise<void>,
     onArtifactMetadataBytes?: (bytes: number) => void,
-    onExecutionSettled?: (error?: unknown) => void
+    onExecutionSettled?: (error?: unknown) => void,
+    artifactProducerScope?: ArtifactProducerInputScope
   ): Promise<unknown> {
     if (WSL_SETUP_RPC_METHODS.has(method)) {
       if (!this.wslSetup || !this.wslSetupSessions) {
@@ -2715,7 +2762,9 @@ class NotebookLocalRpcServer {
       const context = { projectId, sessionId }
       if (params.op === 'list') return this.hostArtifacts.list(params.options, context)
       if (params.op === 'path') {
-        return this.hostArtifacts.resolvePath(params.version_id, context)
+        return artifactProducerScope
+          ? this.hostArtifacts.resolvePath(params.version_id, context, artifactProducerScope)
+          : this.hostArtifacts.resolvePath(params.version_id, context)
       }
       throw new RpcHttpError(400, 'Unknown host Artifact operation.')
     }

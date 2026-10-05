@@ -201,7 +201,9 @@ async function setup(): Promise<Harness> {
     })
   })
   const service = new ManagedExecutionService({
+    artifacts,
     dataRoot: root,
+    notebooks,
     environments,
     operations,
     runtime: notebook,
@@ -380,7 +382,11 @@ describe.skipIf(process.platform !== 'darwin')(
               cause: String(error),
               runs: documents
                 .flatMap((document) => document.runs)
-                .map((run) => ({ status: run.status, text: run.text }))
+                .map((run) => ({
+                  status: run.status,
+                  text: run.text,
+                  workingFiles: run.workingFiles
+                }))
             }),
             { cause: error }
           )

@@ -67,7 +67,9 @@ it.skipIf(process.platform === 'win32').each(['external', 'ordinary', 'fork'])(
     cleanups.push(() => environments.close())
     const content = 'fixed research source'
     const service = new ManagedExecutionService({
+      artifacts: h.artifacts,
       dataRoot: h.fixture.storageRoot,
+      notebooks: h.fixture.notebookRepository,
       environments,
       operations: h.owner,
       runtime: h.notebook,

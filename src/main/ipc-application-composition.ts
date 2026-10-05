@@ -606,6 +606,17 @@ export const createApplicationModules = async (
     notifyRendererDurabilityAborted
   })
   const artifactSurfaces = composeArtifactSurfaces({
+    onArtifactsPublished: async (artifacts) => {
+      const scopes = new Map<string, { projectId: string; sessionId: string }>()
+      for (const artifact of artifacts) {
+        if (!artifact.projectId) continue
+        const scope = { projectId: artifact.projectId, sessionId: artifact.sessionId }
+        scopes.set(JSON.stringify([scope.projectId, scope.sessionId]), scope)
+      }
+      await Promise.all(
+        [...scopes.values()].map((scope) => managedExecution.reconcilePublishedOutputs(scope))
+      )
+    },
     surfaceAdapters,
     declareElectronAdapter,
     ...storageStartup,

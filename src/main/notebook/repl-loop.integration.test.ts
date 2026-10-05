@@ -3939,10 +3939,29 @@ gate('managed execution Host SDK bridge', () => {
           executionId: 'execution'
         }
       ])
+      for (const method of ['collectOutputs', 'discardOutputs']) {
+        const payload = {
+          environmentId: 'environment',
+          collectionId: 'collection',
+          ...(method === 'collectOutputs' ? { requestId: 'collect-1' } : {})
+        }
+        const reply = await send(
+          `const result = await host.managedExecution.${method}(${JSON.stringify(payload)}); return { frozen: Object.isFrozen(result) && Object.isFrozen(result.nested), state: result.nested.state }`
+        )
+        expect(reply.error).toBeNull()
+        expect(JSON.parse(reply.result ?? '{}')).toEqual({ frozen: true, state: 'ready' })
+        expect(requests.at(-1)).toEqual({
+          method,
+          payload,
+          sessionId: 'session',
+          executionId: 'execution'
+        })
+        expect((await send(`await host.managedExecution.${method}([])`)).error).toContain('object')
+      }
       expect((await send('await host.managedExecution.execute([])')).error).toContain('object')
       end()
       expect((await send('await host.managedExecution.runtimes()')).error).toContain('active Main')
-      expect(requests).toHaveLength(1)
+      expect(requests).toHaveLength(3)
     } finally {
       child.kill()
       end()

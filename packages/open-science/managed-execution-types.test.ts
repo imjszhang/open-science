@@ -17,6 +17,13 @@ it('publishes managed execution requests compatible with strict application sche
     type Prepare = Assert<Compatible<SDK.PrepareManagedEnvironmentRequest, Shared.PrepareManagedEnvironmentRequest>>
     type Execute = Assert<Compatible<SDK.ExecuteManagedEnvironmentRequest, Shared.ExecuteManagedEnvironmentRequest>>
     type Environment = Assert<Compatible<SDK.ManagedEnvironmentReference, Shared.ManagedEnvironmentReference>>
+    type Collection = Assert<Compatible<SDK.ManagedCollectionReference, Shared.ManagedCollectionReference>>
+    type Collect = Assert<Compatible<SDK.CollectManagedOutputsRequest, Shared.CollectManagedOutputsRequest>>
+    type CollectResult = Assert<Compatible<Awaited<ReturnType<SDK.ManagedExecutionClient['collectOutputs']>>, SDK.SessionOperationSnapshot>>
+    type DiscardResult = Assert<Compatible<Awaited<ReturnType<SDK.ManagedExecutionClient['discardOutputs']>>, SDK.ManagedEnvironment>>
+    type NoRecoveryAuthority = Assert<'recoveryAuthority' extends keyof SDK.CollectManagedOutputsRequest ? false : true>
+    type NoWriteAttempt = Assert<'writeAttempt' extends keyof SDK.CollectManagedOutputsRequest ? false : true>
+    type NoProvenance = Assert<'provenance' extends keyof SDK.ManagedCollectionReference ? false : true>
     type Operation = Assert<Compatible<SDK.ManagedOperationReference, Shared.ManagedOperationReference>>
     type NoRuntimePath = Assert<'executable' extends keyof SDK.ManagedRuntime ? false : true>
     type NoRoots = Assert<'readOnlyRoots' extends keyof SDK.ManagedRuntime ? false : true>
@@ -30,6 +37,13 @@ it('publishes managed execution requests compatible with strict application sche
     type PackageTarget = Assert<SDK.PackageImportTarget extends SessionPackageImportRequest ? true : false>
     declare const client: SDK.OpenScienceClient
     client.execution.runtimes().then(result => result.diagnostics?.issues.map(issue => issue.code))
+    client.execution.getEnvironment({ projectId: 'p', sessionId: 's', environmentId: 'e' }).then(result => result.pendingCollection?.collectionId)
+    client.execution.collectOutputs({ projectId: 'p', sessionId: 's', environmentId: 'e', collectionId: 'c', requestId: 'collect-1' })
+    client.execution.discardOutputs({ projectId: 'p', sessionId: 's', environmentId: 'e', collectionId: 'c' })
+    // @ts-expect-error Collection never accepts caller-issued provenance.
+    client.execution.collectOutputs({ projectId: 'p', sessionId: 's', environmentId: 'e', collectionId: 'c', requestId: 'r', provenance: {} })
+    // @ts-expect-error Discard requires an explicit pending collection.
+    client.execution.discardOutputs({ projectId: 'p', sessionId: 's', environmentId: 'e' })
     client.packages.preflightImport({ filePath: '/research.science', target: { projectId: 'p' } })
     client.packages.commitImport({ preflightId: 'review' })
     // @ts-expect-error An explicit import destination is required.

@@ -528,7 +528,7 @@ it('documents every managed request boundary without accepting Session or turn a
     backgroundSafety: 'unsafe'
   })
   if (help.kind !== 'operation') throw new Error('expected operation')
-  expect(help.callForms).toHaveLength(6)
+  expect(help.callForms).toHaveLength(8)
   const request = fields(help.request)
   for (const key of [
     'sourceSessionId',
@@ -536,6 +536,7 @@ it('documents every managed request boundary without accepting Session or turn a
     'runtimeId',
     'materials',
     'environmentId',
+    'collectionId',
     'requestId',
     'command',
     'outputs',
@@ -546,6 +547,16 @@ it('documents every managed request boundary without accepting Session or turn a
   expect(help.returns.description).toContain('nativeServiceSupported')
   expect(help.returns.description).toContain('code, message, action')
   expect(help.constraints.join(' ')).toContain('not plan readiness')
+  expect(help.constraints.join(' ')).toContain('never reruns the command')
+  expect(help.constraints.join(' ')).toContain('releaseEnvironment preserves pending outputs')
+  expect(help.constraints.join(' ')).toContain('explicit discardOutputs')
+  expect(help.constraints.join(' ')).toContain('finish/recover the original turn')
+  expect(help.constraints.join(' ')).toContain('all exact Versions and the receipt publish')
+  expect(help.constraints.join(' ')).toContain('host.artifactPath via producer authority')
+  expect(help.constraints.join(' ')).toContain('ordinary catalog stays published-only')
+  expect(help.callForms.map((form) => form.signature).join(' ')).toContain('collectOutputs')
+  for (const authority of ['provenance', 'recoveryAuthority', 'writeAttempt'])
+    expect(request.some((field) => field.name === authority)).toBe(false)
   expect(hostSdkHelp.query('managedExecution', delegateContext)).toMatchObject({
     availability: { status: 'unavailable' }
   })

@@ -1077,28 +1077,36 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   id: 'host.managedExecution',
   path: 'host.managedExecution',
   aliases: ['managedExecution'],
-  summary: 'Prepare and run materials in this Session.',
+  summary: 'Prepare, run and collect materials.',
   callForms: [
     { signature: 'await host.managedExecution.runtimes()', accepts: 'no_arguments' },
     {
       signature: 'await host.managedExecution.inspectMaterials(options)',
-      accepts: 'source_selection'
+      accepts: 'options'
     },
     {
       signature: 'await host.managedExecution.prepare(options)',
-      accepts: 'verified_materials_and_runtime'
+      accepts: 'options'
     },
     {
       signature: 'await host.managedExecution.execute(options)',
-      accepts: 'environment_command_and_outputs'
+      accepts: 'options'
     },
     {
       signature: 'await host.managedExecution.getEnvironment({ environmentId })',
-      accepts: 'environment_reference'
+      accepts: 'options'
     },
     {
       signature: 'await host.managedExecution.releaseEnvironment({ environmentId })',
-      accepts: 'environment_reference'
+      accepts: 'options'
+    },
+    {
+      signature: 'await host.managedExecution.collectOutputs(options)',
+      accepts: 'options'
+    },
+    {
+      signature: 'await host.managedExecution.discardOutputs(options)',
+      accepts: 'options'
     }
   ],
   request: {
@@ -1107,71 +1115,75 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
         name: 'sourceSessionId',
         type: 'string',
         required: false,
-        description: 'Source research for inspectMaterials and prepare.'
+        description: 'inspectMaterials/prepare: source Session.'
       },
       {
         name: 'environmentId',
         type: 'string',
         required: false,
-        description: 'Prepared environment identifier.'
+        description: 'Prepared environment.'
+      },
+      {
+        name: 'collectionId',
+        type: 'string',
+        required: false,
+        description: 'collectOutputs/discardOutputs: getEnvironment.pendingCollection.collectionId.'
       },
       {
         name: 'requestId',
         type: 'string',
         required: false,
-        description: 'Stable request identity for prepare and execute.'
+        description: 'Stable identity for prepare/execute/collectOutputs.'
       },
       {
         name: 'sourceIdentity',
         type: 'string',
         required: false,
-        description: 'prepare: exact source identity from inspectMaterials.'
+        description: 'prepare: inspected identity.'
       },
       {
         name: 'runtimeId',
         type: 'string',
         required: false,
-        description: 'prepare: available id from runtimes.'
+        description: 'prepare: runtimes identifier.'
       },
       {
         name: 'materials',
         type: 'object',
         required: false,
         description:
-          'prepare: { files: [{ versionId, restorePath }] } or { descriptorVersionId, materialKeys, materialVersions? }. Paths are relative. materialVersions maps keys to inspected Version ids.'
+          'prepare: {files:[{versionId,restorePath}]} or {descriptorVersionId,materialKeys,materialVersions?}; relative paths; materialVersions maps keys to Version IDs.'
       },
       {
         name: 'versionIds',
         type: 'string[]',
         required: false,
-        description:
-          'Source Version IDs for inspection/preparation; inspection also accepts descriptorVersionId.'
+        description: 'Source Versions; inspection also accepts descriptorVersionId.'
       },
       {
         name: 'outputs',
         type: 'object[]',
         required: false,
         description:
-          'For execute: [{ path, filename, contentType?, optional? }], paths relative to the owned output root. Saves actual files as Artifacts in the current turn; defaults to [].'
+          'execute: [{path,filename,contentType?,optional?}]; relative output paths; default [].'
       },
       {
         name: 'timeoutMs',
         type: 'integer',
         required: false,
-        description: 'For execute: 1–600000 milliseconds, default 60000.'
+        description: 'execute: 1–600000 ms; default 60000.'
       },
       {
         name: 'localServicePort',
         type: 'integer',
         required: false,
-        description:
-          'execute: loopback HTTP port, 1–65535, routed through the managed service capability.'
+        description: 'execute: managed loopback HTTP port (1–65535).'
       },
       {
         name: 'command',
         type: 'string',
         required: false,
-        description: 'Command for execute, run by Open Science.'
+        description: 'execute: reviewed command.'
       }
     ]
   },
@@ -1179,23 +1191,21 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   returns: {
     type: 'object',
     description:
-      'Inspection, environment or execution result. runtimes: { available, runtimes, diagnostics?: { nativeServiceSupported, issues: [{ code, message, action }] } }.'
+      'runtimes: { available, runtimes, diagnostics?: { nativeServiceSupported, issues: [{ code, message, action }] } }.'
   },
   constraints: [
-    'Active Main foreground turn only; does not create another Session or call another model.',
-    'Inspect materials; explain missing inputs and changed conditions. Use returned identifiers.',
-    'macOS, existing Node >=22. Fixed inputs: OPEN_SCIENCE_INPUT_DIR; outputs: OPEN_SCIENCE_OUTPUT_DIR.',
-    'Node found is not plan readiness. Explain diagnostics; no automatic installation or host-terminal fallback.',
-    'Stop the turn to cancel. Release after collection; published Artifacts remain.'
+    'Active Main turn; does not create another Session or call another model.',
+    'Inspect materials; explain missing inputs/changed conditions; use returned IDs.',
+    'macOS; existing Node >=22. Inputs: OPEN_SCIENCE_INPUT_DIR; outputs: OPEN_SCIENCE_OUTPUT_DIR.',
+    'Node found is not plan readiness; explain diagnostics. No auto-install or host-terminal fallback.',
+    'Stop turn to cancel. collectOutputs never reruns the command; if publication is pending, finish/recover the original turn.',
+    'releaseEnvironment preserves pending outputs; requested cleanup completes after all exact Versions and the receipt publish. Only explicit discardOutputs abandons them.',
+    'Same-turn output versionId: host.artifactPath via producer authority; ordinary catalog stays published-only.',
+    'Never supply provenance, recoveryAuthority or writeAttempt.'
   ],
-  examples: [
-    {
-      title: 'Run a reviewed prepared script',
-      code: 'await host.managedExecution.execute({ environmentId, requestId: "analysis-1", command: \'node "$OPEN_SCIENCE_INPUT_DIR/analysis.mjs"\', outputs: [{ path: "result.json", filename: "result.json" }] })'
-    }
-  ],
+  examples: [],
   backgroundSafety: 'unsafe',
-  backgroundSafetyReason: 'Borrows the active foreground Artifact turn.',
+  backgroundSafetyReason: 'Active foreground Artifact turn.',
   resolveAvailability: ({ capabilities }) =>
     capabilities.managedExecution
       ? { status: 'available' }

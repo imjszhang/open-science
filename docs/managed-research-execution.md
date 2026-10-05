@@ -186,6 +186,61 @@ prove product-wide integration or native behavior.
   aggregation and original conclusion are unverified. All declared outputs and producer identity
   round trips passed. This is arithmetic on synthetic CC0 materials, not evidence of an effect
   or proof that a real Agent can explain the compromise without further client validation.
+- Test `0.35.0-test.50e8875ca682.2` completed the installed downstream-only SDK acceptance
+  (`installed-acceptance-20261005-downstream-02`): unavailable original rows returned the typed
+  refusal without creating a Run; the public analysis produced four byte-verified outputs and
+  passed 25 assertions. A read-only audit checked the actual local Run/Version remapping after
+  export and reimport. Both sets of immutable outputs remained readable after release. The first
+  attempt stopped before execution because the verifier compared export timestamps as research
+  content. Its failed evidence was retained; only the manifest creation time and root RO-Crate
+  Dataset publication time are normalized in the corrected comparison.
+- The installed generic SDK acceptance (`installed-acceptance-20261005-test-01`) also passed:
+  arithmetic, explicit cancellation and actual process timeout, three terminal Notebook Runs,
+  output export/reimport, source preservation and readable results after release. These are
+  synthetic examples without experimental provider calls, not scientific conclusions.
+- In a fresh ordinary Test Session, the Agent discovered the Tuanzi materials and performed one
+  offline engineering run. The storage-alias fix saved thirteen declared files and the collection
+  receipt. An immediate `host.artifactPath` read failed because the ordinary Project catalog only
+  exposes finalized Versions. After that turn ended, the same fourteen Versions were verified,
+  a correction report was saved and the environment was released without another engineering run.
+  The current source now reuses the existing trusted producer-input scope for exact current-turn
+  Version readback. Project listings remain restricted to published results. This readback change
+  still needs an installed-client journey after the next Test build.
+
+## Retained output collection
+
+An execution records a collection identity before dispatch. Once the Notebook owner proves that
+the process has stopped, Main freezes declared output paths, observed bytes and any captured file
+generations, and writes a durable publication intent before each Artifact save. Failed collection
+leaves the environment's outputs available; another execution cannot overwrite them. Ordinary
+release stops resources but retains these pending outputs. Saving all files leaves the collection
+`awaiting-publication` until every exact output Version, including the collection receipt, is finalized
+and visible. The existing Artifact publication notification and startup/query reconciliation verify
+this authority before acknowledging collection. A release requested before publication is durable
+and finishes automatically after acknowledgment. Explicit `discardOutputs` records the decision to
+abandon retained outputs before allowing removal.
+
+`getEnvironment` exposes `pendingCollection`. Codex can submit `collectOutputs` as a new ordinary
+Session operation, or an Open Science Agent can call it in its current turn. This operation never
+dispatches the original command. It retains the original producer Run and requires the actual
+current branch and message ancestry. A saved and published Version is reused through its exact
+write intent; it is not reassigned to the new turn. An old pending Version must finish its original
+owner's publication before it can count as recovered. In particular, a crash before the original
+finalization marker exists does not automatically manufacture publication authority: the retained
+collection reports that its original turn must finish or recover. A native `.science` snapshot can
+preserve pending records as unfinished evidence; that does not make them published results.
+Missing captured generation evidence permits
+the original ordinary save but blocks later automatic recovery instead of inventing evidence.
+
+New saves constrain the bytes before the database write. Publication failure, byte changes,
+ambiguous ownership or revoked authority keep the outputs retained. Collection receipts are ordinary
+Artifacts and state whether collection occurred without execution. None of these local journals or
+capabilities changes `.science` v1 or makes the optional research description executable authority.
+
+Targeted source tests cover real process/Notebook/SQLite collection across turns, uncertain save
+acknowledgements, exact Version reuse, cancellation, native macOS containment, missing evidence,
+cross-branch refusal and immutable output readability after release. Current-source full validation,
+updated Test delivery and installed ordinary/fork acceptance remain separate final gates.
 
 ## Real-material acceptance
 

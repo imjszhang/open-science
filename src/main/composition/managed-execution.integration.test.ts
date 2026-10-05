@@ -450,3 +450,57 @@ it('applies the same handoff fence to native Agent calls as to authenticated ext
   })
   expect(turn.assertActive).toHaveBeenCalledOnce()
 })
+
+it('reconciles published output markers only after environment and operation startup recovery', async () => {
+  const { composed } = await setup()
+  const order: string[] = []
+  vi.spyOn(composed.environments, 'recover').mockImplementation(async () => {
+    order.push('environment')
+  })
+  vi.spyOn(composed.operations, 'recover').mockImplementation(async () => {
+    order.push('operations')
+  })
+  const reconcile = vi
+    .spyOn(composed.service, 'reconcilePublishedOutputs')
+    .mockImplementation(async () => {
+      order.push('published-outputs')
+    })
+  await composed.recover()
+  expect(order).toEqual(['environment', 'operations', 'published-outputs'])
+  expect(reconcile).toHaveBeenCalledExactlyOnceWith(undefined)
+})
+
+it.each(['quiesce', 'close'] as const)(
+  'drains tracked publication reconciliation through %s and rejects work after hold',
+  async (method) => {
+    const { composed } = await setup()
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const reconcile = vi
+      .spyOn(composed.service, 'reconcilePublishedOutputs')
+      .mockImplementation(() => pending)
+    const environmentQuiesce = vi.spyOn(composed.environments, 'quiesce')
+    const reference = { projectId: scope.projectId, sessionId: scope.sessionId }
+    const work = composed.reconcilePublishedOutputs(reference)
+    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledExactlyOnceWith(reference))
+    composed.hold()
+    await expect(composed.reconcilePublishedOutputs(reference)).rejects.toMatchObject({
+      code: 'unavailable'
+    })
+    let drained = false
+    const stopping = composed[method]().then(() => {
+      drained = true
+    })
+    try {
+      await vi.waitFor(() => expect(environmentQuiesce).toHaveBeenCalled())
+      expect(drained).toBe(false)
+    } finally {
+      finish()
+      await Promise.all([work, stopping])
+    }
+    expect(drained).toBe(true)
+    expect(reconcile).toHaveBeenCalledOnce()
+  }
+)

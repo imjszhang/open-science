@@ -1117,7 +1117,7 @@ const handleTaskApiRequest = async (
         assertExternalAuthorizationCurrent(externalAuthorization)
         const operation = (): Promise<unknown> => tasks.callManagedExecution!(method, body)
         // Reads and waits must observe fresh state, even when a caller sends an Idempotency-Key.
-        const data = ['createSession', 'prepare', 'execute'].includes(method)
+        const data = ['createSession', 'prepare', 'execute', 'collectOutputs'].includes(method)
           ? await runIdempotentTask(
               idempotencyRegistry,
               request,
@@ -1129,7 +1129,7 @@ const handleTaskApiRequest = async (
             )
           : await operation()
         assertExternalAuthorizationCurrent(externalAuthorization)
-        json(response, method === 'execute' ? 202 : 200, { data })
+        json(response, ['execute', 'collectOutputs'].includes(method) ? 202 : 200, { data })
         return true
       }
       if (url.pathname === '/api/v1/doctor' && request.method === 'GET' && tasks.doctor) {

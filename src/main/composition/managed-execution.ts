@@ -48,6 +48,7 @@ export type ManagedExecutionComposition = {
   quiesce(): Promise<void>
   close(): Promise<void>
   recover(): Promise<void>
+  reconcilePublishedOutputs(scope?: { projectId: string; sessionId: string }): Promise<void>
   stopSession(projectId: string, sessionId: string): Promise<void>
   stopProject(projectId: string): Promise<void>
 }
@@ -193,7 +194,9 @@ export async function composeManagedExecution({
       archive.withProjectAvailable(projectId, operation)
   })
   const service = new ManagedExecutionService({
+    artifacts: managedFiles.artifactProvenanceRepository,
     dataRoot,
+    notebooks: managedFiles.notebookRepository,
     environments,
     operations,
     runtime: notebook,
@@ -273,6 +276,10 @@ export async function composeManagedExecution({
         })
       )
   })
+  // Publication enrichment must drain before handoff, but cannot own a new execution or
+  // hold a Session archive gate while waiting for reconciliation's own scoped admission.
+  const reconcilePublishedOutputs = (scope?: SessionScope): Promise<void> =>
+    track(() => withDataRootWrite(() => service.reconcilePublishedOutputs(scope)))
   const turnPort = createManagedExecutionTurnPort({
     dataRoot,
     service,
@@ -389,9 +396,11 @@ export async function composeManagedExecution({
       else held = false
     },
     getActiveSessions,
+    reconcilePublishedOutputs,
     recover: async () => {
       await environments.recover()
       await operations.recover()
+      await reconcilePublishedOutputs()
     },
     stopSession: (projectId, sessionId) => {
       let completion = stoppingSessions.get(sessionId)

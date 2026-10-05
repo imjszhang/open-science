@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  collectManagedOutputsRequestSchema,
+  managedCollectionReferenceSchema
+} from '../shared/managed-execution'
 import type { ManagedExecutionService } from './notebook/managed-execution-service'
 import {
   ResearchMaterialUnavailableError,
@@ -17,7 +21,9 @@ export const MANAGED_EXECUTION_EXTERNAL_METHODS = [
   'cancelOperation',
   'waitOperation',
   'getEnvironment',
-  'releaseEnvironment'
+  'releaseEnvironment',
+  'collectOutputs',
+  'discardOutputs'
 ] as const
 
 export type ManagedExecutionExternalMethod = (typeof MANAGED_EXECUTION_EXTERNAL_METHODS)[number]
@@ -74,6 +80,8 @@ export function createManagedExecutionExternalPort(dependencies: {
           z.object({})
             .strict()
             .parse(payload ?? {})
+        if (method === 'collectOutputs') payload = collectManagedOutputsRequestSchema.parse(payload)
+        if (method === 'discardOutputs') payload = managedCollectionReferenceSchema.parse(payload)
         const result = await write(() =>
           method === 'runtimes'
             ? dependencies.service.runtimes()

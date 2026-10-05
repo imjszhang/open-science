@@ -245,8 +245,28 @@ ID retrieves the same work; reusing that ID for different input is rejected. The
 
 `waitOperation` waits at most 60 seconds and returns the current snapshot, which may still be
 running. Aborting an SDK request only stops waiting. Explicitly use `cancelOperation` to stop work;
-use `releaseEnvironment` after work settles to release its managed files. A `cleanup-pending` state
-means cleanup has not yet been verified. Do not delete files outside this API.
+use `releaseEnvironment` after work settles and outputs are collected to release its managed files.
+A `cleanup-pending` state means cleanup has not yet been verified. Release can also return a retained
+`pendingCollection` while the original turn has saved files but has not published them yet. Requested
+cleanup completes automatically after every exact output Version, including the execution/collection
+receipt, is published. Pending outputs are preserved until then; do not delete files outside this API.
+
+If output publication did not finish, inspect `getEnvironment` for `pendingCollection.collectionId`.
+`collectOutputs({ projectId, sessionId, environmentId, collectionId, requestId })` saves the retained
+outputs without rerunning the experiment. It returns an operation start snapshot: observe the same
+`requestId` using `getOperation` or `waitOperation`, including after an HTTP observation timeout.
+Keep the collection's request ID for identical retries. Collection is separate from `execute`;
+never rerun a command merely to recover publication. If collection reports that saved Versions still
+await publication, finish or recover the original turn's finalization before trying collection again.
+
+Inside that same active producing turn, an exact output `versionId` may be read using
+`host.artifactPath(versionId)` through the turn's producer authority. This does not publish it early:
+the ordinary Artifact catalog and other readers still expose only published Versions.
+
+Only explicit `discardOutputs({ projectId, sessionId, environmentId, collectionId })` abandons the
+identified pending collection. It returns the current environment; inspect it before release.
+Already published immutable Artifacts remain available. Neither request accepts `provenance`,
+`recoveryAuthority` or `writeAttempt`; these are application-owned authorities, not public inputs.
 
 The command starts in its writable work directory. `OPEN_SCIENCE_INPUT_DIR` refers to restored,
 read-only inputs, `OPEN_SCIENCE_OUTPUT_DIR` to the output directory, and `OPEN_SCIENCE_NODE` to the

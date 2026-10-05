@@ -1331,7 +1331,9 @@ const managedExecutionMethods = [
   'prepare',
   'execute',
   'getEnvironment',
-  'releaseEnvironment'
+  'releaseEnvironment',
+  'collectOutputs',
+  'discardOutputs'
 ]
 const freezeManagedExecutionValue = (value) => {
   if (value && typeof value === 'object') {

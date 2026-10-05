@@ -57,7 +57,8 @@
       "src/shared/renderer-surface-matrix.test.ts",
       "src/main/remote-access/pairing.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/session-operation-owner.integration.test.ts"
+      "src/main/notebook/session-operation-owner.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

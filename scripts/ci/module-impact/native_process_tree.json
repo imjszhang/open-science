@@ -7,9 +7,7 @@
     "packages/process-tree-native/src/process_tree_native.cc",
     "packages/process-tree-native/src/windows_owned_process.cc"
   ],
-  "interfacePaths": [
-    "packages/process-tree-native/index.cjs"
-  ],
+  "interfacePaths": ["packages/process-tree-native/index.cjs"],
   "consumerModules": [],
   "testFiles": {
     "owner": [],
@@ -589,12 +587,12 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "notebook_network_sandbox",
-    "windows_sensitive"
-  ],
+  "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],
   "fallbackCapability": "main_runtime"
 }

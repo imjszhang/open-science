@@ -99,6 +99,18 @@ import type { NotebookDependencyAnalyzer } from '../notebook/dependency-analysis
 
 const SAFE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
+const assertExpectedArtifactContent = (
+  expected: ArtifactWriteSourceScope['expectedContent'],
+  actual: { checksum: string; sizeBytes: number }
+): void => {
+  if (
+    expected &&
+    (expected.checksum !== actual.checksum || expected.sizeBytes !== actual.sizeBytes)
+  ) {
+    throw new Error('Artifact source content does not match the expected content.')
+  }
+}
+
 type ArtifactProvenanceRepositoryOptions = {
   storageRoot: string
   getClient: () => Promise<PrismaClient>
@@ -601,7 +613,23 @@ class ArtifactProvenanceRepository {
     if (!sourceScope || !Array.isArray(sourceScope.allowedImportRoots)) {
       throw new Error('Artifact save requires a trusted source scope.')
     }
-    return this.writeGeneratedVersion(request, sourceScope, signal, undefined, onMetadataBytes)
+    const expected = sourceScope.expectedContent
+    if (
+      expected !== undefined &&
+      (!expected ||
+        typeof expected.checksum !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(expected.checksum) ||
+        !Number.isSafeInteger(expected.sizeBytes) ||
+        expected.sizeBytes < 0 ||
+        expected.sizeBytes > LOCAL_RESOURCE_BUDGETS.artifactFileBytes)
+    ) {
+      throw new Error('Artifact expected content requires a SHA-256 checksum and a bounded size.')
+    }
+    // Capture the Main-issued constraint before waiting for the session write lock.
+    const trustedScope = expected
+      ? { ...sourceScope, expectedContent: Object.freeze({ ...expected }) }
+      : sourceScope
+    return this.writeGeneratedVersion(request, trustedScope, signal, undefined, onMetadataBytes)
   }
 
   private writeGeneratedVersion(
@@ -620,7 +648,7 @@ class ArtifactProvenanceRepository {
       async (writeVersion) => {
         signal?.throwIfAborted()
         if (request.source.kind === 'localPath') {
-          const replay = await this.replayVersionWithinSession(request)
+          const replay = await this.replayVersionWithinSession(request, sourceScope.expectedContent)
           if (replay) return replay
         }
         if (
@@ -634,13 +662,19 @@ class ArtifactProvenanceRepository {
           }))
         ) {
           const { source, ...versionRequest } = request
+          const content = Buffer.from(source.content, source.encoding)
+          const contentChecksum = sha256(content)
+          assertExpectedArtifactContent(sourceScope.expectedContent, {
+            checksum: contentChecksum,
+            sizeBytes: content.byteLength
+          })
           return writeVersion(
             {
               ...versionRequest,
               sourceKind: 'inline',
               writeRequestChecksum: sha256(
                 JSON.stringify({
-                  contentChecksum: sha256(Buffer.from(source.content, source.encoding)),
+                  contentChecksum,
                   contentType: request.contentType ?? null,
                   filename: request.filename,
                   producerRunId: request.producerRunId ?? null,
@@ -721,6 +755,7 @@ class ArtifactProvenanceRepository {
             }
           },
           async (_file, sourceFileObservation, bindVersionRouting, fileDigest, reservation) => {
+            assertExpectedArtifactContent(sourceScope.expectedContent, fileDigest)
             replacementChecksum = fileDigest.checksum
             if (!reservation) throw new Error('Artifact write reservation was not created.')
             if (prepared && prepared.contentChecksum !== fileDigest.checksum) {
@@ -879,7 +914,8 @@ class ArtifactProvenanceRepository {
   }
 
   private async replayVersionWithinSession(
-    request: ReplayArtifactVersionRequest
+    request: ReplayArtifactVersionRequest,
+    expectedContent?: ArtifactWriteSourceScope['expectedContent']
   ): Promise<ArtifactVersionFile | undefined> {
     const projectId = assertSafeSegment(request.projectId, 'project id')
     const appSessionId = assertSafeSegment(request.appSessionId, 'session id')
@@ -914,6 +950,10 @@ class ArtifactProvenanceRepository {
         `Artifact write operation was reused for a different request: ${writeOperationId}`
       )
     }
+    assertExpectedArtifactContent(expectedContent, {
+      checksum: agentVersion.checksum,
+      sizeBytes: Number(agentVersion.sizeBytes)
+    })
     if (agentVersion.state === 'staging') {
       return this.stagingRecovery.recoverVersion(
         agentVersion,

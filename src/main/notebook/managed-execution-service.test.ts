@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import type { ArtifactVersionFile } from '../../shared/artifact-provenance'
+import type {
+  ArtifactVersionDescriptor,
+  ArtifactVersionFile
+} from '../../shared/artifact-provenance'
 import type { ExecuteManagedEnvironmentRequest } from '../../shared/managed-execution'
+import type { NotebookRunDocument, NotebookRunRecord } from '../../shared/notebook'
 import {
   ManagedExecutionService,
   type ManagedExecutionServiceDependencies,
@@ -19,6 +23,9 @@ import { resolveManagedShellExecutionCapability } from './managed-shell-executio
 import { resolveManagedOutputAuthority } from './managed-output-authority'
 import type { ResearchMaterialAuthority } from './research-materials'
 import { createManagedExecutionTurnPort } from './managed-execution-port'
+import { resolveManagedOutputRecoveryAuthority } from './managed-output-recovery'
+import { managedOutputWriteAttemptSchema } from './managed-output-publication'
+import type { ManagedExecutionOutput } from './managed-execution-output'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -49,7 +56,12 @@ async function setup(): Promise<{
   context: ManagedExecutionTurnContext
   request: ExecuteManagedEnvironmentRequest
   runtime: ManagedExecutionServiceDependencies['runtime']
-  published: Array<{ filename: string; content: string; producerRunId?: string }>
+  savedOutputs: Array<{ filename: string; content: string; producerRunId?: string }>
+  descriptors: Map<string, ArtifactVersionDescriptor>
+  publishSavedVersions: (versionIds?: string[]) => void
+  runs: NotebookRunRecord[]
+  contextFor: (operationId: string, promptMessageId?: string) => ManagedExecutionTurnContext
+  executeFixture: ManagedExecutionServiceDependencies['runtime']['executeManagedShell']
 }> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'managed-core-')))
   roots.push(root)
@@ -63,25 +75,61 @@ async function setup(): Promise<{
     arch: process.arch,
     readOnlyRoots: [join(root, 'runtime')]
   }
-  const runtime: ManagedExecutionServiceDependencies['runtime'] = {
-    executeManagedShell: vi.fn(async (request, capability) => {
+  const runs: NotebookRunRecord[] = []
+  // Unit boundary only: no interpreter is launched. Model the durable Notebook evidence for the
+  // bytes this fake runtime actually writes; real executor/Artifact integration has its own tests.
+  const executeFixture: ManagedExecutionServiceDependencies['runtime']['executeManagedShell'] =
+    async (request, capability) => {
       const policy = resolveManagedShellExecutionCapability(capability, {
         ...scope,
         executionInvocationId: request.executionInvocationId!
       })
-      await writeFile(
-        join(policy.environment.OPEN_SCIENCE_OUTPUT_DIR, 'result.json'),
-        '{"value":42}'
-      )
+      const path = join(policy.environment.OPEN_SCIENCE_OUTPUT_DIR, 'result.json')
+      const content = '{"value":42}'
+      await writeFile(path, content)
+      const environmentId = basename(dirname(policy.environment.OPEN_SCIENCE_OUTPUT_DIR))
+      const runId = runs.length ? `notebook-run-${runs.length + 1}` : 'notebook-run'
+      runs.push({
+        runId,
+        submissionIdentity: request.executionInvocationId,
+        executionInvocationId: request.executionInvocationId,
+        cellId: 'cell',
+        source: 'agent',
+        kernelKind: 'bash',
+        script: request.command,
+        status: 'completed',
+        exitCode: 0,
+        startedAt: 1,
+        endedAt: 2,
+        text: { stdout: '42', stderr: '', traceback: '', plain: [] },
+        outputs: [],
+        inputFiles: [],
+        ...request.provenanceContext,
+        workingFiles: [
+          {
+            path,
+            relativePath: `data/managed-execution/${environmentId}/files/result.json`,
+            kind: 'other',
+            size: Buffer.byteLength(content),
+            createdByRunId: runId,
+            generationId: 'generation-result',
+            checksum: sha(content)
+          }
+        ]
+      })
       return { stdout: '42', stderr: '', exitCode: 0 }
-    }),
+    }
+  const runtime: ManagedExecutionServiceDependencies['runtime'] = {
+    executeManagedShell: vi.fn(executeFixture),
     confirmManagedShellCleanup: vi.fn<
       ManagedExecutionServiceDependencies['runtime']['confirmManagedShellCleanup']
     >(async (request) => ({
       scope: request,
       state: 'verified',
       reaped: true,
-      runId: 'notebook-run',
+      runId:
+        runs.find((run) => run.executionInvocationId === request.executionInvocationId)?.runId ??
+        'notebook-run',
       proof: 'process-owner'
     }))
   }
@@ -107,10 +155,45 @@ async function setup(): Promise<{
     ],
     readVersion: async () => Buffer.from(content)
   }
+  const descriptors = new Map<string, ArtifactVersionDescriptor>()
+  const publishSavedVersions = (versionIds = [...descriptors.keys()]): void => {
+    for (const versionId of versionIds) {
+      const descriptor = descriptors.get(versionId)
+      if (!descriptor) throw new Error('Unit fixture cannot publish an unsaved Version.')
+      descriptor.state = 'finalized'
+      descriptor.isPublished = true
+    }
+  }
   const dependencies: ManagedExecutionServiceDependencies = {
     dataRoot: root,
     environments,
     runtime,
+    artifacts: {
+      resolveVersionDescriptors: vi.fn<
+        ManagedExecutionServiceDependencies['artifacts']['resolveVersionDescriptors']
+      >(async ({ versionIds }) =>
+        versionIds.flatMap((versionId) => {
+          const descriptor = descriptors.get(versionId)
+          return descriptor ? [structuredClone(descriptor)] : []
+        })
+      )
+    },
+    notebooks: {
+      readSessionDocuments: vi.fn(async (projectId, sessionId) => {
+        if (projectId !== scope.projectId || sessionId !== scope.sessionId) return []
+        const document: NotebookRunDocument = {
+          version: 1,
+          ...scope,
+          workspaceCwd: join(root, 'workspace'),
+          notebookSessionRoot: join(root, 'notebooks'),
+          dataRoot: join(root, 'data'),
+          kernel: { kernelName: 'unit-boundary', runtimeRoot: root, lastKnownStatus: 'idle' },
+          runs: structuredClone(runs),
+          updatedAt: 2
+        }
+        return [document]
+      })
+    },
     runtimes: {
       discover: async () => ({
         runtimes: [{ runtimeId: sha('runtime'), runtime: node }],
@@ -136,14 +219,51 @@ async function setup(): Promise<{
     runtimeId: sha('runtime'),
     materials: { files: [{ versionId: 'version-1', restorePath: 'input.mjs' }] }
   })) as { environmentId: string }
-  const published: Array<{ filename: string; content: string; producerRunId?: string }> = []
-  const context: ManagedExecutionTurnContext = {
-    ...scope,
-    operationId: 'operation',
-    workspaceCwd: join(root, 'workspace'),
-    provenanceContext: { ...provenance },
-    recordRun: vi.fn(async () => undefined),
-    saveOutput: vi.fn(async (output) => {
+  const savedOutputs: Array<{ filename: string; content: string; producerRunId?: string }> = []
+  const saved = new Map<string, ArtifactVersionFile>()
+  const contextFor = (
+    operationId: string,
+    promptMessageId = 'prompt'
+  ): ManagedExecutionTurnContext => {
+    const context: ManagedExecutionTurnContext = {
+      ...scope,
+      operationId,
+      workspaceCwd: join(root, 'workspace'),
+      provenanceContext: { ...provenance, promptMessageId },
+      recordRun: vi.fn(async () => undefined),
+      saveOutput: vi.fn(async (output) => save(output)),
+      recoverOutput: vi.fn(async (output) => {
+        const proof = resolveManagedOutputRecoveryAuthority(output.recoveryAuthority, context, {
+          filename: output.filename,
+          path: output.source.path,
+          producerRunId: output.producerRunId
+        })
+        expect(proof.producerProvenance).toEqual(provenance)
+        expect(proof.output.generationId).toBe('generation-result')
+        for (const attempt of output.publication.previousAttempts) {
+          const artifact = saved.get(attempt.request.writeOperationId)
+          if (artifact) {
+            const descriptor = descriptors.get(artifact.versionId)
+            if (descriptor?.state !== 'finalized' || descriptor.isPublished !== true)
+              throw new Error('The previous Artifact turn has not published this Version.')
+            return { artifact, reused: true }
+          }
+        }
+        const managed = await resolveManagedOutputAuthority(
+          output.source.authority,
+          context,
+          output.source.path
+        )
+        const content = await readFile(managed.path, 'utf8')
+        if (
+          sha(content) !== proof.output.sha256 ||
+          Buffer.byteLength(content) !== proof.output.sizeBytes
+        )
+          throw new Error('Retained output no longer matches its original file generation.')
+        return { artifact: await save(output), reused: false }
+      })
+    }
+    async function save(output: ManagedExecutionOutput): Promise<ArtifactVersionFile> {
       if (output.source.kind === 'localPath')
         throw new Error('Service must use an output capability')
       const content =
@@ -153,16 +273,79 @@ async function setup(): Promise<{
               (
                 await resolveManagedOutputAuthority(
                   output.source.authority,
-                  { ...scope, operationId: 'operation' },
+                  context,
                   output.source.path
                 )
               ).path,
               'utf8'
             )
-      published.push({ filename: output.filename, content, producerRunId: output.producerRunId })
-      return { versionId: 'version-' + published.length } as ArtifactVersionFile
-    })
+      const generation = runs
+        .find((run) => run.runId === output.producerRunId)
+        ?.workingFiles.find(
+          (file) => file.checksum === sha(content) && file.size === Buffer.byteLength(content)
+        )
+      const attempt = managedOutputWriteAttemptSchema.parse({
+        schemaVersion: 1,
+        request: {
+          projectId: scope.projectId,
+          appSessionId: scope.sessionId,
+          artifactStorageSessionId: 'artifact-storage',
+          artifactRunId: `artifact-${operationId}`,
+          writeOperationId: 'write-' + sha(JSON.stringify([operationId, output.filename])),
+          filename: output.filename,
+          contentType: output.contentType,
+          producerRunId: output.producerRunId
+        },
+        destination: {
+          provenanceContext: context.provenanceContext,
+          messageAncestry: [...new Set(['prompt', promptMessageId])]
+        },
+        source: {
+          kind: output.source.kind,
+          sha256: sha(content),
+          sizeBytes: Buffer.byteLength(content),
+          ...(output.producerRunId
+            ? {
+                producerRunId: output.producerRunId,
+                producerProvenance: provenance,
+                generationId: generation?.generationId,
+                relativePath:
+                  output.source.kind === 'managedOutput' ? output.source.path : undefined
+              }
+            : {})
+        }
+      })
+      await output.publication?.beforeWrite(attempt)
+      savedOutputs.push({ filename: output.filename, content, producerRunId: output.producerRunId })
+      const versionId = 'version-' + savedOutputs.length
+      // Saving does not finalize an Artifact turn. Tests explicitly publish the saved Versions.
+      const descriptor: ArtifactVersionDescriptor = {
+        ...scope,
+        id: versionId,
+        artifactId: 'artifact-' + output.filename,
+        versionId,
+        versionNumber: 1,
+        name: output.filename,
+        checksum: sha(content),
+        size: Buffer.byteLength(content),
+        createdAt: new Date(0).toISOString(),
+        mtimeMs: 0,
+        state: 'pending',
+        isPublished: false,
+        producerRunId: output.producerRunId
+      }
+      descriptors.set(versionId, descriptor)
+      const artifact: ArtifactVersionFile = {
+        ...descriptor,
+        path: join(root, 'saved-versions', versionId),
+        fileUrl: 'file://' + join(root, 'saved-versions', versionId)
+      }
+      saved.set(attempt.request.writeOperationId, artifact)
+      return artifact
+    }
+    return context
   }
+  const context = contextFor('operation')
   return {
     root,
     service,
@@ -170,7 +353,12 @@ async function setup(): Promise<{
     environments,
     context,
     runtime,
-    published,
+    savedOutputs,
+    descriptors,
+    publishSavedVersions,
+    runs,
+    contextFor,
+    executeFixture,
     request: {
       ...scope,
       environmentId: prepared.environmentId,
@@ -207,12 +395,12 @@ it('freezes parsed requests before asynchronous preparation and publishes only s
   )
   expect(result).toMatchObject({ runId: 'notebook-run', status: 'completed' })
   expect(h.context.recordRun).toHaveBeenCalledWith('notebook-run')
-  expect(h.published[0]).toEqual({
+  expect(h.savedOutputs[0]).toEqual({
     filename: 'result.json',
     content: '{"value":42}',
     producerRunId: 'notebook-run'
   })
-  const receipt = JSON.parse(h.published[1].content)
+  const receipt = JSON.parse(h.savedOutputs[1].content)
   expect(receipt).toMatchObject({
     kind: 'managed-research-execution',
     transport: 'none',
@@ -260,12 +448,7 @@ it('deduplicates concurrent and restarted calls and rejects different content wi
   const gate = deferred()
   vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
     await gate.promise
-    const policy = resolveManagedShellExecutionCapability(capability, {
-      ...scope,
-      executionInvocationId: request.executionInvocationId!
-    })
-    await writeFile(join(policy.environment.OPEN_SCIENCE_OUTPUT_DIR, 'result.json'), '{"value":42}')
-    return { stdout: '', stderr: '', exitCode: 0 }
+    return h.executeFixture(request, capability)
   })
   const first = h.service.executeInTurn(h.request, h.context)
   const second = h.service.executeInTurn(h.request, h.context)
@@ -279,8 +462,93 @@ it('deduplicates concurrent and restarted calls and rejects different content wi
     await new ManagedExecutionService(h.dependencies).executeInTurn(h.request, h.context)
   ).toEqual(await first)
   expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-  expect(h.published).toHaveLength(2)
+  expect(h.savedOutputs).toHaveLength(2)
 })
+
+it('retains a fully saved collection until its original turn publishes every Version, then completes a requested release after restart', async () => {
+  const h = await setup()
+  const result = await h.service.executeInTurn(h.request, h.context)
+  const collection = {
+    ...scope,
+    environmentId: h.request.environmentId,
+    collectionId: result.collectionId,
+    requestId: 'collect'
+  }
+  const outputPath = h.runs[0].workingFiles[0].path
+  expect(h.savedOutputs).toHaveLength(2)
+  expect(
+    await h.service.releaseEnvironment({ ...scope, environmentId: h.request.environmentId })
+  ).toMatchObject({
+    state: 'ready',
+    pendingCollection: { collectionId: result.collectionId }
+  })
+  expect((await h.environments.get(h.request)).releaseRequested).toBe(true)
+  const context = h.contextFor('later', 'next-prompt')
+  await expect(h.service.collectOutputsInTurn(collection, context)).rejects.toThrow(
+    'awaiting publication'
+  )
+  expect(context.saveOutput).not.toHaveBeenCalled()
+  expect(context.recoverOutput).not.toHaveBeenCalled()
+  expect(await readFile(outputPath, 'utf8')).toBe('{"value":42}')
+  const restarted = new ManagedExecutionService(h.dependencies)
+  await restarted.reconcilePublishedOutputs()
+  expect((await h.environments.get(h.request)).pendingCollection).toBeDefined()
+  h.publishSavedVersions()
+  await restarted.reconcilePublishedOutputs()
+  expect(await h.environments.get(h.request)).toMatchObject({ state: 'released' })
+  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
+  await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await restarted.collectOutputsInTurn(collection, context)).toEqual(result)
+  expect(await restarted.executeInTurn(h.request, h.context)).toEqual(result)
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  expect(h.savedOutputs).toHaveLength(2)
+})
+
+it('requires publication of the ordinary execution receipt as well as every declared output', async () => {
+  const h = await setup()
+  const result = await h.service.executeInTurn(h.request, h.context)
+  h.publishSavedVersions([result.outputs[0].versionId])
+  await h.service.reconcilePublishedOutputs(scope)
+  expect((await h.environments.get(h.request)).pendingCollection?.collectionId).toBe(
+    result.collectionId
+  )
+  expect(
+    await h.service.releaseEnvironment({ ...scope, environmentId: h.request.environmentId })
+  ).toMatchObject({ state: 'ready' })
+  expect(await readFile(h.runs[0].workingFiles[0].path, 'utf8')).toBe('{"value":42}')
+  h.publishSavedVersions([result.outputs[1].versionId])
+  await h.service.reconcilePublishedOutputs(scope)
+  expect((await h.environments.get(h.request)).state).toBe('released')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it.each(['project', 'session', 'name', 'version', 'pending', 'unpublished'] as const)(
+  'rejects mismatched %s publication metadata while preserving saved bytes',
+  async (mismatch) => {
+    const h = await setup()
+    const result = await h.service.executeInTurn(h.request, h.context)
+    h.publishSavedVersions()
+    const version = h.descriptors.get(result.outputs[0].versionId)!
+    const exact = structuredClone(version)
+    if (mismatch === 'project')
+      h.descriptors.set(version.versionId, { ...version, projectId: 'foreign' })
+    else if (mismatch === 'session') version.sessionId = 'foreign'
+    else if (mismatch === 'name') version.name = 'unrelated.json'
+    else if (mismatch === 'version') version.versionId = 'unrelated-version'
+    else if (mismatch === 'pending') version.state = 'pending'
+    else version.isPublished = false
+    await h.service.reconcilePublishedOutputs(scope)
+    expect((await h.environments.get(h.request)).pendingCollection?.collectionId).toBe(
+      result.collectionId
+    )
+    expect(await readFile(h.runs[0].workingFiles[0].path, 'utf8')).toBe('{"value":42}')
+    h.descriptors.set(exact.versionId, exact)
+    await h.service.reconcilePublishedOutputs(scope)
+    expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
+    expect((await h.environments.get(h.request)).state).toBe('ready')
+    expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  }
+)
 
 it('does not replay a failed or interrupted command after restarting its service', async () => {
   const h = await setup()
@@ -292,7 +560,7 @@ it('does not replay a failed or interrupted command after restarting its service
     new ManagedExecutionService(h.dependencies).executeInTurn(h.request, h.context)
   ).rejects.toThrow('interrupted or failed')
   expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-  expect(h.published).toEqual([])
+  expect(h.savedOutputs).toEqual([])
 })
 
 it('preserves optional missing outputs but propagates unexpected collection failures', async () => {
@@ -312,18 +580,412 @@ it('preserves optional missing outputs but propagates unexpected collection fail
   )
 })
 
+async function retainCollection(h: Awaited<ReturnType<typeof setup>>): Promise<{
+  projectId: string
+  sessionId: string
+  environmentId: string
+  collectionId: string
+}> {
+  vi.mocked(h.context.saveOutput).mockRejectedValueOnce(new Error('publication unavailable'))
+  await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow(
+    'publication unavailable'
+  )
+  const receipt = await h.environments.get(h.request)
+  expect(receipt.pendingCollection).toBeDefined()
+  return {
+    ...scope,
+    environmentId: h.request.environmentId,
+    collectionId: receipt.pendingCollection!.collectionId
+  }
+}
+
+it('retains stopped output after collection failure and default release, and blocks another execution', async () => {
+  const h = await setup()
+  const collection = await retainCollection(h)
+  const outputPath = h.runs[0].workingFiles[0].path
+  expect(await readFile(outputPath, 'utf8')).toBe('{"value":42}')
+  expect(
+    await h.service.releaseEnvironment({ ...scope, environmentId: h.request.environmentId })
+  ).toMatchObject({
+    state: 'ready',
+    pendingCollection: { collectionId: collection.collectionId }
+  })
+  expect(await readFile(outputPath, 'utf8')).toBe('{"value":42}')
+  await expect(
+    h.service.executeInTurn({ ...h.request, requestId: 'second-run' }, h.context)
+  ).rejects.toThrow('awaiting collection')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  expect(h.savedOutputs).toEqual([])
+})
+
+it('recovers after owner and service restart in a later turn without executing again or changing the producer', async () => {
+  const h = await setup()
+  const collection = await retainCollection(h)
+  await h.environments.close()
+  const verifyRuntime = vi.fn(async () => undefined)
+  const restartedEnvironments = new ManagedResearchEnvironmentOwner({
+    dataRoot: h.root,
+    socketRoot: await realpath(tmpdir()),
+    verifyRuntime,
+    stopExecution: async (request) => ({
+      verified: (await h.runtime.confirmManagedShellCleanup(request, { retry: true })).reaped
+    })
+  })
+  await restartedEnvironments.recover()
+  const restarted = new ManagedExecutionService({
+    ...h.dependencies,
+    environments: restartedEnvironments
+  })
+  const context = h.contextFor('collection-operation', 'next-prompt')
+  const request = { ...collection, requestId: 'collect-once' }
+  const result = await restarted.collectOutputsInTurn(request, context)
+  expect(result).toMatchObject({
+    collectionId: collection.collectionId,
+    runId: 'notebook-run',
+    status: 'completed',
+    outputs: [{ filename: 'result.json', versionId: 'version-1' }, expect.any(Object)]
+  })
+  expect(h.savedOutputs[0]).toEqual({
+    filename: 'result.json',
+    content: '{"value":42}',
+    producerRunId: 'notebook-run'
+  })
+  expect(JSON.parse(h.savedOutputs[1].content)).toMatchObject({
+    collectedWithoutExecution: true,
+    result: { runId: 'notebook-run' }
+  })
+  expect(context.recoverOutput).toHaveBeenCalledOnce()
+  expect(context.recordRun).not.toHaveBeenCalled()
+  expect((await restartedEnvironments.get(collection)).pendingCollection).toBeDefined()
+  h.publishSavedVersions()
+  await restarted.reconcilePublishedOutputs(scope)
+  expect((await restartedEnvironments.get(collection)).pendingCollection).toBeUndefined()
+  expect(await restarted.collectOutputsInTurn(request, context)).toEqual(result)
+  expect(context.recoverOutput).toHaveBeenCalledOnce()
+  expect(h.savedOutputs).toHaveLength(2)
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  expect(verifyRuntime).not.toHaveBeenCalled()
+})
+
+it('returns a completed collection A while preserving a later pending collection B in the same environment', async () => {
+  const h = await setup()
+  const completed = await h.service.executeInTurn(h.request, h.context)
+  h.publishSavedVersions()
+  await h.service.reconcilePublishedOutputs(scope)
+  vi.mocked(h.context.saveOutput).mockRejectedValueOnce(new Error('collection B unavailable'))
+  await expect(
+    h.service.executeInTurn({ ...h.request, requestId: 'run-b' }, h.context)
+  ).rejects.toThrow('collection B unavailable')
+  const pendingB = (await h.environments.get(h.request)).pendingCollection!
+  expect(pendingB.collectionId).not.toBe(completed.collectionId)
+  const context = h.contextFor('retry-a', 'next-prompt')
+  expect(
+    await new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
+      {
+        ...scope,
+        environmentId: h.request.environmentId,
+        collectionId: completed.collectionId,
+        requestId: 'retry-completed-a'
+      },
+      context
+    )
+  ).toEqual(completed)
+  expect((await h.environments.get(h.request)).pendingCollection).toEqual(pendingB)
+  expect(await readFile(h.runs[1].workingFiles[0].path, 'utf8')).toBe('{"value":42}')
+  expect(context.recoverOutput).not.toHaveBeenCalled()
+  expect(context.saveOutput).not.toHaveBeenCalled()
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledTimes(2)
+})
+
+it('reuses an already-saved Version after its receipt fails instead of publishing a duplicate', async () => {
+  const h = await setup()
+  const save = vi.mocked(h.context.saveOutput).getMockImplementation()!
+  vi.mocked(h.context.saveOutput).mockImplementation(async (output) => {
+    if (output.source.kind === 'inline') throw new Error('receipt publication unavailable')
+    return save(output)
+  })
+  await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow(
+    'receipt publication unavailable'
+  )
+  const receipt = await h.environments.get(h.request)
+  const collection = {
+    ...scope,
+    environmentId: h.request.environmentId,
+    collectionId: receipt.pendingCollection!.collectionId
+  }
+  const journal = JSON.parse(
+    await readFile(
+      join(h.root, 'managed-execution-requests', collection.collectionId + '.json'),
+      'utf8'
+    )
+  )
+  expect(journal.collection.frozen.files[0]).toMatchObject({
+    versionId: 'version-1',
+    attempts: [
+      {
+        request: { artifactRunId: 'artifact-operation', producerRunId: 'notebook-run' },
+        source: { sha256: sha('{"value":42}'), sizeBytes: 12, generationId: 'generation-result' }
+      }
+    ]
+  })
+  h.publishSavedVersions()
+  const context = h.contextFor('receipt-recovery', 'next-prompt')
+  const result = await new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
+    { ...collection, requestId: 'collect' },
+    context
+  )
+  expect(result.outputs[0]).toEqual({ filename: 'result.json', versionId: 'version-1' })
+  expect(h.savedOutputs.filter((output) => output.filename === 'result.json')).toHaveLength(1)
+  expect(context.recoverOutput).toHaveBeenCalledOnce()
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it('records an explicit discard before allowing release and never collects discarded output', async () => {
+  const h = await setup()
+  const collection = await retainCollection(h)
+  const outputPath = h.runs[0].workingFiles[0].path
+  expect(await h.service.discardOutputs(collection)).toMatchObject({
+    discardedCollections: [expect.objectContaining({ collectionId: collection.collectionId })]
+  })
+  const journal = JSON.parse(
+    await readFile(
+      join(h.root, 'managed-execution-requests', collection.collectionId + '.json'),
+      'utf8'
+    )
+  )
+  expect(journal.collection).toMatchObject({
+    discarded: true,
+    frozen: {
+      runId: 'notebook-run',
+      files: [{ filename: 'result.json', sha256: sha('{"value":42}') }]
+    }
+  })
+  expect(await readFile(outputPath, 'utf8')).toBe('{"value":42}')
+  expect(
+    await h.service.releaseEnvironment({ ...scope, environmentId: h.request.environmentId })
+  ).toMatchObject({ state: 'released' })
+  await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(
+    h.service.collectOutputsInTurn(
+      { ...collection, requestId: 'after-discard' },
+      h.contextFor('later')
+    )
+  ).rejects.toThrow('explicitly discarded')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it('refuses another environment, Session, Project or Main branch without consuming retained output', async () => {
+  const h = await setup()
+  const collection = await retainCollection(h)
+  const context = h.contextFor('later', 'next-prompt')
+  for (const changed of [
+    { environmentId: 'f'.repeat(64) },
+    { sessionId: 'foreign' },
+    { projectId: 'foreign' }
+  ]) {
+    await expect(
+      h.service.collectOutputsInTurn({ ...collection, ...changed, requestId: 'forged' }, context)
+    ).rejects.toThrow()
+  }
+  for (const changed of [{ sessionId: 'foreign' }, { projectId: 'foreign' }]) {
+    await expect(
+      h.service.collectOutputsInTurn(
+        { ...collection, ...changed, requestId: 'forged-matching-context' },
+        { ...context, ...changed }
+      )
+    ).rejects.toThrow('No matching retained output collection')
+  }
+  await expect(
+    h.service.collectOutputsInTurn(
+      { ...collection, requestId: 'wrong-branch' },
+      {
+        ...context,
+        provenanceContext: { ...context.provenanceContext, messageBranchId: 'foreign-branch' }
+      }
+    )
+  ).rejects.toThrow('original Main Agent branch')
+  expect((await h.environments.get(collection)).pendingCollection?.collectionId).toBe(
+    collection.collectionId
+  )
+  expect(context.recoverOutput).not.toHaveBeenCalled()
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it.each(['failed', 'cancelled'] as const)(
+  'preserves the original %s result when a later turn collects its output',
+  async (status) => {
+    const h = await setup()
+    vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
+      const result = await h.executeFixture(request, capability)
+      h.runs[0].status = status
+      h.runs[0].exitCode = status === 'failed' ? 1 : null
+      return { ...result, exitCode: h.runs[0].exitCode }
+    })
+    const collection = await retainCollection(h)
+    const result = await new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
+      { ...collection, requestId: 'collect' },
+      h.contextFor('later', 'next-prompt')
+    )
+    expect(result).toMatchObject({
+      status,
+      runId: 'notebook-run',
+      exitCode: status === 'failed' ? 1 : null
+    })
+    expect(JSON.parse(h.savedOutputs[1].content)).toMatchObject({
+      collectedWithoutExecution: true,
+      result: { status }
+    })
+    expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  }
+)
+
+it('keeps retained evidence when output bytes change after the collection was frozen', async () => {
+  const h = await setup()
+  const collection = await retainCollection(h)
+  await writeFile(h.runs[0].workingFiles[0].path, '{"value":43}')
+  await expect(
+    new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
+      { ...collection, requestId: 'collect' },
+      h.contextFor('later', 'next-prompt')
+    )
+  ).rejects.toThrow('original file generation')
+  expect((await h.environments.get(collection)).pendingCollection?.collectionId).toBe(
+    collection.collectionId
+  )
+  expect(h.savedOutputs).toEqual([])
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it.each([
+  'submission',
+  'invocation',
+  'nonterminal',
+  'provenance',
+  'producer',
+  'path',
+  'bytes',
+  'duplicate-run'
+] as const)(
+  'retains output rather than inventing missing or conflicting %s evidence',
+  async (kind) => {
+    const h = await setup()
+    vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
+      const result = await h.executeFixture(request, capability)
+      const run = h.runs[0]
+      if (kind === 'submission') run.submissionIdentity = 'different-submission'
+      else if (kind === 'invocation') run.executionInvocationId = 'different-invocation'
+      else if (kind === 'nonterminal') run.status = 'running'
+      else if (kind === 'provenance') run.messageBranchId = 'different-branch'
+      else if (kind === 'producer') run.workingFiles[0].createdByRunId = 'another-run'
+      else if (kind === 'path') run.workingFiles[0].relativePath = 'unrelated/result.json'
+      else if (kind === 'bytes') await writeFile(run.workingFiles[0].path, '{"value":43}')
+      else h.runs.push(structuredClone(run))
+      return result
+    })
+    await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow()
+    expect((await h.environments.get(h.request)).pendingCollection).toBeDefined()
+    expect(await readFile(h.runs[0].workingFiles[0].path, 'utf8')).toContain('value')
+    expect(h.context.saveOutput).not.toHaveBeenCalled()
+    expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  }
+)
+
+it.each(['generation', 'generation-and-checksum'] as const)(
+  'allows first publication with partial %s capture without inventing generation evidence',
+  async (missing) => {
+    const h = await setup()
+    vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
+      const result = await h.executeFixture(request, capability)
+      delete h.runs[0].workingFiles[0].generationId
+      if (missing === 'generation-and-checksum') delete h.runs[0].workingFiles[0].checksum
+      return result
+    })
+    const result = await h.service.executeInTurn(h.request, h.context)
+    expect(result).toMatchObject({
+      status: 'completed',
+      outputs: [{ filename: 'result.json', versionId: 'version-1' }, expect.any(Object)]
+    })
+    expect(h.savedOutputs[0]).toEqual({
+      filename: 'result.json',
+      content: '{"value":42}',
+      producerRunId: 'notebook-run'
+    })
+    const journal = JSON.parse(
+      await readFile(
+        join(h.root, 'managed-execution-requests', result.collectionId + '.json'),
+        'utf8'
+      )
+    )
+    expect(journal.collection.frozen.files[0]).not.toHaveProperty('generationId')
+    expect(journal.collection.frozen.files[0].attempts[0].source).not.toHaveProperty('generationId')
+    expect((await h.environments.get(h.request)).pendingCollection).toBeDefined()
+    h.publishSavedVersions()
+    await h.service.reconcilePublishedOutputs(scope)
+    expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
+  }
+)
+
+it('preserves output and refuses cross-turn recovery when its original generation was never captured', async () => {
+  const h = await setup()
+  vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
+    const result = await h.executeFixture(request, capability)
+    delete h.runs[0].workingFiles[0].generationId
+    delete h.runs[0].workingFiles[0].checksum
+    return result
+  })
+  const collection = await retainCollection(h)
+  const context = h.contextFor('later', 'next-prompt')
+  await expect(
+    new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
+      { ...collection, requestId: 'collect' },
+      context
+    )
+  ).rejects.toThrow(/generation/i)
+  expect(context.recoverOutput).not.toHaveBeenCalled()
+  expect((await h.environments.get(collection)).pendingCollection?.collectionId).toBe(
+    collection.collectionId
+  )
+  expect(await readFile(h.runs[0].workingFiles[0].path, 'utf8')).toBe('{"value":42}')
+  expect(h.savedOutputs).toEqual([])
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it('reads a historical result without collection metadata but cannot grant recovery from it', async () => {
+  const h = await setup()
+  const result = await h.service.executeInTurn(h.request, h.context)
+  const journalPath = join(h.root, 'managed-execution-requests', result.collectionId + '.json')
+  const journal = JSON.parse(await readFile(journalPath, 'utf8'))
+  delete journal.collection
+  delete journal.result.collectionId
+  await writeFile(journalPath, JSON.stringify(journal))
+  const restarted = new ManagedExecutionService(h.dependencies)
+  expect(await restarted.executeInTurn(h.request, h.context)).toEqual(journal.result)
+  await expect(
+    restarted.collectOutputsInTurn(
+      {
+        ...scope,
+        environmentId: h.request.environmentId,
+        collectionId: result.collectionId,
+        requestId: 'legacy-collect'
+      },
+      h.contextFor('later')
+    )
+  ).rejects.toThrow('No matching retained output collection')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
 it('collects partial outputs after process cancellation and reports a cancelled result', async () => {
   const h = await setup()
   const controller = new AbortController()
   vi.mocked(h.runtime.executeManagedShell).mockImplementationOnce(async (request, capability) => {
-    const policy = resolveManagedShellExecutionCapability(capability, {
-      ...scope,
-      executionInvocationId: request.executionInvocationId!
-    })
-    await writeFile(
-      join(policy.environment.OPEN_SCIENCE_OUTPUT_DIR, 'result.json'),
-      '{"partial":true}'
-    )
+    await h.executeFixture(request, capability)
+    const run = h.runs[0]
+    const content = '{"partial":true}'
+    await writeFile(run.workingFiles[0].path, content)
+    run.status = 'cancelled'
+    run.exitCode = null
+    run.workingFiles[0].checksum = sha(content)
+    run.workingFiles[0].size = Buffer.byteLength(content)
     controller.abort(new Error('cancelled'))
     return { stdout: '', stderr: '', exitCode: null, cancelled: true }
   })
@@ -331,8 +993,8 @@ it('collects partial outputs after process cancellation and reports a cancelled 
     status: 'cancelled',
     exitCode: null
   })
-  expect(h.published[0].content).toBe('{"partial":true}')
-  expect(JSON.parse(h.published[1].content).result.status).toBe('cancelled')
+  expect(h.savedOutputs[0].content).toBe('{"partial":true}')
+  expect(JSON.parse(h.savedOutputs[1].content).result.status).toBe('cancelled')
 })
 
 it('keeps resources and publishes nothing when process cleanup is unverified', async () => {
@@ -344,7 +1006,7 @@ it('keeps resources and publishes nothing when process cleanup is unverified', a
     runId: 'notebook-run'
   }))
   await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow('cleanup')
-  expect(h.published).toEqual([])
+  expect(h.savedOutputs).toEqual([])
   expect(h.context.recordRun).not.toHaveBeenCalled()
   expect(await h.environments.get(h.request)).toMatchObject({
     state: 'cleanup-pending',
@@ -370,7 +1032,7 @@ it('rejects a cleanup proof for another invocation before publishing outputs', a
   await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow(
     /proof|verified|belong/
   )
-  expect(h.published).toEqual([])
+  expect(h.savedOutputs).toEqual([])
   expect(h.context.recordRun).not.toHaveBeenCalled()
 })
 
@@ -449,7 +1111,7 @@ it('reports unsupported native services separately from available Node and prese
     dataRoot: h.root,
     service: h.service,
     trackArtifactWrite: async (_sessionId, _owner, write) => write({} as never),
-    artifacts: { saveVersion: vi.fn() },
+    artifacts: { saveVersion: vi.fn(), replayVersion: vi.fn() },
     notebooks: { readSessionDocuments: vi.fn() }
   })
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!

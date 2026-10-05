@@ -825,6 +825,8 @@ open-science execution wait --input-file operation.json --timeout-ms 10000 --jso
 open-science execution cancel --input-file operation.json --json
 open-science execution environment --input-file environment.json --json
 open-science execution release --input-file environment.json --json
+open-science execution collect-outputs --input-file collection.json --wait --timeout-ms 60000 --json
+open-science execution discard-outputs --input-file discard-collection.json --json
 ```
 
 All subcommands except `runtimes` require a JSON object through stdin, `--input-json`, or
@@ -832,17 +834,26 @@ All subcommands except `runtimes` require a JSON object through stdin, `--input-
 `operation.json` contains `projectId`, `sessionId`, and the execution's `requestId`;
 `environment.json` contains `projectId`, `sessionId`, and `environmentId`. `materials` additionally
 uses `sourceSessionId`. Material selection uses immutable Version IDs and safe relative restoration
-paths, not arbitrary host paths.
+paths, not arbitrary host paths. `collection.json` contains `projectId`, `sessionId`, `environmentId`,
+the exact `pendingCollection.collectionId` from `environment`, and a stable new `requestId`.
+`discard-collection.json` contains those four reference fields without `requestId`.
 
 The `timeoutMs` in `execute.json` limits the process lifetime. CLI `--timeout-ms` limits waiting
-only, with a maximum of 60000 ms. `run --wait` performs one bounded wait and may return a running
+only, with a maximum of 60000 ms. `run --wait` and `collect-outputs --wait` perform one bounded wait and may return a running
 snapshot; repeat `status` or `wait` to continue observing it. Closing the CLI or timing out never
 implicitly cancels the operation. `--cancel-on-timeout` is not supported for these commands; use
 `execution cancel` explicitly. Failed, cancelled or interrupted operation snapshots set exit code 1.
 
 Keep request IDs for retries. An identical request reuses its recorded preparation or execution;
 changed input with the same ID is rejected. Use `release` for managed resource cleanup after the
-operation settles, and retain a `cleanup-pending` response for retry. This first execution sandbox
+operation settles and collection finishes, and retain a `cleanup-pending` response for retry.
+`collect-outputs` saves retained files without rerunning the experiment. `release` preserves pending
+outputs; only an explicit `discard-outputs` abandons that identified collection. Release may still
+show pending collection during the original turn. Requested cleanup completes automatically after
+all exact output Versions and the execution/collection receipt publish. If collection reports that
+saved Versions await publication, finish or recover the original turn; do not rerun the command.
+Both operations retain already published immutable Artifacts. No command accepts caller-supplied `provenance`,
+`recoveryAuthority` or `writeAttempt`. This first execution sandbox
 supports local macOS; paired remote web callers are explicitly unsupported.
 
 ## Local `.science` package import and export

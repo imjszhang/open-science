@@ -2535,7 +2535,9 @@ describe('managed execution CLI', () => {
     ['wait', 'waitOperation'],
     ['cancel', 'cancelOperation'],
     ['environment', 'getEnvironment'],
-    ['release', 'releaseEnvironment']
+    ['release', 'releaseEnvironment'],
+    ['collect-outputs', 'collectOutputs'],
+    ['discard-outputs', 'discardOutputs']
   ])('routes execution %s through the managed SDK', async (command, method) => {
     const call = vi.fn().mockResolvedValue({ status: 'completed' })
     const log = vi.fn()
@@ -2572,6 +2574,51 @@ describe('managed execution CLI', () => {
     expect(log).toHaveBeenCalledWith(JSON.stringify({ status: 'running' }))
   })
 
+  it('waits for collection by its request identity without executing, cancelling or discarding', async () => {
+    const input = {
+      projectId: 'project',
+      sessionId: 'session',
+      environmentId: 'env',
+      collectionId: 'collection',
+      requestId: 'collect-1'
+    }
+    const collectOutputs = vi.fn().mockResolvedValue({ status: 'running' })
+    const waitOperation = vi.fn().mockResolvedValue({ status: 'running' })
+    const execute = vi.fn()
+    const cancelOperation = vi.fn()
+    const discardOutputs = vi.fn()
+    const log = vi.fn()
+    await runTaskCommand(
+      parseCliArgs([
+        'execution',
+        'collect-outputs',
+        '--input-json',
+        JSON.stringify(input),
+        '--wait',
+        '--timeout-ms',
+        '10',
+        '--json'
+      ]),
+      {
+        connect: async () => ({
+          execution: { collectOutputs, waitOperation, execute, cancelOperation, discardOutputs }
+        }),
+        log
+      }
+    )
+    expect(collectOutputs).toHaveBeenCalledExactlyOnceWith(input)
+    expect(waitOperation).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project',
+      sessionId: 'session',
+      requestId: 'collect-1',
+      timeoutMs: 10
+    })
+    expect(execute).not.toHaveBeenCalled()
+    expect(cancelOperation).not.toHaveBeenCalled()
+    expect(discardOutputs).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith(JSON.stringify({ status: 'running' }))
+  })
+
   it('reads a request file and rejects malformed or non-object inputs before dispatch', async () => {
     const prepare = vi.fn().mockResolvedValue({ state: 'ready' })
     const readFile = vi.fn().mockResolvedValue('{}')
@@ -2595,6 +2642,9 @@ describe('managed execution CLI', () => {
     ['execution', 'run', '--wait', '--timeout-ms', '60001'],
     ['execution', 'run', '--wait', '--timeout-ms', '10', '--cancel-on-timeout'],
     ['execution', 'prepare', '--wait'],
+    ['execution', 'discard-outputs', '--wait'],
+    ['execution', 'collect-outputs', '--wait', '--timeout-ms', '60001'],
+    ['execution', 'collect-outputs', '--wait', '--cancel-on-timeout'],
     ['execution', 'unknown'],
     ['execution', 'run', '--input-json', '{}', '--input-file', 'input.json'],
     ['project', 'list', '--input-json', '{}'],

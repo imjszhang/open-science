@@ -304,6 +304,7 @@ describe('Artifact Provenance repository architecture', () => {
     expect(topLevelValues(facadeFile)).toEqual(
       [
         'SAFE_SEGMENT_PATTERN',
+        'assertExpectedArtifactContent',
         'assertSafeSegment',
         'hasServerInferredProducer',
         'journalRecoveryPlan',
@@ -989,7 +990,11 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/session-package/headless.test.ts',
       'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
       'src/main/composition/session-packages.test.ts',
-      'src/main/composition/handoff.test.ts'
+      'src/main/composition/handoff.test.ts',
+      'src/main/notebook/managed-nested-generation.integration.test.ts',
+      'src/main/notebook/managed-execution-collection.integration.test.ts',
+      'src/main/notebook/managed-output-publication.integration.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts'
     ])
     expect(module.capabilityOverlays).toEqual([
       'windows_sensitive',

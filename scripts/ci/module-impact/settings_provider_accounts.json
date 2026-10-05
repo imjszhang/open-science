@@ -45,10 +45,7 @@
     "src/main/settings/provider-runtime-projection.ts",
     "src/main/settings/validate.ts"
   ],
-  "consumerModules": [
-    "settings_backend_resolution",
-    "settings_service_facade"
-  ],
+  "consumerModules": ["settings_backend_resolution", "settings_service_facade"],
   "testFiles": {
     "owner": [
       "src/main/settings/settings-backend.architecture.test.ts",
@@ -584,13 +581,12 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "windows_sensitive",
-    "e2e_regressions",
-    "e2e_delegation"
-  ],
+  "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
   "fallbackCapability": "main_runtime"
 }

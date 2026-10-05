@@ -1278,7 +1278,9 @@ describe('managed execution SDK', () => {
       'cancelOperation',
       'waitOperation',
       'getEnvironment',
-      'releaseEnvironment'
+      'releaseEnvironment',
+      'collectOutputs',
+      'discardOutputs'
     ]
     expect(Object.keys(client.execution)).toEqual(methods)
     for (const method of methods) {

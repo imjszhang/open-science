@@ -1,14 +1,7 @@
 {
-  "ownerPaths": [
-    "src/main/pdf-documents/identity.ts"
-  ],
-  "interfacePaths": [
-    "src/main/pdf-documents/identity.ts"
-  ],
-  "consumerModules": [
-    "pdf_annotations",
-    "main_storage"
-  ],
+  "ownerPaths": ["src/main/pdf-documents/identity.ts"],
+  "interfacePaths": ["src/main/pdf-documents/identity.ts"],
+  "consumerModules": ["pdf_annotations", "main_storage"],
   "testFiles": {
     "owner": [],
     "contract": [],
@@ -342,11 +335,12 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "e2e_regressions"
-  ],
+  "capabilityOverlays": ["e2e_regressions"],
   "fallbackCapability": "main_runtime"
 }

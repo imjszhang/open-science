@@ -112,6 +112,7 @@ const receiptSchema = scopeSchema
     directory: directorySchema.optional(),
     outputNonce: z.string().uuid(),
     outputDirectory: directorySchema.optional(),
+    releaseRequested: z.boolean().optional(),
     pendingCollection: collectionSchema.optional(),
     discardedCollections: z
       .array(collectionSchema.extend({ discardedAt: z.number().int().nonnegative() }).strict())
@@ -160,6 +161,8 @@ export type PrepareManagedResearchEnvironment = ManagedResearchScope & {
 export type ManagedEnvironmentExecution = EnvironmentReference & {
   executionInvocationId: string
   collectionId?: string
+  /** Main keeps the output fence until Artifact publication has been durably acknowledged. */
+  retainCollection?: boolean
   environment?: Readonly<Record<string, string>>
   localServicePort?: number
   signal?: AbortSignal
@@ -172,11 +175,15 @@ export type ManagedEnvironmentExecutionContext = Readonly<{
   runtime: ManagedResearchRuntime
   receipt: ManagedResearchEnvironment
   signal: AbortSignal
+  /** Output publication may finish after a verified execution cancellation. */
+  publicationSignal: AbortSignal
   createOutputAuthority(operationId: string): ManagedOutputAuthority
 }>
 export type ManagedEnvironmentCollection = EnvironmentReference & {
   collectionId: string
   operationId: string
+  /** Main keeps the output fence until Artifact publication has been durably acknowledged. */
+  retainCollection?: boolean
   signal?: AbortSignal
 }
 export type ManagedEnvironmentCollectionContext = Readonly<{
@@ -604,6 +611,9 @@ export class ManagedResearchEnvironmentOwner {
     identity.parse(request.executionInvocationId)
     const collectionId =
       request.collectionId === undefined ? undefined : checksum.parse(request.collectionId)
+    const retainCollection = z.boolean().parse(request.retainCollection ?? false)
+    if (retainCollection && !collectionId)
+      throw new Error('Retained execution requires an exact collection identity.')
     const reference = {
       ...scopeSchema.parse({ projectId: request.projectId, sessionId: request.sessionId }),
       environmentId: checksum.parse(request.environmentId)
@@ -638,7 +648,7 @@ export class ManagedResearchEnvironmentOwner {
         throw new Error(
           'Managed execution collection was explicitly discarded and cannot be reused.'
         )
-      if (receipt.state !== 'ready' || receipt.activeExecution)
+      if (receipt.state !== 'ready' || receipt.activeExecution || receipt.releaseRequested)
         throw new Error('Managed environment is not ready.')
       await this.verifyInputs(receipt)
       assertAdmission()
@@ -746,6 +756,7 @@ export class ManagedResearchEnvironmentOwner {
           runtime: receipt.runtime,
           receipt: structuredClone(receipt),
           signal,
+          publicationSignal: publication.signal,
           createOutputAuthority: (operationId): ManagedOutputAuthority =>
             createManagedOutputAuthority({
               projectId: receipt.projectId,
@@ -764,7 +775,7 @@ export class ManagedResearchEnvironmentOwner {
       try {
         if (dispatched) {
           await this.stopAndCleanSocket(receipt)
-          if (succeeded && collectionId) {
+          if (succeeded && collectionId && !retainCollection) {
             await this.clearPendingCollection(receipt)
           }
         } else {
@@ -826,6 +837,7 @@ export class ManagedResearchEnvironmentOwner {
     }
     const collectionId = checksum.parse(request.collectionId)
     const operationId = identity.parse(request.operationId)
+    const retainCollection = z.boolean().parse(request.retainCollection ?? false)
     const generation = this.cancellationGeneration
     const releaseGeneration = this.releaseGenerations.get(reference.environmentId) ?? 0
     const assertAdmission = (): void => {
@@ -890,7 +902,7 @@ export class ManagedResearchEnvironmentOwner {
           authority
         })
         signal.throwIfAborted()
-        await this.clearPendingCollection(receipt)
+        if (!retainCollection) await this.clearPendingCollection(receipt)
         return result
       } finally {
         controller.abort(new Error('Managed environment output collection has settled.'))
@@ -910,6 +922,42 @@ export class ManagedResearchEnvironmentOwner {
       receipt.pendingCollection = pending
       throw error
     }
+  }
+
+  /** Main acknowledges durable publication and completes an already requested release. */
+  async acknowledgeCollection(
+    scope: EnvironmentReference & { collectionId: string }
+  ): Promise<ManagedResearchEnvironment> {
+    const reference = {
+      ...scopeSchema.parse({ projectId: scope.projectId, sessionId: scope.sessionId }),
+      environmentId: checksum.parse(scope.environmentId)
+    }
+    const collectionId = checksum.parse(scope.collectionId)
+    return this.exclusive(reference.environmentId, async () => {
+      const receipt = await this.require(reference)
+      if (!receipt.pendingCollection) return structuredClone(receipt)
+      if (receipt.pendingCollection.collectionId !== collectionId)
+        throw new Error('Retained collection does not match this managed environment.')
+      await this.stopAndCleanSocket(receipt, receipt.pendingCollection.executionInvocationId)
+      if (receipt.releaseRequested) {
+        // Recover a crash between acknowledgment and cleanup as a release, never a reusable root.
+        receipt.state = 'releasing'
+        await this.write(receipt)
+      }
+      await this.clearPendingCollection(receipt)
+      if (receipt.releaseRequested) {
+        try {
+          await this.removeDirectories(receipt)
+          receipt.state = 'released'
+          delete receipt.error
+        } catch {
+          receipt.state = 'cleanup-pending'
+          receipt.error = 'Environment cleanup requires verified ownership and stopped execution.'
+        }
+        await this.write(receipt)
+      }
+      return structuredClone(receipt)
+    })
   }
 
   private async discardPendingCollection(receipt: ManagedResearchEnvironment): Promise<void> {
@@ -972,6 +1020,7 @@ export class ManagedResearchEnvironmentOwner {
     return this.exclusive(scope.environmentId, async () => {
       const receipt = await this.require(scope)
       if (receipt.state === 'released') return structuredClone(receipt)
+      receipt.releaseRequested = true
       receipt.state = 'releasing'
       await this.write(receipt)
       try {
@@ -1024,7 +1073,12 @@ export class ManagedResearchEnvironmentOwner {
         // Collection/release may have advanced while recovery was waiting for the same owner lock.
         const receipt = await this.require(snapshot)
         if (this.live.has(receipt.environmentId)) return
-        if (receipt.state === 'ready' && !receipt.activeExecution) return
+        if (
+          receipt.state === 'ready' &&
+          !receipt.activeExecution &&
+          (!receipt.releaseRequested || receipt.pendingCollection)
+        )
+          return
         if (receipt.state === 'released' || receipt.state === 'failed') return
         try {
           await this.stopAndCleanSocket(receipt, receipt.pendingCollection?.executionInvocationId)
@@ -1032,7 +1086,7 @@ export class ManagedResearchEnvironmentOwner {
           if (receipt.pendingCollection) {
             await this.verifyCollectionDirectories(receipt)
             receipt.state = 'ready'
-          } else if (receipt.state !== 'ready') {
+          } else if (receipt.state !== 'ready' || receipt.releaseRequested) {
             await this.removeDirectories(receipt)
             receipt.state = 'released'
           }

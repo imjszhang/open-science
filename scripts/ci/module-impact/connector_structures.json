@@ -13,9 +13,7 @@
     "src/main/connectors/descriptors/structures.test.ts",
     "src/main/connectors/descriptors/structures.ts"
   ],
-  "interfacePaths": [
-    "src/main/connectors/descriptors/structures.ts"
-  ],
+  "interfacePaths": ["src/main/connectors/descriptors/structures.ts"],
   "consumerModules": [],
   "testFiles": {
     "owner": [
@@ -213,7 +211,9 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
   "capabilityOverlays": [],

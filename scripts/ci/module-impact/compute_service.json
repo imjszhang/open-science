@@ -159,9 +159,7 @@
     "src/renderer/src/lib/compute/WorkspaceComputeRecoveryBridge.tsx",
     "src/renderer/src/lib/compute/useSessionJobHydration.ts"
   ],
-  "consumerModules": [
-    "workspace_page"
-  ],
+  "consumerModules": ["workspace_page"],
   "testFiles": {
     "owner": [
       "src/main/compute/approval-session-lifecycle.test.ts",
@@ -601,13 +599,12 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "windows_sensitive",
-    "e2e_regressions",
-    "e2e_delegation"
-  ],
+  "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
   "fallbackCapability": "main_runtime"
 }

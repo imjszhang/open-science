@@ -5121,7 +5121,9 @@ describe('managed execution HTTP API', () => {
         cancelOperation: vi.fn(),
         waitOperation: vi.fn(),
         getEnvironment: vi.fn(),
-        releaseEnvironment: vi.fn()
+        releaseEnvironment: vi.fn(),
+        collectOutputs: vi.fn(),
+        discardOutputs: vi.fn()
       },
       assertOpen: () => undefined,
       withDataRootWrite: (work) => work()
@@ -5310,13 +5312,15 @@ describe('managed execution HTTP API', () => {
       'cancelOperation',
       'waitOperation',
       'getEnvironment',
-      'releaseEnvironment'
+      'releaseEnvironment',
+      'collectOutputs',
+      'discardOutputs'
     ]) {
       const response = await post(base, method, { requestId: 'run-1' })
-      expect(response.status).toBe(method === 'execute' ? 202 : 200)
+      expect(response.status).toBe(['execute', 'collectOutputs'].includes(method) ? 202 : 200)
       expect(await response.json()).toMatchObject({ data: { status: 'running' } })
     }
-    expect(call).toHaveBeenCalledTimes(10)
+    expect(call).toHaveBeenCalledTimes(12)
     expect(
       contexts.every(
         (context) =>
@@ -5335,21 +5339,24 @@ describe('managed execution HTTP API', () => {
     expect((await post(base, 'notAMethod', {})).status).toBe(404)
   })
 
-  it('rejects paired remote callers even when the existing web authorization accepts them', async () => {
-    const { base, call } = await setup({ remote: true })
-    const response = await fetch(`${base}/api/v1/execution/execute`, {
-      method: 'POST',
-      headers: {
-        host: 'remote.example.test',
-        origin: 'https://remote.example.test',
-        'content-type': 'application/json'
-      },
-      body: '{}'
-    })
-    expect(response.status).toBe(403)
-    expect(await response.json()).toMatchObject({ error: { code: 'unsupported_location' } })
-    expect(call).not.toHaveBeenCalled()
-  })
+  it.each(['execute', 'collectOutputs', 'discardOutputs'])(
+    'rejects remote %s even when web authorization accepts it',
+    async (method) => {
+      const { base, call } = await setup({ remote: true })
+      const response = await fetch(`${base}/api/v1/execution/${method}`, {
+        method: 'POST',
+        headers: {
+          host: 'remote.example.test',
+          origin: 'https://remote.example.test',
+          'content-type': 'application/json'
+        },
+        body: '{}'
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: { code: 'unsupported_location' } })
+      expect(call).not.toHaveBeenCalled()
+    }
+  )
 
   it('rejects a non-loopback peer even with a local Host header and valid token', async () => {
     const { base, call } = await setup()
@@ -5374,6 +5381,70 @@ describe('managed execution HTTP API', () => {
     } finally {
       peer.mockRestore()
     }
+  })
+
+  it('validates collection identities through the authenticated adapter without accepting caller authority', async () => {
+    const { base, call, contexts } = await setup()
+    const collectOutputs = vi.fn().mockResolvedValue({ status: 'running', requestId: 'collect-1' })
+    const discardOutputs = vi.fn().mockResolvedValue({ state: 'ready' })
+    const execute = vi.fn()
+    const releaseEnvironment = vi.fn()
+    const adapter = createManagedExecutionExternalPort({
+      service: {
+        runtimes: vi.fn(),
+        createSession: vi.fn(),
+        inspectMaterials: vi.fn(),
+        prepare: vi.fn(),
+        execute,
+        getOperation: vi.fn(),
+        cancelOperation: vi.fn(),
+        waitOperation: vi.fn(),
+        getEnvironment: vi.fn(),
+        releaseEnvironment,
+        collectOutputs,
+        discardOutputs
+      },
+      assertOpen: () => undefined,
+      withDataRootWrite: (work) => work()
+    })
+    call.mockImplementation((method: ManagedExecutionExternalMethod, payload: unknown) =>
+      adapter.call(method, payload, contexts.at(-1))
+    )
+    const client = new OpenScienceClient({ baseUrl: base, token: 'execution-token' })
+    const reference = {
+      projectId: 'project',
+      sessionId: 'session',
+      environmentId: 'a'.repeat(64),
+      collectionId: 'b'.repeat(64)
+    }
+    const collect = { ...reference, requestId: 'collect-1' }
+    for (const method of ['collectOutputs', 'discardOutputs']) {
+      const input = method === 'collectOutputs' ? collect : reference
+      const unauthenticated = await fetch(`${base}/api/v1/execution/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input)
+      })
+      expect(unauthenticated.status).toBe(401)
+      for (const authority of ['provenance', 'recoveryAuthority', 'writeAttempt']) {
+        const response = await post(base, method, { ...input, [authority]: {} })
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ error: { code: 'invalid_request' } })
+      }
+      expect((await post(base, method, { ...input, collectionId: '' })).status).toBe(400)
+    }
+    expect(collectOutputs).not.toHaveBeenCalled()
+    expect(discardOutputs).not.toHaveBeenCalled()
+    const accepted = await post(base, 'collectOutputs', collect)
+    expect(accepted.status).toBe(202)
+    expect(await accepted.json()).toMatchObject({
+      data: { status: 'running', requestId: 'collect-1' }
+    })
+    await expect(client.execution.discardOutputs(reference)).resolves.toEqual({ state: 'ready' })
+    expect(collectOutputs).toHaveBeenCalledExactlyOnceWith(collect)
+    expect(discardOutputs).toHaveBeenCalledExactlyOnceWith(reference)
+    expect(execute).not.toHaveBeenCalled()
+    expect(releaseEnvironment).not.toHaveBeenCalled()
   })
 
   it('uses the real SDK over authenticated HTTP for retry-safe managed requests', async () => {
@@ -5408,7 +5479,7 @@ describe('managed execution HTTP API', () => {
     const { base, call } = await setup()
     const headers = { 'idempotency-key': 'retry-1' }
     const body = { requestId: 'request-1' }
-    for (const method of ['createSession', 'prepare', 'execute']) {
+    for (const method of ['createSession', 'prepare', 'execute', 'collectOutputs']) {
       const responses = await Promise.all([
         post(base, method, body, headers),
         post(base, method, body, headers)
@@ -5416,12 +5487,12 @@ describe('managed execution HTTP API', () => {
       expect(await responses[0].json()).toEqual(await responses[1].json())
       expect((await post(base, method, { requestId: 'other' }, headers)).status).toBe(409)
     }
-    expect(call).toHaveBeenCalledTimes(3)
+    expect(call).toHaveBeenCalledTimes(4)
     for (const method of ['getOperation', 'waitOperation', 'getEnvironment']) {
       await post(base, method, body, headers)
       await post(base, method, body, headers)
     }
-    expect(call).toHaveBeenCalledTimes(9)
+    expect(call).toHaveBeenCalledTimes(10)
   })
 
   it('retains existing request budgets and rejects invalid wait deadlines before dispatch', async () => {

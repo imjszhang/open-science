@@ -66,7 +66,10 @@ Commands:
   execution runtimes      List independent local execution runtimes
   execution session-create | materials | prepare | run | status | wait | cancel | environment | release
                           Read execution JSON from stdin, --input-json, or --input-file
-  execution run --wait    Wait up to 60 seconds; never cancel implicitly
+  execution collect-outputs | discard-outputs
+                          Save retained outputs or explicitly abandon them; never rerun
+  execution run | collect-outputs --wait
+                          Wait up to 60 seconds; never cancel implicitly
   package preflight-import | commit-import | cancel-import | export
                           Read package JSON from stdin, --input-json, or --input-file
   artifacts list <session-id>
@@ -182,7 +185,9 @@ const EXECUTION_COMMANDS = Object.freeze({
   wait: 'waitOperation',
   cancel: 'cancelOperation',
   environment: 'getEnvironment',
-  release: 'releaseEnvironment'
+  release: 'releaseEnvironment',
+  'collect-outputs': 'collectOutputs',
+  'discard-outputs': 'discardOutputs'
 })
 
 const PACKAGE_COMMANDS = Object.freeze({
@@ -474,7 +479,8 @@ export const parseCliArgs = (argv) => {
     throw new CliUsageError('--jsonl requires run --wait.')
   }
   const executionWait =
-    command === 'execution' && (subcommand === 'wait' || (subcommand === 'run' && options.wait))
+    command === 'execution' &&
+    (subcommand === 'wait' || (['run', 'collect-outputs'].includes(subcommand) && options.wait))
   if (
     options.timeoutMs !== undefined &&
     command !== 'package' &&
@@ -486,8 +492,8 @@ export const parseCliArgs = (argv) => {
   if (command === 'execution' && !options.help) {
     if (!Object.hasOwn(EXECUTION_COMMANDS, subcommand))
       throw new CliUsageError('Unknown execution command.')
-    if (options.wait && subcommand !== 'run')
-      throw new CliUsageError('--wait requires execution run.')
+    if (options.wait && !['run', 'collect-outputs'].includes(subcommand))
+      throw new CliUsageError('--wait requires execution run or collect-outputs.')
     if (options.cancelOnTimeout)
       throw new CliUsageError('Execution waits never cancel implicitly; use execution cancel.')
     if (options.timeoutMs > 60_000)
@@ -1657,7 +1663,7 @@ export const runTaskCommand = async (parsed, dependencies = {}) => {
       input = { ...input, timeoutMs: options.timeoutMs }
     let result = await client.execution[method](input)
     if (
-      subcommand === 'run' &&
+      ['run', 'collect-outputs'].includes(subcommand) &&
       options.wait &&
       ['admitting', 'running', 'cancelling'].includes(result.status)
     ) {

@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import {
   executeManagedEnvironmentRequestSchema,
+  collectManagedOutputsRequestSchema,
+  managedCollectionReferenceSchema,
+  type CollectManagedOutputsRequest,
+  type ManagedCollectionReference,
   inspectManagedMaterialsRequestSchema,
   managedEnvironmentReferenceSchema,
   prepareManagedEnvironmentRequestSchema,
@@ -15,7 +19,8 @@ import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repos
 import type { NotebookRunRepository } from './repository'
 import {
   createManagedExecutionOutputWriter,
-  type ManagedExecutionProvenance
+  type ManagedExecutionProvenance,
+  type ManagedExecutionRecoveredOutput
 } from './managed-execution-output'
 import type { ArtifactFile } from '../../shared/artifacts'
 import type { SessionOperationContext } from './session-operation-owner'
@@ -36,7 +41,9 @@ export const managedExecutionCallSchema = z
       'prepare',
       'execute',
       'getEnvironment',
-      'releaseEnvironment'
+      'releaseEnvironment',
+      'collectOutputs',
+      'discardOutputs'
     ]),
     payload: z.record(z.string(), z.unknown()).default({})
   })
@@ -63,6 +70,7 @@ export type ManagedExecutionContext = Pick<
   | 'provenanceContext'
   | 'recordRun'
   | 'saveOutput'
+  | 'recoverOutput'
 > & {
   executionInvocationId: string
 }
@@ -79,6 +87,12 @@ type Service = {
   prepare(request: PrepareManagedEnvironmentRequest, signal?: AbortSignal): Promise<unknown>
   getEnvironment(request: ManagedEnvironmentReference): Promise<unknown>
   releaseEnvironment(request: ManagedEnvironmentReference): Promise<unknown>
+  discardOutputs(request: ManagedCollectionReference): Promise<unknown>
+  collectOutputsInTurn(
+    request: CollectManagedOutputsRequest,
+    context: ManagedExecutionContext,
+    signal: AbortSignal
+  ): Promise<unknown>
   executeInTurn(
     request: ExecuteManagedEnvironmentRequest,
     context: ManagedExecutionContext,
@@ -95,7 +109,7 @@ export function createManagedExecutionTurnPort(dependencies: {
     ownerExecutionId: string,
     write: (scope: ArtifactTurnWriteScope) => Promise<Result>
   ): Promise<Result>
-  artifacts: Pick<ArtifactProvenanceRepository, 'saveVersion'>
+  artifacts: Pick<ArtifactProvenanceRepository, 'saveVersion' | 'replayVersion'>
   notebooks: Pick<NotebookRunRepository, 'readSessionDocuments'>
 }): ManagedExecutionPort {
   return {
@@ -123,12 +137,20 @@ export function createManagedExecutionTurnPort(dependencies: {
           return dependencies.service.getEnvironment(
             managedEnvironmentReferenceSchema.parse(request)
           )
+        case 'discardOutputs':
+          return dependencies.service.discardOutputs(
+            managedCollectionReferenceSchema.parse(request)
+          )
         case 'releaseEnvironment':
           return dependencies.service.releaseEnvironment(
             managedEnvironmentReferenceSchema.parse(request)
           )
       }
-      const parsed = executeManagedEnvironmentRequestSchema.parse(request)
+      const collection =
+        method === 'collectOutputs' ? collectManagedOutputsRequestSchema.parse(request) : undefined
+      const execution = collection
+        ? undefined
+        : executeManagedEnvironmentRequestSchema.parse(request)
       const scope = {
         projectId: turn.projectId,
         sessionId: turn.sessionId,
@@ -136,7 +158,7 @@ export function createManagedExecutionTurnPort(dependencies: {
         workspaceCwd: turn.workspaceCwd,
         artifactRunId: turn.artifactRunId,
         artifactStorageSessionId: turn.artifactStorageSessionId,
-        writeNamespace: parsed.requestId,
+        writeNamespace: (collection ?? execution)!.requestId,
         provenanceContext: turn.provenanceContext,
         messageAncestry: [turn.provenanceContext.promptMessageId]
       }
@@ -161,6 +183,31 @@ export function createManagedExecutionTurnPort(dependencies: {
         )
         return promise
       }
+      const withWriter = (
+        write: (
+          writer: ReturnType<typeof createManagedExecutionOutputWriter>
+        ) => Promise<ArtifactFile>
+      ): Promise<ArtifactFile> =>
+        dependencies.trackArtifactWrite(turn.sessionId, turn.ownerExecutionId, async (actual) => {
+          turn.assertActive()
+          if (
+            actual.executionId !== turn.ownerExecutionId ||
+            actual.projectId !== turn.projectId ||
+            actual.appSessionId !== turn.sessionId ||
+            actual.artifactStorageSessionId !== turn.artifactStorageSessionId ||
+            actual.artifactRunId !== turn.artifactRunId ||
+            Object.entries(turn.provenanceContext).some(
+              ([key, value]) => actual[key as keyof ManagedExecutionProvenance] !== value
+            )
+          )
+            throw new Error('Managed output does not belong to the current Artifact turn.')
+          const writer = createManagedExecutionOutputWriter(
+            dependencies,
+            { ...scope, messageAncestry: actual.messageAncestry },
+            turn.signal
+          )
+          return write(writer)
+        })
       const context: ManagedExecutionContext = Object.freeze({
         operationId: turn.ownerExecutionId,
         projectId: turn.projectId,
@@ -174,43 +221,36 @@ export function createManagedExecutionTurnPort(dependencies: {
             recorded.add(runId)
           }),
         saveOutput: (output) =>
-          track(() =>
-            dependencies.trackArtifactWrite(
-              turn.sessionId,
-              turn.ownerExecutionId,
-              async (actual) => {
-                turn.assertActive()
-                if (
-                  actual.executionId !== turn.ownerExecutionId ||
-                  actual.projectId !== turn.projectId ||
-                  actual.appSessionId !== turn.sessionId ||
-                  actual.artifactStorageSessionId !== turn.artifactStorageSessionId ||
-                  actual.artifactRunId !== turn.artifactRunId ||
-                  Object.entries(turn.provenanceContext).some(
-                    ([key, value]) => actual[key as keyof ManagedExecutionProvenance] !== value
-                  )
-                )
-                  throw new Error('Managed output does not belong to the current Artifact turn.')
-                const writer = createManagedExecutionOutputWriter(
-                  dependencies,
-                  { ...scope, messageAncestry: actual.messageAncestry },
-                  turn.signal
-                )
-                if (output.producerRunId) {
-                  if (!recorded.has(output.producerRunId))
-                    throw new Error('Managed output requires a recorded Notebook Run.')
-                  await writer.recordRun(output.producerRunId)
-                }
-                return writer.saveOutput(output)
+          track(async () => {
+            let saved!: Awaited<ReturnType<typeof reader.saveOutput>>
+            await withWriter(async (writer) => {
+              if (output.producerRunId) {
+                if (!recorded.has(output.producerRunId))
+                  throw new Error('Managed output requires a recorded Notebook Run.')
+                await writer.recordRun(output.producerRunId)
               }
-            )
-          )
+              saved = await writer.saveOutput(output)
+              return saved
+            })
+            return saved
+          }),
+        recoverOutput: (output) =>
+          track(async () => {
+            let recovered!: ManagedExecutionRecoveredOutput
+            await withWriter(async (writer) => {
+              recovered = await writer.recoverOutput(output)
+              return recovered.artifact
+            })
+            return recovered
+          })
       })
       let result: unknown
       let executionError: unknown
       let executionFailed = false
       try {
-        result = await dependencies.service.executeInTurn(parsed, context, turn.signal)
+        result = collection
+          ? await dependencies.service.collectOutputsInTurn(collection, context, turn.signal)
+          : await dependencies.service.executeInTurn(execution!, context, turn.signal)
       } catch (error) {
         executionFailed = true
         executionError = error

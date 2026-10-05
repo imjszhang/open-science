@@ -373,6 +373,8 @@ async function createRoutedManagedTurnFixture(corruptStorageBinding = false): Pr
       prepare: unexpected,
       getEnvironment: unexpected,
       releaseEnvironment: unexpected,
+      discardOutputs: unexpected,
+      collectOutputsInTurn: unexpected,
       executeInTurn
     },
     artifacts: fixture.repository,

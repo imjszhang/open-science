@@ -28,7 +28,9 @@ import { assertResearchSessionWritable } from '../storage/session-package-state'
 import type { NotebookRunRepository } from './repository'
 import {
   createManagedExecutionOutputWriter,
-  type ManagedExecutionOutput
+  type ManagedExecutionOutput,
+  type ManagedExecutionRecoveryOutput,
+  type ManagedExecutionRecoveredOutput
 } from './managed-execution-output'
 
 const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
@@ -84,6 +86,7 @@ export type SessionOperationContext = Readonly<{
   provenanceContext: Readonly<NotebookRunProvenanceContext>
   recordRun(runId: string): Promise<void>
   saveOutput(output: SessionOperationOutput): Promise<ArtifactVersionFile>
+  recoverOutput(output: ManagedExecutionRecoveryOutput): Promise<ManagedExecutionRecoveredOutput>
 }>
 export type StartSessionOperation = SessionOperationScope & {
   // Main computes this from the validated operation, never from a caller-supplied digest alone.
@@ -115,7 +118,7 @@ export type SessionOperationDependencies = {
     'begin' | 'accept' | 'flush' | 'publish' | 'commitTerminal'
   >
   artifactTurns: Pick<ArtifactTurnOwner, 'openExecution' | 'snapshot' | 'finalize' | 'dispose'>
-  artifacts: Pick<ArtifactProvenanceRepository, 'saveVersion' | 'listRunVersions'>
+  artifacts: Pick<ArtifactProvenanceRepository, 'saveVersion' | 'replayVersion' | 'listRunVersions'>
   notebooks: Pick<NotebookRunRepository, 'readSessionDocuments'>
   // Composition owns admission against ACP, deletion, export and application shutdown.
   reserveSession(
@@ -524,7 +527,9 @@ export class SessionOperationOwner {
         notebookDataDir: writer.notebookDataDir,
         provenanceContext: Object.freeze({ ...provenance }),
         recordRun: (runId: string) => track(() => writer.recordRun(runId)),
-        saveOutput: (output: SessionOperationOutput) => track(() => writer.saveOutput(output))
+        saveOutput: (output: SessionOperationOutput) => track(() => writer.saveOutput(output)),
+        recoverOutput: (output: ManagedExecutionRecoveryOutput) =>
+          track(() => writer.recoverOutput(output))
       })
       const result = await request.execute(context, live.controller.signal)
       resultText = z.string().max(32768).parse(result.text)

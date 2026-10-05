@@ -61,7 +61,13 @@ export const managedEnvironmentReferenceSchema = managedSessionScopeSchema
     environmentId: checksum
   })
   .strict()
-const outputSelection = z
+export const managedCollectionReferenceSchema = managedEnvironmentReferenceSchema
+  .extend({ collectionId: checksum })
+  .strict()
+export const collectManagedOutputsRequestSchema = managedCollectionReferenceSchema
+  .extend({ requestId: identity })
+  .strict()
+export const managedOutputSelectionSchema = z
   .object({
     path: relativePath,
     filename: z
@@ -84,7 +90,7 @@ export const executeManagedEnvironmentRequestSchema = managedEnvironmentReferenc
       .refine((value) => !value.includes('\0')),
     timeoutMs: z.number().int().min(1).max(600_000).default(60_000),
     localServicePort: z.number().int().min(1).max(65535).optional(),
-    outputs: z.array(outputSelection).max(100).default([]),
+    outputs: z.array(managedOutputSelectionSchema).max(100).default([]),
     description: z.string().min(1).max(16_384).optional()
   })
   .strict()
@@ -106,13 +112,22 @@ export type PrepareManagedEnvironmentRequest = z.input<
   typeof prepareManagedEnvironmentRequestSchema
 >
 export type ManagedEnvironmentReference = z.input<typeof managedEnvironmentReferenceSchema>
+export type ManagedCollectionReference = z.input<typeof managedCollectionReferenceSchema>
+export type CollectManagedOutputsRequest = z.input<typeof collectManagedOutputsRequestSchema>
 export type ExecuteManagedEnvironmentRequest = z.input<
   typeof executeManagedEnvironmentRequestSchema
 >
 export type ManagedOperationReference = z.input<typeof managedOperationReferenceSchema>
 export type CreateManagedSessionRequest = z.input<typeof createManagedSessionRequestSchema>
 export type ManagedExecutionMethod =
-  'runtimes' | 'inspectMaterials' | 'prepare' | 'execute' | 'getEnvironment' | 'releaseEnvironment'
+  | 'runtimes'
+  | 'inspectMaterials'
+  | 'prepare'
+  | 'execute'
+  | 'getEnvironment'
+  | 'releaseEnvironment'
+  | 'collectOutputs'
+  | 'discardOutputs'
 
 export type ManagedRuntimeDiagnosticCode =
   | 'node_not_found'

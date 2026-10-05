@@ -305,7 +305,9 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
         })
         cleanups.push(() => environments.close())
         const service = new ManagedExecutionService({
+          artifacts: h.artifacts,
           dataRoot: h.fixture.storageRoot,
+          notebooks: h.fixture.notebookRepository,
           environments,
           operations: h.owner,
           runtime: h.notebook,

@@ -146,9 +146,7 @@
     "src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.tsx",
     "src/main/artifacts/ro-crate-export.ts"
   ],
-  "consumerModules": [
-    "session_persistence"
-  ],
+  "consumerModules": ["session_persistence"],
   "testFiles": {
     "owner": [
       "src/main/artifacts/artifact-provenance-graph.test.ts",
@@ -583,13 +581,12 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-execution-collection.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "windows_sensitive",
-    "e2e_regressions",
-    "e2e_delegation"
-  ],
+  "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
   "fallbackCapability": "main_runtime"
 }

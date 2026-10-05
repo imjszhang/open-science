@@ -9,9 +9,7 @@
     "src/main/acp/image-input-compatibility-owner.ts",
     "src/main/acp/vision-evidence-repository.ts"
   ],
-  "consumerModules": [
-    "workspace_runtime"
-  ],
+  "consumerModules": ["workspace_runtime"],
   "testFiles": {
     "owner": [
       "src/main/acp/image-input-compatibility-owner.test.ts",
@@ -166,12 +164,11 @@
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/composition/handoff.test.ts",
       "src/main/composition/session-packages.test.ts",
-      "src/main/notebook/managed-nested-generation.integration.test.ts"
+      "src/main/notebook/managed-nested-generation.integration.test.ts",
+      "src/main/notebook/managed-output-publication.integration.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "e2e_regressions",
-    "e2e_delegation"
-  ],
+  "capabilityOverlays": ["e2e_regressions", "e2e_delegation"],
   "fallbackCapability": "main_runtime"
 }

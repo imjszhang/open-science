@@ -194,7 +194,19 @@ new Session type or separate reproduction workflow just to execute the materials
 
 Keep request IDs for retries, inspect actual Notebook/Artifact results, and distinguish task
 completion from the experiment's scientific outcome. Cancellation uses the current turn's stop
-operation. Release the prepared environment after collection when it is no longer needed;
+operation. If publication is incomplete, inspect `host.managedExecution.getEnvironment` for
+`pendingCollection.collectionId`. Use `host.managedExecution.collectOutputs` with that
+`environmentId`, `collectionId` and a stable `requestId` to save retained outputs without rerunning
+the experiment. Do not substitute `execute` for output collection. A pending collection can mean
+that files are already saved but the original turn has not published them yet. If collection reports
+this, finish or recover that turn's finalization instead of rerunning the command. In the same active
+producing turn, use an exact returned output `versionId` with `host.artifactPath(versionId)` through
+producer authority when needed; the ordinary Artifact catalog remains published-only.
+`releaseEnvironment` preserves pending outputs; requested cleanup completes automatically once all
+exact output Versions, including the execution/collection receipt, publish. Only an explicit `host.managedExecution.discardOutputs({ environmentId, collectionId })`
+abandons them. Discard only when the user intends to abandon that collection. Never supply
+`provenance`, `recoveryAuthority` or `writeAttempt`; the application owns these authorities.
+Release the prepared environment after collection when it is no longer needed;
 published immutable Artifacts survive this cleanup. Report unavailable runtime support honestly.
 The initial native-service target is macOS with an independently installed Node 22 or newer.
 Discovery uses the application's launch PATH and common host locations, including `~/.local/bin`;

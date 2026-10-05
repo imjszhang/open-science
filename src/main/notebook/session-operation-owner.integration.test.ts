@@ -628,6 +628,8 @@ it.skipIf(process.platform === 'win32').each(['ordinary', 'fork'])(
             prepare: async () => ({}),
             getEnvironment: async () => ({}),
             releaseEnvironment: async () => ({}),
+            discardOutputs: async () => ({}),
+            collectOutputsInTurn: async () => ({}),
             executeInTurn: async (input, context, executionSignal) => {
               expect(context.operationId).toBe(outer.operationId)
               const executionInvocationId = input.requestId
@@ -745,6 +747,8 @@ it.skipIf(process.platform === 'win32')(
     })
     cleanups.push(() => environments.close())
     const service = new ManagedExecutionService({
+      artifacts: h.artifacts,
+      notebooks: h.fixture.notebookRepository,
       dataRoot: h.fixture.storageRoot,
       environments,
       operations: h.owner,
@@ -809,7 +813,8 @@ it.skipIf(process.platform === 'win32')(
       await expect(
         service.releaseEnvironment({ ...target, environmentId: prepared.environmentId })
       ).resolves.toMatchObject({
-        state: 'released'
+        state: 'ready',
+        pendingCollection: { collectionId: expect.stringMatching(/^[a-f0-9]{64}$/) }
       })
       done = await h.owner.wait({ ...target, requestId: executeRequest.requestId })
     } finally {
@@ -821,6 +826,12 @@ it.skipIf(process.platform === 'win32')(
     const session = (await h.read(target))!
     const output = session.artifacts!.find((artifact) => artifact.name === 'partial.txt')!
     const receipt = session.artifacts!.find((artifact) => artifact.name?.startsWith('execution-'))!
+    // The stop collected bytes before the current turn published them. Only exact Version
+    // publication (including the receipt) may acknowledge retention and finish requested release.
+    await service.reconcilePublishedOutputs(target)
+    const released = await environments.get({ ...target, environmentId: prepared.environmentId })
+    expect(released.state).toBe('released')
+    expect(released.pendingCollection).toBeUndefined()
     expect(await readFile(output.path, 'utf8')).toBe('partial result')
     expect(JSON.parse(await readFile(receipt.path, 'utf8')).result).toMatchObject({
       status: 'cancelled',
