@@ -14,6 +14,7 @@ import { composeDesktopUtilities } from './composition/desktop-utilities'
 import { composeDocumentReading } from './composition/document-reading'
 import { composeHandoff, composeStorageHandoff } from './composition/handoff'
 import { composeManagedFiles } from './composition/managed-files'
+import { composeManagedExecution } from './composition/managed-execution'
 import { composeNotebookBridge } from './composition/notebook-bridge'
 import { composeNotebookRuntime } from './composition/notebook-runtime'
 import { composeNotebookSurfaces } from './composition/notebook-surfaces'
@@ -54,6 +55,7 @@ import type { SessionSummary } from '../shared/session-persistence'
 import { type AppIconPreview, type AppIconVariant } from '../shared/settings'
 import { registerReviewerComposition } from './composition/reviewer'
 import { type DiagnosticOperation } from './diagnostics/operation'
+import { createLogger, diagnosticErrorFields } from './logger'
 import { createElectronSurfaceAdapter } from './ipc-surfaces/adapter'
 import { createConnectorApprovalElectronSurface } from './ipc-surfaces/connector-approvals'
 import { createCoreElectronSurfaces } from './ipc-surfaces/core'
@@ -79,6 +81,7 @@ import { detectActiveSessions } from './storage/detect-active'
 import {
   isMigrationInProgress,
   isMigrationPending,
+  runDataRootStartupRecovery,
   withDataRootWrite
 } from './storage/migration-state'
 import type { TaskControlPorts } from './tasks/task-control-ports'
@@ -130,6 +133,8 @@ export type ApplicationRuntimeInterfaces = {
     preference: Parameters<WindowSettingsCapabilities['setClosePreference']>[0]
   ) => Promise<void>
   taskAgent: TaskAgentPort
+  managedExecution: import('./managed-execution-external-port').ManagedExecutionExternalPort
+  sessionPackageTransfer: import('./session-package-external-port').SessionPackageExternalPort
   taskControls: TaskControlPorts
   computePreferences: Pick<SessionEnabledComputeHostsOwner, 'withReservation' | 'set'>
   sessionDeletionCapability: Pick<SessionDeletion, 'setSessionDeletionHandlers'>
@@ -257,6 +262,7 @@ export const createApplicationModules = async (
     modules
   })
   const projectLifecycle = composeProjectLifecycle({
+    stopManagedProject: (projectId) => managedExecution.stopProject(projectId),
     applicationEvents,
     ...storageStartup,
     uploadRepository: uploadStorage.uploadRepository,
@@ -289,6 +295,18 @@ export const createApplicationModules = async (
     composition
   })
   const specialistCatalog = await composeSpecialistCatalog({ ...settingsBootstrap, composition })
+  const managedExecution = await composeManagedExecution({
+    applicationEvents,
+    managedFiles,
+    sessionAuthority,
+    sessionPackages,
+    projectLifecycle,
+    notebookRuntime,
+    runtimeRef,
+    modules
+  })
+  notebookRuntime.notebookLifecycle = managedExecution.notebookLifecycle
+  sessionAuthority.notebookActivityRef.current = managedExecution.notebookLifecycle
   const researchCatalog = await composeResearchCatalog({
     applicationEvents,
     ...settingsBootstrap,
@@ -387,6 +405,7 @@ export const createApplicationModules = async (
     mainEntryPath
   })
   const notebookBridge = await composeNotebookBridge({
+    managedExecution: managedExecution.internal,
     ...settingsBootstrap,
     managedFileVersionService: uploadStorage.managedFileVersionService,
     runtimeRef,
@@ -429,6 +448,9 @@ export const createApplicationModules = async (
     translate
   })
   const agentRuntime = await composeAgentRuntime({
+    stopManagedSession: (projectId, sessionId) =>
+      managedExecution.stopSession(projectId, sessionId),
+    runtimeSessionOwner: managedExecution.runtimeSessions,
     ...settingsBootstrap,
     ...storageStartup,
     uploadRepository: uploadStorage.uploadRepository,
@@ -510,6 +532,7 @@ export const createApplicationModules = async (
     modules
   })
   const handoff = await composeHandoff({
+    managedExecution,
     declareElectronAdapter,
     webSessionPersistenceFlush,
     ...settingsBootstrap,
@@ -569,6 +592,7 @@ export const createApplicationModules = async (
     composition
   })
   const storageHandoff = composeStorageHandoff({
+    resumeManagedExecution: () => managedExecution.resume(),
     declareElectronAdapter,
     webSessionPersistenceFlush,
     ...settingsBootstrap,
@@ -609,6 +633,13 @@ export const createApplicationModules = async (
     ...projectLifecycle,
     ...agentRuntime,
     translate
+  })
+  await runDataRootStartupRecovery(() => managedExecution.recover(), {
+    reportFailure: (error) =>
+      createLogger('managed-research-execution').error(
+        'Managed execution recovery remains pending',
+        diagnosticErrorFields(error)
+      )
   })
   surfaceAdapters.push(
     ...createCoreElectronSurfaces({
@@ -751,6 +782,8 @@ export const createApplicationModules = async (
       )
     },
     taskAgent: agentWorkflows.taskAgent,
+    managedExecution: managedExecution.external,
+    sessionPackageTransfer: sessionPackageSurfaces.sessionPackageHeadless,
     taskControls: {
       specialists: {
         resolve: (reference) =>

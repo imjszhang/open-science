@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { ShellCellSession } from './shell-cell-session'
 import { dirname } from 'node:path'
+import {
+  resolveManagedShellExecutionCapability,
+  type ManagedShellExecutionCapability
+} from './managed-shell-execution'
 import type { NotebookExecutionRecovery } from '../../shared/execution-recovery'
 import { assertShellSearchScope } from './shell-search-scope'
 import type { ShellProcessLaunchOwnership } from './shell-process-ownership.windows-posix'
@@ -77,6 +81,9 @@ type NotebookShellResult = {
 }
 
 type NotebookShellProcessRequest = {
+  /** Main-only authority; never accepted by a public request schema. */
+  managedExecution?: ManagedShellExecutionCapability
+  executionInvocationId?: string
   laneKey?: string
   runId?: string
   command: string
@@ -99,6 +106,13 @@ type NotebookShellProcessRequest = {
 // Runtime-private port: platform invocation, encoding, env projection, and teardown stay in its adapter.
 type NotebookShellProcess = {
   execute(request: NotebookShellProcessRequest): Promise<NotebookShellResult>
+  confirmManagedCleanup?(
+    scope: { projectId: string; sessionId: string; runId: string },
+    retry?: boolean
+  ): Promise<{
+    state: 'verified' | 'running' | 'cleanup-pending' | 'unknown'
+    reaped: boolean
+  }>
   shutdown?(scope: {
     projectId?: string
     sessionId?: string
@@ -320,6 +334,16 @@ const prepareShellLaunchOptions = async (
   }
 ): Promise<PreparedShellLaunch> => {
   const hostPlatform = options.platform ?? process.platform
+  const managed = options.managedExecution
+    ? resolveManagedShellExecutionCapability(options.managedExecution, options)
+    : undefined
+  if (
+    managed &&
+    (!options.processSandbox ||
+      (options.runtimeBinding ?? defaultShellRuntimeBinding(hostPlatform)).kind !== 'native-posix')
+  ) {
+    throw new Error('Managed Shell execution requires the native process sandbox.')
+  }
   try {
     assertProcessTreeSupport(hostPlatform)
   } catch (error) {
@@ -378,30 +402,65 @@ const prepareShellLaunchOptions = async (
   let shellEnv: NodeJS.ProcessEnv
   let workloadCacheEnv: NodeJS.ProcessEnv
   let npmReadRoots: string[] = []
+  let localService: import('./process-sandbox').NotebookLocalService | undefined
   try {
-    workloadCacheEnv = prepareNotebookWorkloadCache(options.runtimeRoot)
-    shellEnv = options.environment
-      ? { ...options.environment }
-      : buildShellEnv(
-          options.handoffDir,
-          runtimePlatform,
-          process.env,
-          options.runtimeRoot,
-          workloadCacheEnv,
-          runtimeBinding
+    if (managed) {
+      // No host environment, shared npm/cache storage, or implicit workspace grants enter this run.
+      shellEnv = { ...managed.environment }
+      workloadCacheEnv = {}
+      if (managed.localService) {
+        if (hostPlatform !== 'darwin' || !options.runId) {
+          throw new Error('Managed local services require a native macOS Run owner.')
+        }
+        // Load the native service adapter only for this capability. Ordinary Notebook consumers
+        // (including recovery subprocesses) do not require this ESM-only runtime package.
+        const { validateLocalService } = await import('@aipoch/notebook-network-sandbox')
+        options.signal?.throwIfAborted()
+        const socketPath = await managed.localService.prepareSocket({
+          runId: options.runId,
+          signal: options.signal
+        })
+        options.signal?.throwIfAborted()
+        localService = validateLocalService(
+          { executionId: options.runId, socketPath },
+          hostPlatform
         )
-    // Resolve host npm before injecting the workload-writable global bin into PATH.
-    if (options.processSandbox && runtimeBinding.kind === 'native-posix') {
-      npmReadRoots = shellNpmReadRoots(shellEnv, runtimePlatform)
+        shellEnv.OPEN_SCIENCE_SERVICE_SOCKET = localService.socketPath
+        shellEnv.OPEN_SCIENCE_SERVICE_PORT = String(managed.localService.logicalPort)
+      }
+    } else {
+      workloadCacheEnv = prepareNotebookWorkloadCache(options.runtimeRoot)
+      shellEnv = options.environment
+        ? { ...options.environment }
+        : buildShellEnv(
+            options.handoffDir,
+            runtimePlatform,
+            process.env,
+            options.runtimeRoot,
+            workloadCacheEnv,
+            runtimeBinding
+          )
+      // Resolve host npm before injecting the workload-writable global bin into PATH.
+      if (options.processSandbox && runtimeBinding.kind === 'native-posix') {
+        npmReadRoots = shellNpmReadRoots(shellEnv, runtimePlatform)
+      }
+      shellEnv = prepareShellNpmEnvironment(options.runtimeRoot, runtimePlatform, shellEnv)
+      if (options.inputRoot) shellEnv.OPEN_SCIENCE_INPUT_DIR = options.inputRoot
+      else delete shellEnv.OPEN_SCIENCE_INPUT_DIR
     }
-    shellEnv = prepareShellNpmEnvironment(options.runtimeRoot, runtimePlatform, shellEnv)
-    if (options.inputRoot) shellEnv.OPEN_SCIENCE_INPUT_DIR = options.inputRoot
-    else delete shellEnv.OPEN_SCIENCE_INPUT_DIR
   } catch (error) {
     throw new ShellPreparationError({
       stdout: '',
       stderr: error instanceof Error ? error.message : String(error),
-      exitCode: null
+      exitCode: null,
+      ...(managed
+        ? {
+            runtimeStatus: 'unavailable' as const,
+            errorCode: 'shell-runtime-unavailable' as const,
+            recovery: { execution: 'not-started' as const, retryAfter: 'runtime-ready' as const },
+            ...(options.signal?.aborted ? { cancelled: true } : {})
+          }
+        : {})
     })
   }
 
@@ -422,16 +481,19 @@ const prepareShellLaunchOptions = async (
           executable: invocation.executable,
           args: invocation.args,
           env: baseEnv,
-          pathEnvironment: {
-            OPEN_SCIENCE_HANDOFF_DIR: options.handoffDir,
-            ...workloadCacheEnv,
-            NPM_CONFIG_PREFIX: shellEnv.NPM_CONFIG_PREFIX,
-            NPM_CONFIG_CACHE: shellEnv.NPM_CONFIG_CACHE,
-            ...(options.inputRoot ? { OPEN_SCIENCE_INPUT_DIR: options.inputRoot } : {})
-          },
+          pathEnvironment: managed
+            ? {}
+            : {
+                OPEN_SCIENCE_HANDOFF_DIR: options.handoffDir,
+                ...workloadCacheEnv,
+                NPM_CONFIG_PREFIX: shellEnv.NPM_CONFIG_PREFIX,
+                NPM_CONFIG_CACHE: shellEnv.NPM_CONFIG_CACHE,
+                ...(options.inputRoot ? { OPEN_SCIENCE_INPUT_DIR: options.inputRoot } : {})
+              },
           cwd: options.cwd,
           commandText: options.command,
           ...(options.executionReference ? { executionReference: options.executionReference } : {}),
+          ...(localService ? { localService } : {}),
           sessionId: options.sessionId,
           projectId: options.projectId,
           runtime: 'bash',
@@ -441,38 +503,57 @@ const prepareShellLaunchOptions = async (
           ...(platform === 'win32' && runtimeBinding.kind === 'powershell'
             ? { superviseProcessTree: true }
             : {}),
-          filesystem: {
-            readOnlyRoots: [
-              options.runtimeRoot,
-              ...(runtimeBinding.kind === 'powershell' && runtimeBinding.version === '7.6'
-                ? [dirname(resolveWindowsNotebookRuntime().node)]
-                : []),
-              ...(options.inputRoot ? [options.inputRoot] : []),
-              ...(runtimeBinding.kind === 'wsl2-bash'
-                ? []
-                : [
-                    dirname(invocation.executable),
-                    ...(runtimePlatform === 'win32'
-                      ? []
-                      : [...environmentPathRoots(baseEnv, runtimePlatform), ...npmReadRoots])
-                  ])
-            ],
-            ...(runtimePlatform === 'win32'
-              ? { optionalReadOnlyRoots: environmentPathRoots(baseEnv, runtimePlatform) }
-              : {}),
-            readWriteRoots: [
-              options.notebookSessionRoot ?? options.cwd,
-              options.cwd,
-              options.handoffDir,
-              notebookWorkloadCacheRoot(options.runtimeRoot),
-              shellEnv.NPM_CONFIG_PREFIX!
-            ],
-            deniedReadRoots: options.protectedDirs ?? [],
-            deniedWriteRoots: [
-              ...(options.inputRoot ? [options.inputRoot] : []),
-              ...(options.protectedDirs ?? [])
-            ]
-          },
+          filesystem: managed
+            ? {
+                readOnlyRoots: [
+                  dirname(invocation.executable),
+                  ...managed.filesystem.readOnlyRoots
+                ],
+                readWriteRoots: [
+                  ...managed.filesystem.readWriteRoots,
+                  ...(localService ? [dirname(localService.socketPath)] : [])
+                ],
+                deniedReadRoots: [
+                  ...managed.filesystem.deniedReadRoots,
+                  ...(options.protectedDirs ?? [])
+                ],
+                deniedWriteRoots: [
+                  ...managed.filesystem.deniedWriteRoots,
+                  ...(options.protectedDirs ?? [])
+                ]
+              }
+            : {
+                readOnlyRoots: [
+                  options.runtimeRoot,
+                  ...(runtimeBinding.kind === 'powershell' && runtimeBinding.version === '7.6'
+                    ? [dirname(resolveWindowsNotebookRuntime().node)]
+                    : []),
+                  ...(options.inputRoot ? [options.inputRoot] : []),
+                  ...(runtimeBinding.kind === 'wsl2-bash'
+                    ? []
+                    : [
+                        dirname(invocation.executable),
+                        ...(runtimePlatform === 'win32'
+                          ? []
+                          : [...environmentPathRoots(baseEnv, runtimePlatform), ...npmReadRoots])
+                      ])
+                ],
+                ...(runtimePlatform === 'win32'
+                  ? { optionalReadOnlyRoots: environmentPathRoots(baseEnv, runtimePlatform) }
+                  : {}),
+                readWriteRoots: [
+                  options.notebookSessionRoot ?? options.cwd,
+                  options.cwd,
+                  options.handoffDir,
+                  notebookWorkloadCacheRoot(options.runtimeRoot),
+                  shellEnv.NPM_CONFIG_PREFIX!
+                ],
+                deniedReadRoots: options.protectedDirs ?? [],
+                deniedWriteRoots: [
+                  ...(options.inputRoot ? [options.inputRoot] : []),
+                  ...(options.protectedDirs ?? [])
+                ]
+              },
           ...(options.signal ? { signal: options.signal } : {})
         })
       : undefined
@@ -1110,10 +1191,11 @@ const runShellCommand = (
 }
 
 type BoundedShellExecution = {
-  identity: Pick<NotebookShellProcessRequest, 'projectId' | 'sessionId' | 'laneKey'>
+  identity: Pick<NotebookShellProcessRequest, 'projectId' | 'sessionId' | 'laneKey' | 'runId'>
   controller: AbortController
   completion: Promise<NotebookShellResult>
   result?: NotebookShellResult
+  cleanupVerified?: boolean
   retryCleanup?: () => Promise<boolean>
   shutdown?: Promise<{ reaped: boolean }>
 }
@@ -1124,8 +1206,15 @@ const shellCleanupVerified = (result: NotebookShellResult): boolean =>
 // Each lane owns a live interpreter; runShellCommand remains the one-shot spawn/cleanup owner.
 class NotebookShellProcessAdapter implements NotebookShellProcess {
   private readonly sessions = new Map<string, ShellCellSession>()
+  private readonly unconfirmedPersistentSessions = new Set<string>()
   // Lifecycle handles only. runShellCommand and the existing receipt registry own every process.
   private readonly boundedExecutions = new Set<BoundedShellExecution>()
+  // Cleanup outcomes/closures from the original owner, never a second PID registry.
+  private readonly managedExecutions = new Map<string, BoundedShellExecution>()
+  private readonly managedCleanupProofs = new Map<
+    string,
+    { projectId: string; sessionId: string }
+  >()
   constructor(
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly processSandbox?: NotebookProcessSandbox,
@@ -1177,9 +1266,44 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
       ...request,
       runtimeBinding: request.runtimeBinding ?? defaultShellRuntimeBinding(this.platform)
     }
-    // A bounded service must finish only after its entire process tree is reaped. The main-process
-    // composition chooses this immutable mode; ordinary interactive Shell lanes remain persistent.
-    if (this.executionMode === 'bounded') {
+    // Only a main-issued invocation capability selects bounded execution in a normal adapter.
+    // The constructor mode remains a compatibility seam for existing bounded-only consumers.
+    if (request.managedExecution) {
+      const policy = resolveManagedShellExecutionCapability(request.managedExecution, request, true)
+      request = {
+        ...request,
+        cwd: policy.cwd,
+        environment: { ...policy.environment },
+        ...(policy.signal
+          ? {
+              signal: request.signal
+                ? AbortSignal.any([request.signal, policy.signal])
+                : policy.signal
+            }
+          : {})
+      }
+    }
+    const bounded = Boolean(request.managedExecution) || this.executionMode === 'bounded'
+    const persistentCleanupPending =
+      bounded &&
+      [...this.unconfirmedPersistentSessions].some((key) => {
+        const identity = this.sessions.get(key)?.identity
+        return (
+          identity?.projectId === request.projectId &&
+          identity.sessionId === request.sessionId &&
+          identity.laneKey === request.laneKey
+        )
+      })
+    if (this.hasUnconfirmedBoundedExecution(request) || persistentCleanupPending)
+      return Promise.resolve({
+        stdout: '',
+        stderr: SHELL_CLEANUP_INCOMPLETE_MESSAGE,
+        exitCode: null,
+        errorCode: 'shell-cleanup-incomplete',
+        ownedTreeReaped: false,
+        recovery: { execution: 'not-started', retryAfter: 'cleanup-verified' }
+      })
+    if (bounded) {
       return this.executeBounded(request)
     }
     const key = JSON.stringify([
@@ -1255,13 +1379,16 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
       )
       this.sessions.set(key, session)
     }
-    return session.execute(request)
+    const result = await session.execute(request)
+    if (shellCleanupVerified(result)) this.unconfirmedPersistentSessions.delete(key)
+    else this.unconfirmedPersistentSessions.add(key)
+    return result
   }
 
   async shutdown(
     scope: { projectId?: string; sessionId?: string; laneKey?: string } = {}
   ): Promise<{ reaped: boolean }> {
-    if (this.executionMode === 'bounded') {
+    const drainBounded = async (): Promise<{ reaped: boolean }> => {
       const selected = [...this.boundedExecutions].filter(
         ({ identity }) =>
           (scope.projectId === undefined || identity.projectId === scope.projectId) &&
@@ -1280,7 +1407,11 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
               } catch {
                 // A failed cleanup never discards the original owner or its retry capability.
               }
-              if (reaped) this.boundedExecutions.delete(execution)
+              if (reaped) {
+                execution.cleanupVerified = true
+                this.boundedExecutions.delete(execution)
+                this.rememberManagedCleanup(execution)
+              }
               return { reaped }
             })().finally(() => {
               execution.shutdown = undefined
@@ -1291,6 +1422,8 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
       )
       return { reaped: results.every((result) => result.reaped) }
     }
+    // One adapter can own both ordinary persistent interpreters and managed bounded executions.
+    const bounded = drainBounded()
     const selected = [...this.sessions].filter(
       ([, session]) =>
         (scope.projectId === undefined || session.identity.projectId === scope.projectId) &&
@@ -1300,15 +1433,20 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
     const results = await Promise.all(
       selected.map(async ([key, session]) => {
         const result = await session.shutdown()
-        if (result.reaped && this.sessions.get(key) === session) this.sessions.delete(key)
+        if (result.reaped && this.sessions.get(key) === session) {
+          this.sessions.delete(key)
+          this.unconfirmedPersistentSessions.delete(key)
+        } else if (!result.reaped) {
+          this.unconfirmedPersistentSessions.add(key)
+        }
         return result
       })
     )
-    return { reaped: results.every((result) => result.reaped) }
+    return { reaped: (await bounded).reaped && results.every((result) => result.reaped) }
   }
 
-  private executeBounded(request: NotebookShellProcessRequest): Promise<NotebookShellResult> {
-    const blocked = [...this.boundedExecutions].some(
+  private hasUnconfirmedBoundedExecution(request: NotebookShellProcessRequest): boolean {
+    return [...this.boundedExecutions].some(
       ({ identity, result }) =>
         result !== undefined &&
         !shellCleanupVerified(result) &&
@@ -1316,15 +1454,56 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
         identity.sessionId === request.sessionId &&
         identity.laneKey === request.laneKey
     )
-    if (blocked)
-      return Promise.resolve({
-        stdout: '',
-        stderr: SHELL_CLEANUP_INCOMPLETE_MESSAGE,
-        exitCode: null,
-        errorCode: 'shell-cleanup-incomplete',
-        ownedTreeReaped: false,
-        recovery: { execution: 'not-started', retryAfter: 'cleanup-verified' }
+  }
+
+  async confirmManagedCleanup(
+    scope: { projectId: string; sessionId: string; runId: string },
+    retry = false
+  ): Promise<{ state: 'verified' | 'running' | 'cleanup-pending' | 'unknown'; reaped: boolean }> {
+    const proof = this.managedCleanupProofs.get(scope.runId)
+    if (proof?.projectId === scope.projectId && proof.sessionId === scope.sessionId) {
+      return { state: 'verified', reaped: true }
+    }
+    const execution = this.managedExecutions.get(scope.runId)
+    if (
+      !execution ||
+      execution.identity.projectId !== scope.projectId ||
+      execution.identity.sessionId !== scope.sessionId
+    )
+      return { state: 'unknown', reaped: false }
+    if (!execution.result) return { state: 'running', reaped: false }
+    if (execution.cleanupVerified || shellCleanupVerified(execution.result))
+      return { state: 'verified', reaped: true }
+    if (!retry) return { state: 'cleanup-pending', reaped: false }
+    if (!execution.shutdown) {
+      execution.shutdown = (async () => {
+        const reaped = (await execution.retryCleanup?.().catch(() => false)) === true
+        if (reaped) {
+          this.boundedExecutions.delete(execution)
+          // Preserve historical failure output; only the retained owner's cleanup fact advances.
+          execution.cleanupVerified = true
+          this.rememberManagedCleanup(execution)
+        }
+        return { reaped }
+      })().finally(() => {
+        execution.shutdown = undefined
       })
+    }
+    const { reaped } = await execution.shutdown
+    return { state: reaped ? 'verified' : 'cleanup-pending', reaped }
+  }
+
+  private rememberManagedCleanup(execution: BoundedShellExecution): void {
+    const { runId, projectId, sessionId } = execution.identity
+    if (runId && this.managedExecutions.get(runId) === execution) {
+      this.managedCleanupProofs.set(runId, { projectId, sessionId })
+      // Keep original cleanup closures only while unconfirmed; a positive fact needs no process,
+      // completion promise or captured output retained in memory.
+      this.managedExecutions.delete(runId)
+    }
+  }
+
+  private executeBounded(request: NotebookShellProcessRequest): Promise<NotebookShellResult> {
     const controller = new AbortController()
     const abort = (): void => controller.abort(request.signal?.reason)
     request.signal?.addEventListener('abort', abort, { once: true })
@@ -1345,7 +1524,10 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
       )
       .then((result) => {
         execution.result = result
-        if (shellCleanupVerified(result)) this.boundedExecutions.delete(execution)
+        if (shellCleanupVerified(result)) {
+          this.boundedExecutions.delete(execution)
+          this.rememberManagedCleanup(execution)
+        }
         return result
       })
       .finally(() => request.signal?.removeEventListener('abort', abort))
@@ -1353,12 +1535,15 @@ class NotebookShellProcessAdapter implements NotebookShellProcess {
       identity: {
         projectId: request.projectId,
         sessionId: request.sessionId,
-        laneKey: request.laneKey
+        laneKey: request.laneKey,
+        runId: request.runId
       },
       controller,
       completion
     }
     this.boundedExecutions.add(execution)
+    if (request.managedExecution && request.runId)
+      this.managedExecutions.set(request.runId, execution)
     return completion
   }
 

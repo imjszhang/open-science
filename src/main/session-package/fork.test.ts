@@ -716,6 +716,10 @@ it('copies writable file versions, file bookmarks and historical Plan references
     versionId: clonedVersionId
   })
   const copied = (await repository.loadSession(child.projectId, child.sessionId))!
+  expect(origin.receiptIdentity).toEqual({
+    importId: copied.forkOrigin!.importId,
+    manifestChecksum: copied.forkOrigin!.manifestChecksum
+  })
   const copiedPlan = copied.planHistoryProjections![0]
   expect(copiedPlan.document.task_summary).toBe('Study')
   expect(copiedPlan.artifactVersionId).not.toBe(plan.versionId)

@@ -169,7 +169,10 @@
       "src/renderer/src/components/PackageImportSelection.test.tsx",
       "src/renderer/src/components/ProjectPackageDropZone.test.tsx",
       "src/main/index-fatal-errors.test.ts",
-      "src/main/session-package/fork.test.ts"
+      "src/main/session-package/fork.test.ts",
+      "src/main/composition/managed-execution.integration.test.ts",
+      "src/main/composition/session-packages.test.ts",
+      "src/main/composition/handoff.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation"],

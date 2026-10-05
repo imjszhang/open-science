@@ -23,13 +23,15 @@ describe('self-awareness bundled Skill', () => {
     expect(skill?.description).toMatch(/JavaScript control REPL/i)
   })
 
-  it('documents the shipped 20-key JavaScript contract and read limits', async () => {
+  it('documents the shipped 21-key JavaScript contract and read limits', async () => {
     const body = await new SkillRegistry(skillsRoot).body('self-awareness')
 
     for (const phrase of [
       'repl_execute',
       'await host.capabilities()',
-      '20 known boolean keys',
+      '21 known boolean keys',
+      '`managedExecution`',
+      'caps.managedExecution === true',
       '`mcp`',
       '`compute`',
       '`agents`',

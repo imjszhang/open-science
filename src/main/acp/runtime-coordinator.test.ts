@@ -52,6 +52,67 @@ const emptySnapshot = (): AcpStateSnapshot => ({
   promptInFlightSessionIds: []
 })
 
+describe('ordinary application operation admission', () => {
+  it('reserves without starting an Agent and refuses competing external work', async () => {
+    const factory = vi.fn(
+      (callbacks: AcpRuntimeCallbacks) =>
+        createFakeRuntime({ frameworkId: 'opencode', sessionIds: [], callbacks }).runtime
+    )
+    const coordinator = new AcpRuntimeCoordinator(factory)
+    const release = await coordinator.reserveSessionOperation('external-session', vi.fn())
+    expect(coordinator.getSnapshot().promptInFlightSessionIds).toContain('external-session')
+    await expect(coordinator.reserveSessionOperation('external-session', vi.fn())).rejects.toThrow(
+      'active'
+    )
+    release()
+    await vi.waitFor(() =>
+      expect(coordinator.getSnapshot().promptInFlightSessionIds).not.toContain('external-session')
+    )
+    const next = await coordinator.reserveSessionOperation('external-session', vi.fn())
+    next()
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(factory.mock.results[0].value.connect).not.toHaveBeenCalled()
+  })
+
+  it('cancels through the existing stop action but keeps admission until cleanup finishes', async () => {
+    const factory = vi.fn(
+      (callbacks: AcpRuntimeCallbacks) =>
+        createFakeRuntime({ frameworkId: 'opencode', sessionIds: [], callbacks }).runtime
+    )
+    const coordinator = new AcpRuntimeCoordinator(factory)
+    const cancelled = vi.fn()
+    const release = await coordinator.reserveSessionOperation('external-session', cancelled)
+    let finished = false
+    const cancellation = coordinator.cancelPrompt({ sessionId: 'external-session' }).then(() => {
+      finished = true
+    })
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledTimes(1))
+    expect(finished).toBe(false)
+    await expect(coordinator.reserveSessionOperation('external-session', vi.fn())).rejects.toThrow(
+      'active'
+    )
+    release()
+    await cancellation
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(factory.mock.results[0].value.connect).not.toHaveBeenCalled()
+  })
+
+  it('quit admission closes before another application request can start and can be resumed', async () => {
+    const coordinator = new AcpRuntimeCoordinator(
+      (callbacks) =>
+        createFakeRuntime({ frameworkId: 'opencode', sessionIds: [], callbacks }).runtime
+    )
+    const result = await coordinator.prepareForQuit()
+    expect(result).toBe('completed')
+    await expect(coordinator.reserveSessionOperation('external-session', vi.fn())).rejects.toThrow(
+      'quitting'
+    )
+    coordinator.abortQuitPreparation()
+    const release = await coordinator.reserveSessionOperation('external-session', vi.fn())
+    release()
+  })
+})
+
 const runtimeEventId = (runtimeSequence: number, eventId: string): RegExp =>
   new RegExp(`^runtime-${runtimeSequence}-[0-9a-f-]{36}:${eventId}$`, 'u')
 

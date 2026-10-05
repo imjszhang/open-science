@@ -158,7 +158,8 @@
     "src/shared/renderer-contracts/storage.ts",
     "src/shared/renderer-contracts/system.ts",
     "src/shared/renderer-contracts/update.ts",
-    "src/shared/renderer-contracts/window.ts"
+    "src/shared/renderer-contracts/window.ts",
+    "src/shared/managed-execution.ts"
   ],
   "interfacePaths": [
     "src/shared/interface-scale.ts",
@@ -250,7 +251,8 @@
     "src/shared/runtime-writer.ts",
     "src/shared/pdf-annotations.ts",
     "src/shared/literature-smart-collections.ts",
-    "src/shared/journal-attributes.ts"
+    "src/shared/journal-attributes.ts",
+    "src/shared/managed-execution.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -306,7 +308,11 @@
       "src/main/literature/journal-attributes.test.ts",
       "src/renderer/src/pages/literature/journals/journal-import-file.test.ts",
       "src/renderer/src/pages/literature/JournalAttributes.render.test.tsx",
-      "src/main/windows-titlebar.test.ts"
+      "src/main/windows-titlebar.test.ts",
+      "packages/open-science/managed-execution-types.test.ts",
+      "src/main/notebook/managed-execution-service.test.ts",
+      "src/main/notebook/local-rpc-server.managed-execution.test.ts",
+      "src/main/notebook/managed-execution-entrypoints.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

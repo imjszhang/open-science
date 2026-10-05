@@ -172,3 +172,128 @@ conversation drafts are not changed.
 `--provider-default-model` keeps following the provider-owned default instead of pinning the
 first model in its catalog. An explicit `--model` stays fixed. If a saved selection becomes
 unavailable, choose a replacement explicitly or wait for it to become available again.
+
+## Managed execution of research materials
+
+`client.execution` uses the receiving machine's authenticated local service. It prepares immutable
+research materials in an Open-Science managed environment and executes a bounded command through
+Notebook. It does not start an Agent/model task. Use an existing writable Session, or
+`execution.createSession({ projectId, requestId, title })` to create an ordinary local Session.
+The source research and destination Session can differ within the authorized Project.
+
+```js
+const scope = { projectId: 'your-project-id', sessionId: 'your-writable-session-id' }
+const { runtimes, diagnostics } = await client.execution.runtimes()
+if (!runtimes.length) {
+  console.log(diagnostics?.issues)
+  throw new Error('Open Science needs an available independent Node runtime.')
+}
+const materials = await client.execution.inspectMaterials({
+  ...scope,
+  sourceSessionId: 'imported-research-session-id'
+})
+// Select an available immutable Version reported by materials.versions.
+const environment = await client.execution.prepare({
+  ...scope,
+  requestId: 'prepare-analysis-1',
+  sourceSessionId: materials.source.sessionId,
+  sourceIdentity: materials.source.identity,
+  runtimeId: runtimes[0].runtimeId,
+  materials: { files: [{ versionId: 'selected-version-id', restorePath: 'input.json' }] }
+})
+const operation = await client.execution.execute({
+  ...scope,
+  environmentId: environment.environmentId,
+  requestId: 'analysis-1',
+  command: 'node --version',
+  timeoutMs: 10_000
+})
+const latest = await client.execution.waitOperation({
+  ...scope,
+  requestId: operation.requestId,
+  timeoutMs: 60_000
+})
+console.log(latest)
+```
+
+The initial native-service target is macOS with an independently installed Node 22 or newer.
+Discovery uses the application's launch PATH and common host locations, including `~/.local/bin`.
+An empty runtime list means the application cannot currently find a compatible runtime; make the
+existing Node available to the application and restart it before retrying. The client does not
+install a runtime or substitute Electron. For an isolated Test installation, explicitly select its
+`configRoot` when connecting so execution and package operations use the intended application.
+
+Runtime discovery's `available` means a compatible independent Node was found; it does not establish
+that a particular plan or local HTTP service is supported. Optional `diagnostics` reports
+`nativeServiceSupported` and `issues` with stable `code`, fixed `message`, and suggested `action`.
+Codes distinguish `node_not_found`, `node_version_unsupported`, `node_host_mismatch`,
+`node_not_independent`, `node_unusable`, and `native_service_unsupported`. The same diagnostics reach
+the CLI and internal `host.managedExecution.runtimes()` without candidate paths, environment values,
+or raw probe errors. Older applications may omit diagnostics. Inspect them before executing a plan;
+they do not authorize or perform installation.
+
+Save the actual execution scope as an ordinary output Artifact: include the selected `sourceIdentity`,
+descriptor identity or `planKey` when present, declared scope, actual parameters, known missing
+materials or alternative conditions, and limits on what the results establish. Declare that report
+in `outputs` so it travels with the result package. This is a record of the chosen execution, not a
+new `.science` field. External request/result records do not automatically capture the complete
+Codex conversation.
+
+Use a new `requestId` for new work. Retrying an identical preparation or execution with its existing
+ID retrieves the same work; reusing that ID for different input is rejected. The optional HTTP
+`idempotencyKey` is an additional transport retry safeguard, not a replacement for the request ID.
+
+`waitOperation` waits at most 60 seconds and returns the current snapshot, which may still be
+running. Aborting an SDK request only stops waiting. Explicitly use `cancelOperation` to stop work;
+use `releaseEnvironment` after work settles to release its managed files. A `cleanup-pending` state
+means cleanup has not yet been verified. Do not delete files outside this API.
+
+The command starts in its writable work directory. `OPEN_SCIENCE_INPUT_DIR` refers to restored,
+read-only inputs, `OPEN_SCIENCE_OUTPUT_DIR` to the output directory, and `OPEN_SCIENCE_NODE` to the
+selected independent Node executable. Declare output paths relative to the output directory in
+`outputs` to publish immutable Session artifacts. Runtime paths, filesystem grants and execution
+capabilities cannot be supplied through this API. The first supported sandbox is macOS; remote
+callers are rejected. Optional local HTTP service adaptation uses a managed Unix socket and does
+not expose a public TCP endpoint.
+
+## Local `.science` package transfers
+
+`client.packages` uses explicit file paths on the receiving local machine. It shares the desktop
+package format, validation, locks and import receipt. Importing preserves read-only research history
+and does not execute its contents. Inspect first, review the returned summary and omissions, then
+explicitly commit the returned handle:
+
+```js
+const review = await client.packages.preflightImport(
+  {
+    filePath: '/absolute/path/research.science',
+    target: { projectName: 'Imported research' } // Or { projectId: 'existing-project-id' }
+  },
+  { idempotencyKey: 'inspect-research-1', timeoutMs: 120_000 }
+)
+console.log(review.preview, review.expiresAt)
+// After reviewing this exact preview:
+const imported = await client.packages.commitImport({ preflightId: review.preflightId })
+await client.packages.export(
+  {
+    projectId: imported.projectId,
+    sessionId: imported.sessionId,
+    filePath: '/absolute/path/shared-research.science'
+  },
+  { timeoutMs: 120_000 }
+)
+```
+
+Preflight stages and validates the archive but publishes no Project or Session. Its handle belongs to
+the caller and expires after ten minutes by default; commit uses the staged archive, even if the
+original file changes. Use `cancelImport({ preflightId })` to discard it. Only one transfer may be
+active at a time. Shutdown discards an uncommitted preflight; review again after restarting.
+Retrying a committed handle within the same service lifetime returns its imported identity without
+importing twice. Use HTTP `idempotencyKey` options when retrying a lost preflight or export response;
+a new preflight intentionally starts a new review.
+
+Export requires a new destination filename and never overwrites an existing file. Optional
+`excludedStorageKeys` and `includePdfNotes` use the existing package selection rules; sensitive
+content checks remain enforced. A successful transfer can return `cleanupPending: true` when its
+publication succeeded but private staging cleanup must be retried. Remote callers cannot use host
+file paths. These methods do not open desktop dialogs or weaken desktop command restrictions.

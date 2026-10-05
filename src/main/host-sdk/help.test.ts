@@ -73,13 +73,13 @@ describe('Host SDK help', () => {
         aliases: [id.slice('host.'.length)]
       }))
     )
-    expect(JSON.stringify(catalog).length).toBeLessThanOrEqual(2_900)
+    expect(JSON.stringify(catalog).length).toBeLessThanOrEqual(3_200)
 
     const unavailableCatalog = hostSdkHelp.query(undefined, {
       callerRole: 'main',
       capabilities: unprovisioned
     })
-    expect(JSON.stringify(unavailableCatalog).length).toBeLessThanOrEqual(2_900)
+    expect(JSON.stringify(unavailableCatalog).length).toBeLessThanOrEqual(3_200)
   })
 
   it('documents the transient visual-model-gated viewImage contract', () => {
@@ -514,5 +514,39 @@ describe('Host SDK help', () => {
     expect(() => hostSdkHelp.query('x'.repeat(129), mainContext)).toThrow(
       'host.help query must be at most 128 characters'
     )
+  })
+})
+
+it('documents every managed request boundary without accepting Session or turn authority from the Agent', () => {
+  const help = hostSdkHelp.query('managedExecution', {
+    ...mainContext,
+    capabilities: { ...mainContext.capabilities, managedExecution: true }
+  })
+  expect(help).toMatchObject({
+    id: 'host.managedExecution',
+    availability: { status: 'available' },
+    backgroundSafety: 'unsafe'
+  })
+  if (help.kind !== 'operation') throw new Error('expected operation')
+  expect(help.callForms).toHaveLength(6)
+  const request = fields(help.request)
+  for (const key of [
+    'sourceSessionId',
+    'sourceIdentity',
+    'runtimeId',
+    'materials',
+    'environmentId',
+    'requestId',
+    'command',
+    'outputs',
+    'timeoutMs'
+  ])
+    expect(named(request, key)).toBeDefined()
+  expect(help.constraints.join(' ')).toContain('does not create another Session')
+  expect(help.returns.description).toContain('nativeServiceSupported')
+  expect(help.returns.description).toContain('code, message, action')
+  expect(help.constraints.join(' ')).toContain('not plan readiness')
+  expect(hostSdkHelp.query('managedExecution', delegateContext)).toMatchObject({
+    availability: { status: 'unavailable' }
   })
 })

@@ -1801,6 +1801,7 @@ export class SessionPackageService {
   }
 
   async readOrigin(request: SessionPackageRequest): Promise<{
+    receiptIdentity: Pick<SessionPackageReceipt, 'importId' | 'manifestChecksum'>
     sourceManifest: SessionPackageManifest
     identities: Record<string, string>
     files: SessionPackageReceipt['files']
@@ -1842,6 +1843,10 @@ export class SessionPackageService {
       await readPackageJson(join(directory, 'source', 'records.json'))
     )
     return {
+      receiptIdentity: {
+        importId: receipt.importId,
+        manifestChecksum: receipt.manifestChecksum
+      },
       sourceManifest,
       identities: receipt.identities,
       files: receipt.files,

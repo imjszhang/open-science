@@ -253,6 +253,109 @@ describe('package text policy', () => {
   })
 })
 
+describe('credential requirement declarations', () => {
+  const slot = {
+    key: 'g-provider-credential',
+    description: 'Recipient-provided model credential; no credential is included.',
+    required: true,
+    environmentVariable: 'LLM_API_KEY',
+    planKeys: ['engineering-check', 'recipient-experiment']
+  }
+  const scan = (text: string, split: number): boolean => {
+    const scanner = new PackageTextScanner()
+    scanner.write(text.slice(0, split))
+    scanner.write(text.slice(split))
+    return Boolean(scanner.finish())
+  }
+
+  it.each(['secrets', 'credentials', 'authorization', 'api-key'])(
+    'recognizes typed references under %s without allowing a stored value',
+    (key) => {
+      const text = JSON.stringify({ metadata: { [key]: [slot] } }, null, 2)
+      expect(findSensitivePackageText(text)).toBeUndefined()
+      for (let split = 0; split <= text.length; split++)
+        expect(scan(text, split), `split ${split}`).toBe(false)
+      const scanner = new PackageTextScanner()
+      for (const char of text) scanner.write(char)
+      expect(scanner.finish()).toBeUndefined()
+    }
+  )
+
+  it.each([
+    'actual-private-value',
+    { provider: 'actual-private-value' },
+    ['actual-private-value'],
+    [slot, 'actual-private-value'],
+    [{ ...slot, value: 'actual-private-value' }],
+    [{ ...slot, default: 'actual-private-value' }],
+    [{ ...slot, nested: { value: 'actual-private-value' } }],
+    [{ ...slot, required: 'actual-private-value' }],
+    [{ ...slot, description: { value: 'actual-private-value' } }],
+    [{ ...slot, environmentVariable: 'LLM_API_KEY=actual-private-value' }],
+    [{ ...slot, environmentVariable: 'not-a-variable' }],
+    [{ ...slot, planKeys: [{ value: 'actual-private-value' }] }],
+    [{ ...slot, description: 'password=actual-private-value' }],
+    [{ ...slot, description: 'ghp_syntheticprivatevalue' }],
+    [{ ...slot, description: 'https://example.org/?token=actual-private-value' }],
+    [{ ...slot, description: JSON.stringify({ apiKey: 'actual-private-value' }) }],
+    [{ environmentVariable: 'LLM_API_KEY' }],
+    [slot, slot]
+  ])('blocks values, unknown fields and embedded credentials: %j', (value) => {
+    const text = JSON.stringify({ secrets: value })
+    expect(findSensitivePackageText(text)).toBeDefined()
+    for (let split = 0; split <= text.length; split++)
+      expect(scan(text, split), `split ${split}`).toBe(true)
+  })
+
+  it('rejects duplicate, truncated and invalid declarations across read boundaries', () => {
+    const json = JSON.stringify({ secrets: [slot] })
+    for (const text of [
+      json.replace('"required":true', '"required":"actual-private-value","required":true'),
+      json.replace('"required":true', '"required":"actual-private-value","requ\\u0069red":true'),
+      json.slice(0, -1),
+      json.slice(0, -2),
+      json + ' trailing text',
+      json + '\npassword=actual-private-value',
+      json.replace('"secrets":', '"secrets"='),
+      json.replace('"secrets":', 'secrets:')
+    ]) {
+      expect(findSensitivePackageText(text)).toBeDefined()
+      for (let split = 0; split <= text.length; split++)
+        expect(scan(text, split), `split ${split}: ${text}`).toBe(true)
+    }
+  })
+
+  it('keeps only completed bounded declarations safe after their prefix leaves the overlap', () => {
+    for (const key of ['secrets', 'authorization', 'no-authorization', 'api-key']) {
+      const reference = JSON.stringify({ [key]: [slot] })
+      for (let shift = -key.length - 3; shift <= 1; shift++) {
+        const text = ' '.repeat(65536 - 8192 + shift) + reference + ' '.repeat(9000)
+        expect(scan(text, 65536), `${key} overlap ${shift}`).toBe(false)
+      }
+    }
+    for (const value of ['actual-private-value', JSON.stringify(slot)]) {
+      const text = '{"secrets":[' + ' '.repeat(9000) + value + ']}'
+      expect(scan(text, 30)).toBe(true)
+      const scanner = new PackageTextScanner()
+      for (let offset = 0; offset < text.length; offset += 1000)
+        scanner.write(text.slice(offset, offset + 1000))
+      expect(scanner.finish()).toBeDefined()
+    }
+  })
+
+  it('reports a later real credential after a complete declaration with its original offset', () => {
+    const prefix = JSON.stringify({ secrets: [slot] }) + '\n' + ' '.repeat(70000)
+    const credential = '{"apiKey":"actual-private-value"}\n'
+    const text = prefix + credential
+    const scanner = new PackageTextScanner()
+    for (let start = 0; start < text.length; start += 65536)
+      scanner.write(text.slice(start, start + 65536))
+    const result = scanner.finish()!
+    expect(result.match).toMatchObject({ rule: 'field', label: '"apiKey"' })
+    expect(result.offset + result.match.offset).toBe(prefix.length + 1)
+  })
+})
+
 it.each([
   ['{"noCredentials":true}', false],
   ['{"noCredentials":false}\n{"noCredentials":true}\n', false],

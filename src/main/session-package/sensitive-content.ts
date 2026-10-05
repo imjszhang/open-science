@@ -48,6 +48,95 @@ const boundary = (value: string): Boundary => {
   return 'other'
 }
 
+type DeclarationState = 'accepted' | 'pending' | 'rejected'
+const MAX_DECLARATION_TEXT = 4096
+
+// Recognize references to recipient-supplied environment credentials, never credential values.
+// This is a bounded JSON structure rule, independent of filenames or package document formats.
+const credentialDeclarations = (text: string, complete: boolean): DeclarationState => {
+  if (!text.startsWith('[')) return 'rejected'
+  let depth = 0
+  let quoted = false
+  let escaped = false
+  let end = 0
+  for (; end < Math.min(text.length, MAX_DECLARATION_TEXT); end++) {
+    const char = text[end]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') quoted = false
+    } else if (char === '"') quoted = true
+    else if (char === '[' || char === '{') depth++
+    else if (char === ']' || char === '}') {
+      depth--
+      if (depth === 0) break
+    }
+  }
+  if (end >= Math.min(text.length, MAX_DECLARATION_TEXT))
+    return !complete && text.length < MAX_DECLARATION_TEXT ? 'pending' : 'rejected'
+  const source = text.slice(0, end + 1)
+  try {
+    const entries: unknown = JSON.parse(source)
+    if (!Array.isArray(entries) || entries.length === 0 || entries.length > 32) return 'rejected'
+    // JSON.parse keeps only the final duplicate member. Reject duplicates before trusting shape.
+    const tokens = source.match(/"(?:\\.|[^"\\])*"|[{}:]/g) ?? []
+    const members: Set<string>[] = []
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index]
+      if (token === '{') members.push(new Set())
+      else if (token === '}') members.pop()
+      else if (tokens[index + 1] === ':') {
+        const name: string = JSON.parse(token)
+        const current = members.at(-1)
+        if (!current || current.has(name)) return 'rejected'
+        current.add(name)
+      }
+    }
+    const identifier = (value: unknown): value is string =>
+      typeof value === 'string' && /^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(value)
+    const variables = new Set<string>()
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'rejected'
+      const fields = entry as Record<string, unknown>
+      if (
+        Object.keys(fields).some(
+          (key) =>
+            !['key', 'description', 'required', 'environmentVariable', 'planKeys'].includes(key)
+        ) ||
+        typeof fields.required !== 'boolean' ||
+        typeof fields.environmentVariable !== 'string' ||
+        !/^[A-Z][A-Z0-9_]{0,127}$/.test(fields.environmentVariable) ||
+        variables.has(fields.environmentVariable) ||
+        (fields.key !== undefined && !identifier(fields.key)) ||
+        (fields.description !== undefined &&
+          (typeof fields.description !== 'string' || fields.description.trim() === '')) ||
+        (fields.planKeys !== undefined &&
+          (!Array.isArray(fields.planKeys) ||
+            fields.planKeys.length === 0 ||
+            fields.planKeys.length > 32 ||
+            fields.planKeys.some((key) => !identifier(key)) ||
+            new Set(fields.planKeys).size !== fields.planKeys.length))
+      )
+        return 'rejected'
+      // Inspect decoded leaves as ordinary text too: JSON escapes must not hide assignments,
+      // tokens or a serialized credential object inside otherwise valid declaration metadata.
+      if (
+        Object.values(fields)
+          .flat()
+          .some(
+            (value) =>
+              typeof value === 'string' && findPackageTextMatch(value, true, false) !== undefined
+          )
+      )
+        return 'rejected'
+      variables.add(fields.environmentVariable)
+    }
+    return 'accepted'
+  } catch {
+    return 'rejected'
+  }
+}
+
 export const buildSensitiveContentEvidence = (
   text: string,
   match: PackageTextMatch,
@@ -84,8 +173,22 @@ const findPackageTextMatch = (
   text: string,
   complete: boolean,
   jsonBooleans: boolean,
-  beforeText = ''
+  beforeText = '',
+  declaration?: (index: number, state: DeclarationState) => void
 ): PackageTextMatch | undefined => {
+  const declarationField = (index: number): boolean => {
+    if (!jsonBooleans) return false
+    while (index > 0 && /[a-z0-9_-]/i.test(text[index - 1])) index--
+    const preceding = index === 0 ? beforeText : text[index - 1]
+    if (preceding !== '"' && !(index === 0 && /^[a-z0-9_-]$/i.test(preceding))) return false
+    const field = /^[a-z0-9_-]+"[ \t\r\n]*:[ \t\r\n]*/i.exec(text.slice(index))
+    if (!field) return false
+    const rest = text.slice(index + field[0].length)
+    if (!rest.startsWith('[')) return false
+    const state = credentialDeclarations(rest, complete)
+    declaration?.(index, state)
+    return state !== 'rejected'
+  }
   const booleanField = (index: number): boolean => {
     if (!jsonBooleans) return false
     // Header rules can start at a hyphenated key's suffix; recover the member name
@@ -112,16 +215,19 @@ const findPackageTextMatch = (
     if (finished(end)) return true
     // Only a prefix of an accepted placeholder needs more input. Preserve definite matches
     // before their assignment prefix leaves the bounded streaming overlap.
-    const trimmed = decodeEscapes(value)
+    const decoded = decodeEscapes(value)
       .replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-      .trim()
+      .trimStart()
+    const trimmed = decoded.trimEnd()
     if (
       ['Bearer', 'Basic', 'Digest', 'Negotiate'].some((scheme) =>
         scheme.toLowerCase().startsWith(trimmed.toLowerCase())
       )
     )
       return false
-    const bare = trimmed
+    // Whitespace inside an unfinished marker cannot later become the exact [redacted] value.
+    // In particular, do not lose a JSON array opener followed by a long whitespace run.
+    const bare = decoded
       .replace(/^(?:Bearer|Basic|Digest|Negotiate)\s+/i, '')
       .replace(/\\(?:u[0-9a-f]{0,3})?$/i, '')
       .replace(/%[0-9a-f]?$/i, '')
@@ -267,7 +373,7 @@ const findPackageTextMatch = (
   for (const match of text.matchAll(
     /\b(?:authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-amz-security-token|cookie|set-cookie)\b\s*["']?\s*:\s*["']?([^"'\r\n}]*)/gi
   )) {
-    if (booleanField(match.index)) continue
+    if (booleanField(match.index) || declarationField(match.index)) continue
     if (privateValue(match[1], match.index + match[0].length))
       return {
         offset: match.index,
@@ -281,7 +387,7 @@ const findPackageTextMatch = (
   // Match prefixes independently so a harmless outer field cannot hide an inner assignment.
   for (const match of text.matchAll(/\b([a-z][a-z0-9_-]*)(\s*["']?\s*[:=]\s*)/gi)) {
     if (!isSensitiveDiagnosticKey(match[1])) continue
-    if (booleanField(match.index)) continue
+    if (booleanField(match.index) || declarationField(match.index)) continue
     const start = match.index + match[0].length
     const rest = text.slice(start)
     // In diagnostics such as `Unexpected token ':'`, the quotes enclose the
@@ -413,12 +519,27 @@ export class PackageTextScanner {
   private offset = 0
   private original?: TextFinding
   private structured?: TextFinding
+  private readonly pendingDeclarations = new Set<number>()
+  private declarationOverflow = false
 
   write(decoded: string, complete = false): void {
     this.syntax.write(decoded)
     const text = this.tail + decoded
     const inspect = (jsonBooleans: boolean): TextFinding | undefined => {
-      const match = findPackageTextMatch(text, complete, jsonBooleans, this.beforeTail)
+      const match = findPackageTextMatch(
+        text,
+        complete,
+        jsonBooleans,
+        this.beforeTail,
+        (index, state) => {
+          const absolute = this.offset - this.tail.length + index
+          if (state === 'pending') {
+            if (this.pendingDeclarations.size >= 32 && !this.pendingDeclarations.has(absolute))
+              this.declarationOverflow = true
+            else this.pendingDeclarations.add(absolute)
+          } else this.pendingDeclarations.delete(absolute)
+        }
+      )
       return match ? { text, match, offset: this.offset - this.tail.length } : undefined
     }
     this.original ??= inspect(false)
@@ -430,7 +551,9 @@ export class PackageTextScanner {
 
   finish(): TextFinding | undefined {
     this.write('', true)
-    return this.syntax.finish() ? this.structured : this.original
+    return this.syntax.finish() && !this.declarationOverflow && this.pendingDeclarations.size === 0
+      ? this.structured
+      : this.original
   }
 }
 

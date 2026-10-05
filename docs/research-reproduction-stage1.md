@@ -1,5 +1,8 @@
 # Research reproduction: stage 1
 
+This is the historical first-stage completion record. For the current shared execution capability
+and its delivery evidence, see [Managed research execution](./managed-research-execution.md).
+
 This stage establishes portable research materials and verifies bounded Node services in the
 existing managed execution system. It does not introduce a new `.science` version, scientific
 object model, automatic execution on import, public execution API, or research navigation UI.
@@ -16,9 +19,10 @@ without a format change. A trusted engineering harness can restore the pinned ex
 that an independent Node service runs within the existing Notebook execution and cleanup boundary.
 This is the foundation for a later recipient workflow, not a released one-click reproduction UI.
 
-The original research remains read-only. A future recipient operation belongs to a separate,
-writable discussion/execution with its own Session and Run identities. Replay continues to display
-recorded history; successful replay is not evidence of a new execution.
+The original research remains read-only. A recipient operation belongs to a writable Session
+distinct from that source, with its own Run identity. This can be an existing ordinary Session or
+an optional fork; a new Session is needed only if no suitable receiving Session exists. Replay
+continues to display recorded history; successful replay is not evidence of a new execution.
 
 ## Acceptance ledger
 

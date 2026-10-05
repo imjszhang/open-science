@@ -496,7 +496,223 @@ export class OpenScienceApiError extends Error {
   status?: number
 }
 
+/** Identifiers belong to a local application Session; source research may be another Session. */
+export type ManagedSessionScope = { projectId: string; sessionId: string }
+export type CreateManagedSessionRequest = { projectId: string; requestId: string; title: string }
+export type InspectManagedMaterialsRequest = ManagedSessionScope & {
+  sourceSessionId: string
+  sourceIdentity?: string
+  versionIds?: string[]
+  descriptorVersionId?: string
+}
+export type PrepareManagedEnvironmentRequest = ManagedSessionScope & {
+  requestId: string
+  sourceSessionId: string
+  sourceIdentity: string
+  versionIds?: string[]
+  runtimeId: string
+  materials:
+    | { files: Array<{ versionId: string; restorePath: string }> }
+    | {
+        descriptorVersionId: string
+        materialKeys: string[]
+        materialVersions?: Record<string, string>
+      }
+}
+export type ManagedEnvironmentReference = ManagedSessionScope & { environmentId: string }
+export type ExecuteManagedEnvironmentRequest = ManagedEnvironmentReference & {
+  requestId: string
+  command: string
+  /** Process deadline, distinct from a request or wait deadline. Maximum 600000 ms. */
+  timeoutMs?: number
+  localServicePort?: number
+  outputs?: Array<{ path: string; filename: string; contentType?: string; optional?: boolean }>
+  description?: string
+}
+export type ManagedOperationReference = ManagedSessionScope & { requestId: string }
+export type ManagedRuntime = {
+  kind: 'node'
+  version: string
+  sha256: string
+  platform: 'darwin' | 'linux' | 'win32'
+  arch: string
+}
+export type ManagedRuntimeDiagnosticCode =
+  | 'node_not_found'
+  | 'node_version_unsupported'
+  | 'node_host_mismatch'
+  | 'node_not_independent'
+  | 'node_unusable'
+  | 'native_service_unsupported'
+export type ManagedRuntimeDiagnostics = {
+  /** Local HTTP service support, distinct from discovering a compatible Node. */
+  nativeServiceSupported: boolean
+  /** Fixed guidance without host paths, environment values or raw probe errors. */
+  issues: Array<{ code: ManagedRuntimeDiagnosticCode; message: string; action: string }>
+}
+export type ManagedRuntimeDiscovery = {
+  /** Whether at least one compatible independent Node was found. */
+  available: boolean
+  runtimes: Array<ManagedRuntime & { runtimeId: string }>
+  /** Older applications may omit diagnostics. This does not install or configure a runtime. */
+  diagnostics?: ManagedRuntimeDiagnostics
+}
+export type ManagedMaterialSource = ManagedSessionScope & { identity: string; title?: string }
+export type ManagedMaterialVersion = {
+  versionId: string
+  sourceIdentity: string
+  filename: string
+  sha256: string
+  sizeBytes: number
+  contentAvailable?: boolean
+  descriptor?: boolean
+}
+export type ManagedMaterialsInspection = {
+  source: ManagedMaterialSource
+  status: 'no-description' | 'choose-description' | 'ready' | 'unsupported' | 'invalid'
+  descriptorCandidates: ManagedMaterialVersion[]
+  descriptor?: ManagedMaterialVersion
+  inspection?: unknown
+  description?: unknown
+  materials?: Array<{
+    key: string
+    status: 'available' | 'external' | 'withheld' | 'missing' | 'mismatch'
+    versionIds?: string[]
+  }>
+  versions: ManagedMaterialVersion[]
+}
+export type ManagedEnvironment = ManagedEnvironmentReference & {
+  source: ManagedMaterialSource
+  state: 'preparing' | 'ready' | 'releasing' | 'cleanup-pending' | 'released' | 'failed'
+  runtime: ManagedRuntime
+  inputs: Array<ManagedMaterialVersion & { materialKey?: string; restorePath?: string }>
+  error?: string
+}
+export type SessionOperationSnapshot = ManagedOperationReference & {
+  schemaVersion: 1
+  operationId: string
+  requestFingerprint: string
+  requestText: string
+  status:
+    'admitting' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  createdAt: number
+  updatedAt: number
+  provenance?: {
+    rootFrameId: string
+    agentFrameId: string
+    messageBranchId: string
+    runtimeSegmentId: string
+    promptMessageId: string
+  }
+  notebookRunIds: string[]
+  artifactVersionIds: string[]
+  artifactRunId?: string
+  resultText?: string
+  error?: string
+  recoveryPending?: boolean
+}
+/** Local authenticated operations. No model task is started by these methods. */
+export type ManagedExecutionClient = {
+  runtimes(
+    request?: Record<string, never>,
+    options?: RequestOptions
+  ): Promise<ManagedRuntimeDiscovery>
+  createSession(
+    request: CreateManagedSessionRequest,
+    options?: RequestOptions
+  ): Promise<ManagedSessionScope>
+  inspectMaterials(
+    request: InspectManagedMaterialsRequest,
+    options?: RequestOptions
+  ): Promise<ManagedMaterialsInspection>
+  prepare(
+    request: PrepareManagedEnvironmentRequest,
+    options?: RequestOptions
+  ): Promise<ManagedEnvironment>
+  execute(
+    request: ExecuteManagedEnvironmentRequest,
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot>
+  getOperation(
+    request: ManagedOperationReference,
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot | undefined>
+  cancelOperation(
+    request: ManagedOperationReference,
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot | undefined>
+  /** Wait 1..60000 ms (default 30000); timeout returns the current snapshot, without cancelling. */
+  waitOperation(
+    request: ManagedOperationReference & { timeoutMs?: number },
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot | undefined>
+  getEnvironment(
+    request: ManagedEnvironmentReference,
+    options?: RequestOptions
+  ): Promise<ManagedEnvironment>
+  releaseEnvironment(
+    request: ManagedEnvironmentReference,
+    options?: RequestOptions
+  ): Promise<ManagedEnvironment>
+}
+
+export type PackageImportTarget =
+  { projectId: string; projectName?: never } | { projectName: string; projectId?: never }
+export type PackagePreview = {
+  title: string
+  projectName: string
+  branchCount: number
+  messageCount: number
+  fileCount: number
+  totalBytes: number
+  omissions: Array<{ kind: 'missing' | 'excluded' | 'external'; description: string }>
+}
+export type PackageImportPreflightRequest = { filePath: string; target: PackageImportTarget }
+export type PackageImportPreflight = {
+  target: PackageImportTarget
+  preflightId: string
+  filename: string
+  preview: PackagePreview
+  expiresAt: number
+}
+export type PackageExportRequest = {
+  projectId: string
+  sessionId: string
+  filePath: string
+  excludedStorageKeys?: string[]
+  includePdfNotes?: boolean
+}
+/** Authenticated local paths only. Import publishes nothing until an explicit commit. */
+export type SessionPackagesClient = {
+  preflightImport(
+    request: PackageImportPreflightRequest,
+    options?: RequestOptions
+  ): Promise<PackageImportPreflight>
+  commitImport(
+    request: { preflightId: string },
+    options?: RequestOptions
+  ): Promise<{
+    projectId: string
+    sessionId: string
+    cleanupPending: boolean
+  }>
+  cancelImport(
+    request: { preflightId: string },
+    options?: RequestOptions
+  ): Promise<{ cancelled: boolean }>
+  export(
+    request: PackageExportRequest,
+    options?: RequestOptions
+  ): Promise<{
+    filePath: string
+    preview: PackagePreview
+    cleanupPending: boolean
+  }>
+}
+
 export class OpenScienceClient {
+  readonly execution: ManagedExecutionClient
+  readonly packages: SessionPackagesClient
   constructor(options: {
     baseUrl: string
     token: string

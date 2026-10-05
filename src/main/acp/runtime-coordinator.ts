@@ -129,6 +129,7 @@ type PendingResumeReconciliation = {
 }
 
 type RootAdmissionLease = {
+  kind: 'prompt' | 'operation'
   release: () => void
 }
 
@@ -291,8 +292,10 @@ class AcpRuntimeCoordinator {
     const promptInFlightSessionIds = Array.from(
       new Set([
         ...ownedSessionIds((snapshot) => snapshot.promptInFlightSessionIds),
-        ...Array.from(this.rootAdmissionTails.keys()).filter((sessionId) =>
-          this.sessionRuntimes.has(sessionId)
+        ...Array.from(this.rootAdmissionTails.keys()).filter(
+          (sessionId) =>
+            this.sessionRuntimes.has(sessionId) ||
+            this.activeRootAdmissions.get(sessionId)?.kind === 'operation'
         )
       ])
     )
@@ -1075,9 +1078,45 @@ class AcpRuntimeCoordinator {
     )
   }
 
+  // Application-owned operations share root admission with Agent prompts. They create no provider
+  // process; the caller retains this lease through output publication and terminal persistence.
+  async reserveSessionOperation(sessionId: string, onCancel: () => void): Promise<() => void> {
+    this.assertPromptAdmissionOpen()
+    if (
+      this.rootAdmissionTails.has(sessionId) ||
+      this.getSnapshot().promptInFlightSessionIds.includes(sessionId)
+    ) {
+      throw new Error('Session has active or queued work.')
+    }
+    let acquire!: (release: () => void) => void
+    let reject!: (error: unknown) => void
+    const acquired = new Promise<() => void>((resolve, fail) => {
+      acquire = resolve
+      reject = fail
+    })
+    const completion = this.linearizeRootAdmission(
+      sessionId,
+      async (cancellation) => {
+        cancellation.throwIfCancelled()
+        this.assertPromptAdmissionOpen()
+        let release!: () => void
+        const settled = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        void cancellation.promise.catch(() => onCancel())
+        acquire(release)
+        await settled
+      },
+      'operation'
+    )
+    void completion.catch(reject)
+    return acquired
+  }
+
   private linearizeRootAdmission<Result>(
     sessionId: string,
-    operation: (cancellation: RootAdmissionCancellation) => Promise<Result>
+    operation: (cancellation: RootAdmissionCancellation) => Promise<Result>,
+    kind: RootAdmissionLease['kind'] = 'prompt'
   ): Promise<Result> {
     const previous = this.rootAdmissionTails.get(sessionId)
     let rejectCancellation!: (error: unknown) => void
@@ -1105,11 +1144,13 @@ class AcpRuntimeCoordinator {
     })
     let released = false
     const lease: RootAdmissionLease = {
+      kind,
       release: () => {
         if (released) return
         released = true
         if (this.activeRootAdmissions.get(sessionId) === lease) {
           this.activeRootAdmissions.delete(sessionId)
+          this.notifyInteractionRelease(sessionId)
         }
         resolveGate()
       }
@@ -1551,6 +1592,11 @@ class AcpRuntimeCoordinator {
       await this.delegatedWork?.stopActiveBranch?.(request.sessionId)
       return this.getState()
     }
+    if (this.activeRootAdmissions.get(request.sessionId)?.kind === 'operation') {
+      this.cancelRootAdmissions(request.sessionId)
+      await this.rootAdmissionTails.get(request.sessionId)
+      return this.getState()
+    }
     const initiatingTurnMessageId = this.activePromptRequests.get(request.sessionId)?.request
       .provenanceContext?.promptMessageId
     const cancelledAdmission = this.activeRootAdmissions.get(request.sessionId)
@@ -1573,6 +1619,11 @@ class AcpRuntimeCoordinator {
   }
 
   async stopPromptForHandoff(sessionId: string): Promise<void> {
+    if (this.activeRootAdmissions.get(sessionId)?.kind === 'operation') {
+      this.cancelRootAdmissions(sessionId)
+      await this.rootAdmissionTails.get(sessionId)
+      return
+    }
     // Supersede the old turn exactly like user cancellation, but do not emit the user-generation
     // cancellation callback: that callback marks the approved handoff itself cancelled.
     const cancelledAdmission = this.activeRootAdmissions.get(sessionId)
@@ -1791,6 +1842,18 @@ class AcpRuntimeCoordinator {
 
   async applyModelChange(target: AgentModelChangeTarget): Promise<boolean> {
     return this.getActiveRuntime().applyModelChange(target)
+  }
+
+  trackManagedExecutionArtifactWrite<Result extends import('../../shared/artifacts').ArtifactFile>(
+    sessionId: string,
+    ownerExecutionId: string,
+    write: (scope: import('./artifact-turn-owner').ArtifactTurnWriteScope) => Promise<Result>
+  ): Promise<Result> {
+    return this.runtimeForSession(sessionId).trackManagedExecutionArtifactWrite(
+      sessionId,
+      ownerExecutionId,
+      write
+    )
   }
 
   writeArtifactForCurrentRun(
@@ -2057,7 +2120,9 @@ class AcpRuntimeCoordinator {
 
   private hasSessionInteraction(sessionId: string): boolean {
     return (
-      this.pendingPromptStarts.has(sessionId) || (this.activePromptCounts.get(sessionId) ?? 0) > 0
+      this.activeRootAdmissions.get(sessionId)?.kind === 'operation' ||
+      this.pendingPromptStarts.has(sessionId) ||
+      (this.activePromptCounts.get(sessionId) ?? 0) > 0
     )
   }
 
@@ -2218,7 +2283,8 @@ class AcpRuntimeCoordinator {
           const remaining = (this.activePromptCounts.get(sessionId) ?? 1) - 1
           if (remaining > 0) this.activePromptCounts.set(sessionId, remaining)
           else this.activePromptCounts.delete(sessionId)
-          this.activeRootAdmissions.get(sessionId)?.release()
+          const admission = this.activeRootAdmissions.get(sessionId)
+          if (admission?.kind !== 'operation') admission?.release()
           this.notifyInteractionRelease(sessionId)
           this.teardownCallbacks.onSessionTurnEnded?.(sessionId, turnToken)
           this.callbacks.onPromptEnded?.(sessionId, turnToken)

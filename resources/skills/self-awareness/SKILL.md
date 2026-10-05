@@ -14,7 +14,7 @@ JavaScript control REPL; Python and R data kernels do not receive it.
 const caps = await host.capabilities()
 ```
 
-The current project-native result contains 20 known boolean keys:
+The current project-native result contains 21 known boolean keys:
 
 - `mcp` gates connector calls through `host.mcp(server, method, args?)`.
 - `compute` gates the `host.compute` namespace.
@@ -26,6 +26,7 @@ The current project-native result contains 20 known boolean keys:
 - `frames` gates the read-only `host.frames` namespace.
 - `sessions` gates Main-only, read-only Session diagnostics through `host.sessions.list(options?)`
   and exact lookup through `host.sessions.inspect(sessionId)` in the current Project.
+- `managedExecution` gates Main-only material preparation and bounded execution in the current Session.
 - `llm` gates one-shot, tool-less inference through `host.llm(request, options?)`.
 - `currentModel` gates exact current-model lookup through `host.currentModel()`. It returns the
   calling Session's exact current model id and fails when the live backend cannot establish one.
@@ -164,6 +165,42 @@ Session scope fields, create extraction work, or return content, messages, full 
 reviews, paths, storage keys, Bearer tokens, or internal routes. Missing or ambiguous identities,
 cross-Project edges, and corrupt evidence fail closed. There is no indexed property, `clear()`,
 client cache, Python/R `host`, or lineage API outside the JavaScript control REPL.
+
+## Run imported research materials in the current Session
+
+When `caps.managedExecution === true`, query `await host.help('managedExecution')` for the
+prepared-environment tools. Use `host.sessions` or an explicit source identity to select the
+research, then inspect its fixed materials with `host.managedExecution.inspectMaterials`.
+Reading a research, discussing it and watching Replay do not execute its contents.
+
+Explain the available scope before running: original inputs, downstream analysis, alternative
+conditions, or an engineering check. Missing/withheld inputs and changed model/runtime conditions
+must remain visible in the result. A valid description does not establish that its requirements
+are satisfied or authorize installing dependencies, using credentials or running a paid study.
+For the selected task, save a short execution-scope report as an ordinary output Artifact. Record
+the selected source identity and description/plan when present, the actual scope and parameters,
+known missing inputs, any substitutions or runtime adaptations, and limits on comparing the result
+with the original study. Distinguish author declarations from verified observations and unknowns.
+Update the report from the actual outcome; do not label an engineering check or changed-condition
+run as full scientific reproduction. The application's collection receipt preserves material and
+Run identities but does not infer scientific equivalence or replace this explanation.
+
+Prepare verified materials using the returned source identity and an available runtime. Execute
+the selected script through `host.managedExecution.execute` in the current foreground turn. Its
+inputs and work/output directories are owned by Open Science; use the documented environment
+variables and declare result files in `outputs`. A normal writable Session is sufficient; an
+existing fork works too. The original imported Session remains read-only. Do not require a fork,
+new Session type or separate reproduction workflow just to execute the materials.
+
+Keep request IDs for retries, inspect actual Notebook/Artifact results, and distinguish task
+completion from the experiment's scientific outcome. Cancellation uses the current turn's stop
+operation. Release the prepared environment after collection when it is no longer needed;
+published immutable Artifacts survive this cleanup. Report unavailable runtime support honestly.
+The initial native-service target is macOS with an independently installed Node 22 or newer.
+Discovery uses the application's launch PATH and common host locations, including `~/.local/bin`;
+Electron is not a replacement. If no runtime is found, explain the prerequisite and how to make the
+existing Node visible to the application before retrying. Do not silently install a runtime or
+move execution into the caller's own terminal.
 
 ## Discover Agent Frames
 

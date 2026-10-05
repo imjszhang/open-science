@@ -801,3 +801,72 @@ older releases. To switch a file credential back to OS storage, restart in OS mo
 replace it with the key while the vault is available. Existing unreadable records remain intact.
 These commands do not migrate historical configuration or store diagnostic history. Older backends that
 lack the endpoints return an endpoint error; the CLI never falls back to editing Settings files directly.
+
+## Managed research execution
+
+These commands use the authenticated service on the receiving machine and never submit a model
+prompt. An imported research record is read-only; choose an existing writable Session or create an
+ordinary one. No special Session type or fork is required.
+
+`execution runtimes` returns optional `diagnostics` with `nativeServiceSupported` and
+`issues: [{ code, message, action }]`. These explain missing, incompatible or unverifiable Node
+candidates and unsupported native local services without exposing candidate paths or raw probe
+errors. `available` still means a compatible Node was found, not that every research plan can run.
+Older applications may omit diagnostics. The command never installs or configures a runtime.
+
+```bash
+open-science execution runtimes --json
+open-science execution session-create --input-json '{"projectId":"project-id","requestId":"session-1","title":"Research verification"}' --json
+open-science execution materials --input-file inspect.json --json
+open-science execution prepare --input-file prepare.json --json
+open-science execution run --input-file execute.json --wait --timeout-ms 60000 --json
+open-science execution status --input-file operation.json --json
+open-science execution wait --input-file operation.json --timeout-ms 10000 --json
+open-science execution cancel --input-file operation.json --json
+open-science execution environment --input-file environment.json --json
+open-science execution release --input-file environment.json --json
+```
+
+All subcommands except `runtimes` require a JSON object through stdin, `--input-json`, or
+`--input-file`. Use the SDK request shapes in [the README](./README.md#managed-execution-of-research-materials).
+`operation.json` contains `projectId`, `sessionId`, and the execution's `requestId`;
+`environment.json` contains `projectId`, `sessionId`, and `environmentId`. `materials` additionally
+uses `sourceSessionId`. Material selection uses immutable Version IDs and safe relative restoration
+paths, not arbitrary host paths.
+
+The `timeoutMs` in `execute.json` limits the process lifetime. CLI `--timeout-ms` limits waiting
+only, with a maximum of 60000 ms. `run --wait` performs one bounded wait and may return a running
+snapshot; repeat `status` or `wait` to continue observing it. Closing the CLI or timing out never
+implicitly cancels the operation. `--cancel-on-timeout` is not supported for these commands; use
+`execution cancel` explicitly. Failed, cancelled or interrupted operation snapshots set exit code 1.
+
+Keep request IDs for retries. An identical request reuses its recorded preparation or execution;
+changed input with the same ID is rejected. Use `release` for managed resource cleanup after the
+operation settles, and retain a `cleanup-pending` response for retry. This first execution sandbox
+supports local macOS; paired remote web callers are explicitly unsupported.
+
+## Local `.science` package import and export
+
+The package commands accept a JSON object from stdin, `--input-json`, or `--input-file`. Paths in
+that object are absolute paths on the receiving local machine. The CLI does not upload the archive.
+
+```bash
+open-science package preflight-import --input-json '{"filePath":"/absolute/path/research.science","target":{"projectName":"Imported research"}}' --idempotency-key inspect-research-1 --timeout-ms 120000 --json
+# Review the returned preview and omissions, then use its actual preflightId:
+open-science package commit-import --input-json '{"preflightId":"returned-uuid"}' --json
+# Or discard the staged preview:
+open-science package cancel-import --input-json '{"preflightId":"returned-uuid"}' --json
+open-science package export --input-json '{"projectId":"project-id","sessionId":"session-id","filePath":"/absolute/path/export.science"}' --json
+```
+
+Use `target: { "projectId": "existing-project-id" }` instead of `projectName` to import into an
+existing Project. Preflight does not publish a Project or Session and never commits automatically.
+The staged preview expires after ten minutes by default and is discarded on service shutdown.
+Commit preserves the original read-only research history; it does not execute the research.
+Export requires a destination that does not already exist. These operations require authenticated
+local access and preserve the desktop package validation and sensitive-content checks.
+
+For larger archives, increase `--timeout-ms`. Timing out stops waiting, not the server transfer.
+Keep `--idempotency-key` unchanged when retrying a request whose response was lost; use a new key
+for a new transfer. The same key with different input is rejected. A restarted service requires a
+new preflight and review. `cancel-import` explicitly discards an uncommitted staged preview.

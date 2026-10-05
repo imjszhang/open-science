@@ -39,6 +39,8 @@ const log = createLogger('notebook:file-evidence')
 
 type WorkingFileObservationRequest = {
   dataRoot: string
+  /** Main-owned logical alias for the same physical root, used only for persisted file identity. */
+  logicalDataRoot?: string
   notebookSessionRoot: string
   cwd?: string
   code?: string
@@ -1260,7 +1262,12 @@ const startRootObservation = async (
       realpath(rootPath),
       realpath(logicalSessionRootPath)
     ])
-    if (!isPathInside(sessionRoot, observedRoot)) {
+    if (
+      !isPathInside(sessionRoot, observedRoot) ||
+      (rootPath !== logicalRootPath &&
+        (!isPathInside(logicalSessionRoot, logicalObservedRoot) ||
+          (await realpath(logicalObservedRoot)) !== observedRoot))
+    ) {
       return {
         initialFiles: [],
         initialAvailable: false,
@@ -1968,7 +1975,11 @@ const startWorkingFileObservation = async (
   const logicalSessionRoot = resolve(request.notebookSessionRoot)
   const handoffRoot = join(logicalSessionRoot, 'handoff')
   const roots: Array<{ kind: 'data' | 'handoff'; path: string; logicalPath: string }> = [
-    { kind: 'data', path: request.dataRoot, logicalPath: request.dataRoot },
+    {
+      kind: 'data',
+      path: request.dataRoot,
+      logicalPath: request.logicalDataRoot ?? request.dataRoot
+    },
     ...(await realpath(handoffRoot).then(
       () => [{ kind: 'handoff' as const, path: handoffRoot, logicalPath: handoffRoot }],
       () => []

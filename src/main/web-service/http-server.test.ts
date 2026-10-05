@@ -6,7 +6,7 @@ import { RemoteAccessRepository } from '../remote-access/repository'
 import { requirePairingManager } from '../remote-access/ipc'
 import { remoteAccessApplicationCommandContracts } from '../../shared/remote-access'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { request as httpRequest, IncomingMessage, ServerResponse } from 'node:http'
+import { request as httpRequest, IncomingMessage, ServerResponse, Server } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -4997,5 +4997,384 @@ describe('Agent runtime Task HTTP routes', () => {
       { framework: 'codebuddy', status: 'missing' }
     ])
     await tasks.dispose()
+  })
+})
+
+describe('managed execution HTTP API', () => {
+  const setup = async (
+    options: { remote?: boolean; budget?: boolean; unavailable?: boolean } = {}
+  ): Promise<{
+    base: string
+    call: ReturnType<typeof vi.fn>
+    contexts: CallerContext[]
+  }> => {
+    const call = vi.fn().mockResolvedValue({ status: 'running', requestId: 'run-1' })
+    const contexts: CallerContext[] = []
+    const server = await startTestWebHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'execution-token',
+      staticRoot: '/unused',
+      rpc: { channels: () => [], invoke: vi.fn() },
+      ...(options.budget
+        ? {
+            requestBodyBudgets: {
+              perRequestBytes: 64,
+              perClientInFlightBytes: 128,
+              serverInFlightBytes: 256
+            }
+          }
+        : {}),
+      ...(options.remote
+        ? {
+            externalAccess: {
+              authorizeHttp: vi.fn().mockResolvedValue(accessOnlyExternalAccess()),
+              authorizeWebSocket: vi
+                .fn()
+                .mockResolvedValue({ principalId: 'remote', isCurrent: () => true })
+            }
+          }
+        : {}),
+      tasks: {
+        runWithCallerContext: (context, operation) => {
+          contexts.push(context)
+          return operation()
+        },
+        subscribeProgress: vi.fn(() => vi.fn()),
+        listProjects: vi.fn(),
+        createProject: vi.fn(),
+        updateProject: vi.fn(),
+        listSessions: vi.fn(),
+        getSession: vi.fn(),
+        startRun: vi.fn(),
+        getRun: vi.fn(),
+        cancelRun: vi.fn(),
+        listArtifacts: vi.fn(),
+        acquireArtifact: vi.fn(),
+        releaseArtifact: vi.fn(),
+        ...(options.unavailable ? {} : { callManagedExecution: call })
+      },
+      bootstrap: {
+        appName: 'Open-Science',
+        appVersion: '0.0.0',
+        configRoot: '/fake/root',
+        platform: 'test',
+        versions: { electron: '1', chrome: '1', node: '1' }
+      }
+    })
+    servers.push(server)
+    return { base: `http://127.0.0.1:${server.port}`, call, contexts }
+  }
+  const post = (
+    base: string,
+    method: string,
+    body: unknown,
+    extraHeaders: Record<string, string> = {}
+  ): Promise<Response> =>
+    fetch(`${base}/api/v1/execution/${method}`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer execution-token',
+        'content-type': 'application/json',
+        ...extraHeaders
+      },
+      body: JSON.stringify(body)
+    })
+
+  it('authenticates all methods and retains a local automation caller', async () => {
+    const { base, call, contexts } = await setup()
+    const denied = await fetch(`${base}/api/v1/execution/runtimes`)
+    expect(denied.status).toBe(401)
+    expect(call).not.toHaveBeenCalled()
+    for (const method of [
+      'runtimes',
+      'createSession',
+      'inspectMaterials',
+      'prepare',
+      'execute',
+      'getOperation',
+      'cancelOperation',
+      'waitOperation',
+      'getEnvironment',
+      'releaseEnvironment'
+    ]) {
+      const response = await post(base, method, { requestId: 'run-1' })
+      expect(response.status).toBe(method === 'execute' ? 202 : 200)
+      expect(await response.json()).toMatchObject({ data: { status: 'running' } })
+    }
+    expect(call).toHaveBeenCalledTimes(10)
+    expect(
+      contexts.every(
+        (context) =>
+          context.surface === 'task' &&
+          context.location === 'local' &&
+          context.principalKind === 'automation'
+      )
+    ).toBe(true)
+    expect(
+      (
+        await fetch(`${base}/api/v1/execution/runtimes`, {
+          headers: { authorization: 'Bearer execution-token' }
+        })
+      ).status
+    ).toBe(200)
+    expect((await post(base, 'notAMethod', {})).status).toBe(404)
+  })
+
+  it('rejects paired remote callers even when the existing web authorization accepts them', async () => {
+    const { base, call } = await setup({ remote: true })
+    const response = await fetch(`${base}/api/v1/execution/execute`, {
+      method: 'POST',
+      headers: {
+        host: 'remote.example.test',
+        origin: 'https://remote.example.test',
+        'content-type': 'application/json'
+      },
+      body: '{}'
+    })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({ error: { code: 'unsupported_location' } })
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-loopback peer even with a local Host header and valid token', async () => {
+    const { base, call } = await setup()
+    const emit = Server.prototype.emit
+    const peer = vi.spyOn(Server.prototype, 'emit').mockImplementation(function (
+      this: Server,
+      event: string | symbol,
+      ...args: unknown[]
+    ): boolean {
+      if (event === 'request')
+        Object.defineProperty((args[0] as IncomingMessage).socket, 'remoteAddress', {
+          configurable: true,
+          value: '203.0.113.10'
+        })
+      return Reflect.apply(emit, this, [event, ...args])
+    })
+    try {
+      const response = await post(base, 'execute', {})
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: { code: 'unsupported_location' } })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      peer.mockRestore()
+    }
+  })
+
+  it('uses the real SDK over authenticated HTTP for retry-safe managed requests', async () => {
+    const { base, call } = await setup()
+    const client = new OpenScienceClient({ baseUrl: base, token: 'execution-token' })
+    const request = {
+      projectId: 'project',
+      sessionId: 'session',
+      environmentId: 'environment',
+      requestId: 'run-1',
+      command: 'node --version'
+    }
+    await client.execution.execute(request, { idempotencyKey: 'managed-sdk-retry' })
+    await client.execution.execute(request, { idempotencyKey: 'managed-sdk-retry' })
+    expect(call).toHaveBeenCalledOnce()
+    expect(call).toHaveBeenCalledWith('execute', request)
+    await client.execution.waitOperation({
+      projectId: 'project',
+      sessionId: 'session',
+      requestId: 'run-1',
+      timeoutMs: 1
+    })
+    expect(call).toHaveBeenLastCalledWith('waitOperation', {
+      projectId: 'project',
+      sessionId: 'session',
+      requestId: 'run-1',
+      timeoutMs: 1
+    })
+  })
+
+  it('deduplicates mutations while status and wait always observe current state', async () => {
+    const { base, call } = await setup()
+    const headers = { 'idempotency-key': 'retry-1' }
+    const body = { requestId: 'request-1' }
+    for (const method of ['createSession', 'prepare', 'execute']) {
+      const responses = await Promise.all([
+        post(base, method, body, headers),
+        post(base, method, body, headers)
+      ])
+      expect(await responses[0].json()).toEqual(await responses[1].json())
+      expect((await post(base, method, { requestId: 'other' }, headers)).status).toBe(409)
+    }
+    expect(call).toHaveBeenCalledTimes(3)
+    for (const method of ['getOperation', 'waitOperation', 'getEnvironment']) {
+      await post(base, method, body, headers)
+      await post(base, method, body, headers)
+    }
+    expect(call).toHaveBeenCalledTimes(9)
+  })
+
+  it('retains existing request budgets and rejects invalid wait deadlines before dispatch', async () => {
+    const { base, call } = await setup({ budget: true })
+    expect((await post(base, 'prepare', { text: 'x'.repeat(100) })).status).toBe(413)
+    for (const timeoutMs of [0, -1, 60_001, 1.5, '10'])
+      expect((await post(base, 'waitOperation', { timeoutMs })).status).toBe(400)
+    expect((await post(base, 'prepare', [])).status).toBe(400)
+    expect(call).not.toHaveBeenCalled()
+    expect((await post(base, 'waitOperation', { timeoutMs: 60_000 })).status).toBe(200)
+  })
+
+  it('reports an unavailable optional port without routing through Agent work', async () => {
+    const { base, call } = await setup({ unavailable: true })
+    expect((await post(base, 'prepare', {})).status).toBe(503)
+    expect(call).not.toHaveBeenCalled()
+  })
+})
+
+describe('headless package HTTP API', () => {
+  const setup = async (
+    options: { remote?: boolean; unavailable?: boolean } = {}
+  ): Promise<{ base: string; call: ReturnType<typeof vi.fn> }> => {
+    const call = vi.fn().mockResolvedValue({ preflightId: 'preview' })
+    const server = await startTestWebHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'package-token',
+      staticRoot: '/unused',
+      rpc: { channels: () => [], invoke: vi.fn() },
+      requestBodyBudgets: {
+        perRequestBytes: 1024,
+        perClientInFlightBytes: 2048,
+        serverInFlightBytes: 4096
+      },
+      ...(options.remote
+        ? {
+            externalAccess: {
+              authorizeHttp: vi.fn().mockResolvedValue(accessOnlyExternalAccess()),
+              authorizeWebSocket: vi
+                .fn()
+                .mockResolvedValue({ principalId: 'remote', isCurrent: () => true })
+            }
+          }
+        : {}),
+      tasks: {
+        runWithCallerContext: (_context, operation) => operation(),
+        subscribeProgress: vi.fn(() => vi.fn()),
+        listProjects: vi.fn(),
+        createProject: vi.fn(),
+        updateProject: vi.fn(),
+        listSessions: vi.fn(),
+        getSession: vi.fn(),
+        startRun: vi.fn(),
+        getRun: vi.fn(),
+        cancelRun: vi.fn(),
+        listArtifacts: vi.fn(),
+        acquireArtifact: vi.fn(),
+        releaseArtifact: vi.fn(),
+        ...(options.unavailable ? {} : { callSessionPackages: call })
+      },
+      bootstrap: {
+        appName: 'Open-Science',
+        appVersion: '0.0.0',
+        configRoot: '/fake/root',
+        platform: 'test',
+        versions: { electron: '1', chrome: '1', node: '1' }
+      }
+    })
+    servers.push(server)
+    return { base: `http://127.0.0.1:${server.port}`, call }
+  }
+  const post = (
+    base: string,
+    method: string,
+    body: unknown,
+    headers: Record<string, string> = {}
+  ): Promise<Response> =>
+    fetch(`${base}/api/v1/packages/${method}`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer package-token',
+        'content-type': 'application/json',
+        ...headers
+      },
+      body: JSON.stringify(body)
+    })
+
+  it('uses the real SDK for explicit authenticated preflight, commit, cancel and export with retry protection', async () => {
+    const { base, call } = await setup()
+    expect(
+      (await fetch(`${base}/api/v1/packages/preflightImport`, { method: 'POST', body: '{}' }))
+        .status
+    ).toBe(401)
+    expect(call).not.toHaveBeenCalled()
+    const client = new OpenScienceClient({ baseUrl: base, token: 'package-token' })
+    const request = { filePath: '/research.science', target: { projectName: 'Research' } }
+    await client.packages.preflightImport(request, { idempotencyKey: 'preview-retry' })
+    await client.packages.preflightImport(request, { idempotencyKey: 'preview-retry' })
+    expect(call).toHaveBeenCalledExactlyOnceWith('preflightImport', request)
+    await client.packages.commitImport({ preflightId: 'preview' })
+    await client.packages.cancelImport({ preflightId: 'preview' })
+    await client.packages.export({ projectId: 'p', sessionId: 's', filePath: '/output.science' })
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      'preflightImport',
+      'commitImport',
+      'cancelImport',
+      'export'
+    ])
+    expect(
+      (
+        await post(
+          base,
+          'preflightImport',
+          { ...request, filePath: '/changed.science' },
+          { 'idempotency-key': 'preview-retry' }
+        )
+      ).status
+    ).toBe(409)
+  })
+
+  it('preserves request budgets and rejects non-object or unknown inputs before dispatch', async () => {
+    const { base, call } = await setup()
+    expect((await post(base, 'export', { text: 'x'.repeat(2000) })).status).toBe(413)
+    expect((await post(base, 'export', [])).status).toBe(400)
+    expect((await post(base, 'importWithoutReview', {})).status).toBe(404)
+    expect(call).not.toHaveBeenCalled()
+    const missing = await setup({ unavailable: true })
+    expect((await post(missing.base, 'export', {})).status).toBe(503)
+  })
+
+  it('rejects paired remote callers even if the established authentication accepts them', async () => {
+    const { base, call } = await setup({ remote: true })
+    const reply = await fetch(`${base}/api/v1/packages/export`, {
+      method: 'POST',
+      headers: {
+        host: 'remote.example.test',
+        origin: 'https://remote.example.test',
+        'content-type': 'application/json'
+      },
+      body: '{}'
+    })
+    expect(reply.status).toBe(403)
+    expect(await reply.json()).toMatchObject({ error: { code: 'unsupported_location' } })
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('uses the actual socket peer rather than trusting a local Host header', async () => {
+    const { base, call } = await setup()
+    const emit = Server.prototype.emit
+    const peer = vi.spyOn(Server.prototype, 'emit').mockImplementation(function (
+      this: Server,
+      event: string | symbol,
+      ...args: unknown[]
+    ): boolean {
+      if (event === 'request')
+        Object.defineProperty((args[0] as IncomingMessage).socket, 'remoteAddress', {
+          configurable: true,
+          value: '203.0.113.10'
+        })
+      return Reflect.apply(emit, this, [event, ...args])
+    })
+    try {
+      expect((await post(base, 'export', {})).status).toBe(403)
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      peer.mockRestore()
+    }
   })
 })

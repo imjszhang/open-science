@@ -14,6 +14,7 @@ const HOST_SDK_OPERATION_IDS = Object.freeze(
     'host.llm',
     'host.listModels',
     'host.sessions',
+    'host.managedExecution',
     'host.viewImage'
   ].sort()
 )
@@ -29,6 +30,7 @@ type HostSdkHelpContext = Readonly<{
       llm?: boolean
       listModels?: boolean
       sessions?: boolean
+      managedExecution?: boolean
       viewImage?: boolean
     }
   >
@@ -1070,7 +1072,141 @@ const SESSIONS_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
         : { status: 'unavailable', reason: 'host.sessions is not provisioned for this Session.' }
 }
 
+const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
+  kind: 'operation',
+  id: 'host.managedExecution',
+  path: 'host.managedExecution',
+  aliases: ['managedExecution'],
+  summary: 'Prepare and run materials in this Session.',
+  callForms: [
+    { signature: 'await host.managedExecution.runtimes()', accepts: 'no_arguments' },
+    {
+      signature: 'await host.managedExecution.inspectMaterials(options)',
+      accepts: 'source_selection'
+    },
+    {
+      signature: 'await host.managedExecution.prepare(options)',
+      accepts: 'verified_materials_and_runtime'
+    },
+    {
+      signature: 'await host.managedExecution.execute(options)',
+      accepts: 'environment_command_and_outputs'
+    },
+    {
+      signature: 'await host.managedExecution.getEnvironment({ environmentId })',
+      accepts: 'environment_reference'
+    },
+    {
+      signature: 'await host.managedExecution.releaseEnvironment({ environmentId })',
+      accepts: 'environment_reference'
+    }
+  ],
+  request: {
+    fields: [
+      {
+        name: 'sourceSessionId',
+        type: 'string',
+        required: false,
+        description: 'Source research for inspectMaterials and prepare.'
+      },
+      {
+        name: 'environmentId',
+        type: 'string',
+        required: false,
+        description: 'Prepared environment identifier.'
+      },
+      {
+        name: 'requestId',
+        type: 'string',
+        required: false,
+        description: 'Stable request identity for prepare and execute.'
+      },
+      {
+        name: 'sourceIdentity',
+        type: 'string',
+        required: false,
+        description: 'prepare: exact source identity from inspectMaterials.'
+      },
+      {
+        name: 'runtimeId',
+        type: 'string',
+        required: false,
+        description: 'prepare: available id from runtimes.'
+      },
+      {
+        name: 'materials',
+        type: 'object',
+        required: false,
+        description:
+          'prepare: { files: [{ versionId, restorePath }] } or { descriptorVersionId, materialKeys, materialVersions? }. Paths are relative. materialVersions maps keys to inspected Version ids.'
+      },
+      {
+        name: 'versionIds',
+        type: 'string[]',
+        required: false,
+        description:
+          'Source Version IDs for inspection/preparation; inspection also accepts descriptorVersionId.'
+      },
+      {
+        name: 'outputs',
+        type: 'object[]',
+        required: false,
+        description:
+          'For execute: [{ path, filename, contentType?, optional? }], paths relative to the owned output root. Saves actual files as Artifacts in the current turn; defaults to [].'
+      },
+      {
+        name: 'timeoutMs',
+        type: 'integer',
+        required: false,
+        description: 'For execute: 1–600000 milliseconds, default 60000.'
+      },
+      {
+        name: 'localServicePort',
+        type: 'integer',
+        required: false,
+        description:
+          'execute: loopback HTTP port, 1–65535, routed through the managed service capability.'
+      },
+      {
+        name: 'command',
+        type: 'string',
+        required: false,
+        description: 'Command for execute, run by Open Science.'
+      }
+    ]
+  },
+  options: NO_OPTIONS,
+  returns: {
+    type: 'object',
+    description:
+      'Inspection, environment or execution result. runtimes: { available, runtimes, diagnostics?: { nativeServiceSupported, issues: [{ code, message, action }] } }.'
+  },
+  constraints: [
+    'Active Main foreground turn only; does not create another Session or call another model.',
+    'Inspect materials; explain missing inputs and changed conditions. Use returned identifiers.',
+    'macOS, existing Node >=22. Fixed inputs: OPEN_SCIENCE_INPUT_DIR; outputs: OPEN_SCIENCE_OUTPUT_DIR.',
+    'Node found is not plan readiness. Explain diagnostics; no automatic installation or host-terminal fallback.',
+    'Stop the turn to cancel. Release after collection; published Artifacts remain.'
+  ],
+  examples: [
+    {
+      title: 'Run a reviewed prepared script',
+      code: 'await host.managedExecution.execute({ environmentId, requestId: "analysis-1", command: \'node "$OPEN_SCIENCE_INPUT_DIR/analysis.mjs"\', outputs: [{ path: "result.json", filename: "result.json" }] })'
+    }
+  ],
+  backgroundSafety: 'unsafe',
+  backgroundSafetyReason: 'Borrows the active foreground Artifact turn.',
+  resolveAvailability: ({ capabilities }) =>
+    capabilities.managedExecution
+      ? { status: 'available' }
+      : {
+          status: 'unavailable',
+          reason: 'Managed execution requires an active Main turn and configured service.'
+        }
+}
+
 const OPERATION_DESCRIPTORS: readonly HostSdkHelpOperationDescriptor[] = [
+  MANAGED_EXECUTION_DESCRIPTOR,
   CHILDREN_DESCRIPTOR,
   COLLECT_DESCRIPTOR,
   CURRENT_MODEL_DESCRIPTOR,
@@ -1097,7 +1233,7 @@ if (JSON.stringify(registeredOperationIds) !== JSON.stringify(HOST_SDK_SUBAGENT_
 }
 
 const MAX_HELP_QUERY_CHARS = 128
-const MAX_CATALOG_RESULT_CHARS = 2_900
+const MAX_CATALOG_RESULT_CHARS = 3_200
 const MAX_OPERATION_RESULT_CHARS = 3_600
 const MAX_DELEGATE_RESULT_CHARS = 3_400
 

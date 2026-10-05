@@ -978,7 +978,18 @@ describe('Artifact Provenance repository architecture', () => {
       'src/renderer/src/lib/compute/useJobAnalysisEffect.render.test.tsx',
       'src/main/acp/approved-handoff-outcome.integration.test.ts',
       'src/main/acp/approved-handoff-outcome.test.ts',
-      'src/main/session-package/research-reproduction.integration.test.ts'
+      'src/main/session-package/research-reproduction.integration.test.ts',
+      'src/main/composition/managed-execution.integration.test.ts',
+      'src/main/notebook/local-rpc-server.managed-execution.test.ts',
+      'src/main/notebook/managed-execution-entrypoints.integration.test.ts',
+      'src/main/notebook/managed-execution-service.macos.integration.test.ts',
+      'src/main/notebook/managed-execution-service.test.ts',
+      'src/main/notebook/research-material-authority.test.ts',
+      'src/main/notebook/session-operation-owner.integration.test.ts',
+      'src/main/session-package/headless.test.ts',
+      'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
+      'src/main/composition/session-packages.test.ts',
+      'src/main/composition/handoff.test.ts'
     ])
     expect(module.capabilityOverlays).toEqual([
       'windows_sensitive',

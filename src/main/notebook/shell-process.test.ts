@@ -27,6 +27,7 @@ import type { NotebookProcessSandbox } from './process-sandbox'
 import { normalizeFilesystemLayout } from '../../../packages/notebook-network-sandbox/runtime/src/platform/filesystem-layout.js'
 import { terminateProcessTree } from '../process-tree'
 import { notebookWorkloadCacheEnv } from './notebook-workload-cache-paths'
+import { createManagedShellExecutionCapability } from './managed-shell-execution'
 import { shellNpmPaths } from './shell-npm-environment'
 import { windowsSupervisedLaunch } from '../../../packages/notebook-network-sandbox/runtime/src/platform/windows-appcontainer'
 import { ViolationLog } from '../../../packages/notebook-network-sandbox/runtime/src/gateway/violation-log'
@@ -59,6 +60,160 @@ describe('bounded Shell adapter lifecycle', () => {
     timeoutMs: 10_000,
     ...overrides
   })
+
+  const managedCapability = (): ReturnType<typeof createManagedShellExecutionCapability> =>
+    createManagedShellExecutionCapability({
+      projectId: 'project',
+      sessionId: 'session',
+      executionInvocationId: 'managed',
+      cwd: portableRuntimeRoot,
+      environment: { HOME: portableRuntimeRoot, PATH: '/usr/bin:/bin' },
+      filesystem: { readOnlyRoots: [], readWriteRoots: [portableRuntimeRoot] }
+    })
+
+  it.skipIf(process.platform === 'win32')(
+    'drains persistent and per-invocation bounded processes together',
+    async () => {
+      const gate = Promise.withResolvers<void>()
+      const cleanup = vi.fn(async () => {
+        await gate.promise
+        return { processesTerminated: true, networkClosed: true, temporaryResourcesRemoved: true }
+      })
+      const children: ChildProcess[] = []
+      const adapter = new NotebookShellProcessAdapter(
+        process.platform,
+        {
+          wrap: async (invocation) => ({
+            executable: invocation.executable,
+            args: invocation.args,
+            env: invocation.env,
+            annotateStderr: (text) => text,
+            cleanup
+          })
+        },
+        {
+          claim: (child) => {
+            children.push(child)
+            return () => undefined
+          }
+        }
+      )
+      await adapter.execute(request({ command: 'export FIXTURE_PERSISTENT=live' }))
+      const running = adapter.execute(
+        request({
+          runId: 'bounded-run',
+          executionInvocationId: 'managed',
+          managedExecution: managedCapability(),
+          command: 'echo ready; while :; do sleep 1; done'
+        })
+      )
+      let stopped = false
+      try {
+        await vi.waitFor(() => expect(children).toHaveLength(2))
+        const shutdown = adapter
+          .shutdown({ projectId: 'project', sessionId: 'session' })
+          .then((result) => {
+            stopped = true
+            return result
+          })
+        await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(2))
+        expect(stopped).toBe(false)
+        for (const child of children)
+          expect(() => process.kill(child.pid!, 0)).toThrow(
+            expect.objectContaining({ code: 'ESRCH' })
+          )
+        gate.resolve()
+        expect(await shutdown).toEqual({ reaped: true })
+        expect(await running).toMatchObject({ cancelled: true })
+      } finally {
+        gate.resolve()
+        expect(await adapter.shutdown()).toEqual({ reaped: true })
+        await running
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'retains failed managed cleanup and fences ordinary commands until verified',
+    async () => {
+      let verified = false
+      const cleanups: string[] = []
+      const adapter = new NotebookShellProcessAdapter(process.platform, {
+        wrap: async (invocation) => ({
+          executable: invocation.executable,
+          args: invocation.args,
+          env: invocation.env,
+          annotateStderr: (text) => text,
+          cleanup: async () => {
+            cleanups.push(invocation.executionReference ?? '')
+            const complete = invocation.executionReference !== 'managed-run' || verified
+            return {
+              processesTerminated: true,
+              networkClosed: complete,
+              temporaryResourcesRemoved: complete
+            }
+          }
+        })
+      })
+      try {
+        await adapter.execute(
+          request({ command: 'export FIXTURE_PERSISTENT=live', executionReference: 'ordinary-run' })
+        )
+        const result = await adapter.execute(
+          request({
+            runId: 'managed-run',
+            executionReference: 'managed-run',
+            executionInvocationId: 'managed',
+            managedExecution: managedCapability()
+          })
+        )
+        expect(result.errorCode).toBe('shell-cleanup-incomplete')
+        expect((await adapter.execute(request())).errorCode).toBe('shell-cleanup-incomplete')
+        expect(await adapter.shutdown()).toEqual({ reaped: false })
+        expect(cleanups).toContain('ordinary-run')
+        verified = true
+        expect(await adapter.shutdown()).toEqual({ reaped: true })
+      } finally {
+        verified = true
+        expect(await adapter.shutdown()).toEqual({ reaped: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'does not let a managed invocation bypass failed persistent cleanup',
+    async () => {
+      let verified = false
+      const wrap = vi.fn(async (invocation: Parameters<NotebookProcessSandbox['wrap']>[0]) => ({
+        executable: invocation.executable,
+        args: invocation.args,
+        env: invocation.env,
+        annotateStderr: (text: string) => text,
+        cleanup: async () => ({
+          processesTerminated: true,
+          networkClosed: verified,
+          temporaryResourcesRemoved: verified
+        })
+      }))
+      const adapter = new NotebookShellProcessAdapter(process.platform, { wrap })
+      try {
+        expect((await adapter.execute(request({ command: 'exit 0' }))).errorCode).toBe(
+          'shell-cleanup-incomplete'
+        )
+        expect(
+          (
+            await adapter.execute(
+              request({ managedExecution: managedCapability(), executionInvocationId: 'managed' })
+            )
+          ).errorCode
+        ).toBe('shell-cleanup-incomplete')
+        expect(wrap).toHaveBeenCalledOnce()
+      } finally {
+        verified = true
+        expect(await adapter.shutdown()).toEqual({ reaped: true })
+      }
+    }
+  )
 
   it.skipIf(process.platform === 'win32')(
     'scopes shutdown and waits for the original process cleanup',
