@@ -1,7 +1,9 @@
 # Managed research execution
 
-Status: implementation in progress. This document is the acceptance ledger for the second stage,
-based on `014c6dfc5` and the user's revised product scope. It does not describe a shipped feature.
+Status: implemented locally and delivered to the independent Test client. This document records
+the second stage, based on `014c6dfc5` and the user's revised product scope. The installed functional
+revision is `32191a29038d`; later changes cover test reliability and this ledger. This is not an
+upstream or public release. See the final delivery evidence and its validation limits below.
 
 ## Product contract
 
@@ -56,8 +58,8 @@ raw probe errors; finding Node and supporting a native local service are separat
 
 ## Acceptance ledger
 
-All entries are pending until an evidence reference is recorded below. Narrow unit tests do not
-prove product-wide integration or native behavior.
+The evidence below records completed checks and their limits. Narrow unit tests do not prove
+product-wide integration or native behavior; earlier failed attempts remain historical evidence.
 
 | Requirement                            | Required evidence                                                                                                                                        |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -205,7 +207,7 @@ prove product-wide integration or native behavior.
   a correction report was saved and the environment was released without another engineering run.
   The current source now reuses the existing trusted producer-input scope for exact current-turn
   Version readback. Project listings remain restricted to published results. This readback change
-  still needs an installed-client journey after the next Test build.
+  was subsequently verified in the installed ordinary and fork journeys recorded below.
 
 ## Retained output collection
 
@@ -239,8 +241,8 @@ capabilities changes `.science` v1 or makes the optional research description ex
 
 Targeted source tests cover real process/Notebook/SQLite collection across turns, uncertain save
 acknowledgements, exact Version reuse, cancellation, native macOS containment, missing evidence,
-cross-branch refusal and immutable output readability after release. Current-source full validation,
-updated Test delivery and installed ordinary/fork acceptance remain separate final gates.
+cross-branch refusal and immutable output readability after release. The installed journeys and
+repository validation below complement these source tests; neither substitutes for the other.
 
 ## Real-material acceptance
 
@@ -274,14 +276,97 @@ can still provide useful complete evidence; neither an exit code nor a successfu
 establishes a scientific conclusion. Package export retains its existing sensitive-content and
 dependency-closure checks.
 
-An independent Test build containing the publication fix was produced and installed from
-`6dfbc510b136983a5f3fe9631403f26b36541e9d`. Build, signature and local maintenance checks passed.
-Installation alone does not establish startup recovery or Agent usability.
+## Final local delivery evidence
 
-Remaining release gates include the ordinary-Agent storage-alias fix and actual ordinary/fork
-journeys, uncollected-output retention and recovery, installed-client unavailable-material and
-lifecycle checks, the downstream-only compromise case, and required checks on the final source.
-The completed external journey does not substitute for these gates.
+The independent Test client is `0.35.0-test.32191a29038d.2`, built from
+`32191a29038dca7fecebfa8b4f93ed2a8963bcb4`. The installed archive SHA-256 is
+`205e08ddd35b33000cccfc19f9ee563c80cfd3f03e91a3ea9db2253058f83e61`; its actual bytes match the
+maintenance manifest. Build, signing, startup, type and lint checks passed. Test configuration,
+data and updater settings remain independent of the formal client. The main checkout and pinned
+Tuanzi source checkout remain clean. Only local feature-branch commits were created.
+
+Installed acceptance records, dated 2026-10-05 UTC, are versioned separately:
+
+| Entry                        | Test functional revision | Evidence directory                                      | Observed result                                                                                                  |
+| ---------------------------- | ------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| External Tuanzi SDK          | `50e8875ca682`           | `installed-acceptance-20261005-restart-01`              | Native import, one offline execution, output publication, export/import, producer mapping and release            |
+| Ordinary Main Agent          | `154f65b3281d`           | `installed-acceptance-20261005-publication-ordinary-01` | One offline execution, exact current-turn reads, publication-aware release, 16 output/report Versions preserved  |
+| Working-copy Main Agent      | `32191a29038d`           | `installed-acceptance-20261005-publication-fork-02`     | One offline execution, exact current-turn reads, publication-aware release, 34 historical/new Versions preserved |
+| Generic external SDK         | `154f65b3281d`           | `installed-acceptance-20261005-publication-01`          | Arithmetic, unavailable-input refusal, cancellation, timeout, package round trip and release                     |
+| Downstream-only external SDK | `50e8875ca682`           | `installed-acceptance-20261005-downstream-02`           | Explicit withheld-input refusal and a separate public-summary calculation with truthful scope                    |
+
+The ordinary journey passed ten pre-export checks and twenty round-trip checks. Thirteen generated
+outputs plus the application receipt were readable by exact Version in the producing turn while
+still pending. All sixteen published output/report contents survived native export/import; the
+thirteen generated files retained their remapped producer Run. Its source Session comparison began
+during the active turn, rather than before the prompt; the original package checksum was unchanged.
+
+The earlier installed fork attempt on `154f65b3281d` remains a failed, zero-execution attempt in
+`installed-acceptance-20261005-publication-fork-01`. A control capability first issued after turn
+activation retained the Notebook aggregate's placeholder root instead of the restored fork's active
+root. The correction binds only that default Main capability to the matching active turn; explicit
+foreign, delegated and retired contexts remain rejected. Real runtime/HTTP and current-turn Artifact
+regressions passed after reproducing the failure before the fix.
+
+The subsequent installed fork journey used its own seventeen copied materials, performed exactly
+one new engineering Run and passed all twenty-four project checks. It read thirteen generated
+outputs and the collection receipt in the same turn, then saved a scope report. Observation captured
+the retained collection with `releaseRequested` before publication, followed by automatic release
+only after all exact Versions were published. Six execution/publication audit checks, nineteen
+output-provenance round-trip checks and thirty-eight history/source checks passed. All thirty-four
+Artifact contents matched: seventeen copied materials, two preserved prior-failure reports and
+fifteen new outputs/reports. Historical material-staging Runs were not counted as new experiments.
+
+The fork export's HTTP observation timed out after thirty seconds. The original operation later
+produced the complete archive; no second export was submitted. Native v1 inventory validation
+checked all 565 entries before one new-Project import, which completed with `cleanupPending=false`.
+The lost export response means its response-time cleanup field is unknown. SDK readback and local
+native Notebook/database audits independently verified output bytes and remapped producer identities.
+The native Run reports an observer conflict, so this proves the exact output associations, not
+completeness of the entire file-observation graph. The initial audit incorrectly treated a parent
+REPL's observation of the same generation as another producer; that failed audit and its correction
+remain recorded. Actual `createdByRunId` and Artifact producer evidence identify the real command.
+
+The generic SDK ledger SHA-256 is
+`b1578ad1021cd0efc15c964802d2021bab002f8feda8bcf3a76443e1cf417ea6`. It verified arithmetic
+count 4, sum 20 and mean 5, three genuine terminal Runs and preserved bytes/producers after package
+transfer and release. A failed preparation returned the expected refusal without a Notebook Run;
+the public SDK cannot separately enumerate a hidden environment from that failed request. The
+earlier downstream-only case verified four outputs and twenty-five assertions, with public group
+means 5 and 7 and difference 2. It does not verify the withheld rows or original research conclusion.
+Prior-revision evidence is not represented as a fresh run on the final Test revision.
+
+## Final repository validation
+
+The complete functional-source run at `32191a29038d` reported 50,528 passing tests, 855 skips and
+two failures (2,594 passing files, 60 skipped files and one failed file). Both failures were in the
+existing network-enforcement integration fixture. A standalone run reproduced them. Process/DNS
+tracing showed `example.com` resolving and completing while the system `example.org` lookup did
+not return before the unchanged fifteen-second timeout. The following raw-socket test then failed
+at initialization because the previous test had not released its owner; it did not attempt a socket.
+
+The test's parent proxy provides both HTTP responses, so public DNS availability is irrelevant to
+its command-ownership assertion. A causal control with only these two lookups fixed passed the
+unchanged file. Test-only commit `fc33bd87f` pins those exact names and restores the resolver in
+`finally`; other names still use the real resolver. Real curl processes, OS isolation, concurrency,
+ownership assertions and timeouts remain unchanged. The final uninstrumented whole-file run passed
+eight tests with one platform skip; sandbox types, lint, formatting and diff checks also passed.
+No production change or client rebuild was needed. The full suite was not rerun after this isolated
+fixture correction: this is full-run evidence plus a passing, causally justified focused correction,
+not a claim that one complete invocation was entirely green. Skipped cases remain unverified.
+
+## Remaining scope and usability limits
+
+This stage supports native macOS with an existing independent Node 22 or newer. It does not install
+arbitrary runtimes or dependencies, establish Windows/Linux parity, capture the full Codex chat,
+or implement project-specific live previews. Cross-device execution remains deferred. All Tuanzi
+acceptance here is bounded offline engineering with zero experimental provider calls and zero
+scientific trials; the disabled 3-versus-6 study has not run.
+
+The shared Host help can state method-specific required fields more clearly: the installed Agent
+initially omitted `sourceSessionId`, received a schema error, then selected the explicit source and
+continued. Source selection remains required; current reading focus is never an implicit authority.
+This is a help-copy follow-up, not permission to guess a source or relax admission.
 
 No upstream publication, formal client replacement, live-model scientific trial or public research
 release is included in this implementation authorization.
