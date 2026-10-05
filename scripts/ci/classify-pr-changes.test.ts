@@ -759,6 +759,7 @@ describe('pull request change classification', () => {
 
   it.each([
     'src/main/notebook/windows-shell.ts',
+    'src/shared/research-reproduction.ts',
     'src/shared/renderer-contract-catalog.ts',
     'src/shared/renderer-contracts/settings-preferences.ts'
   ])('adds Windows GUI consumers for Windows-sensitive source %s', (path) => {

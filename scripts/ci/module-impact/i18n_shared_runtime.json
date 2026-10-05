@@ -689,7 +689,10 @@
       "src/renderer/src/lib/acp/workspace-runtime-overflow-recovery-failures.test.ts",
       "src/renderer/src/pages/workspace/SessionHeaderMenu.test.tsx",
       "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts",
-      "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx"
+      "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx",
+      "src/main/notebook/local-service.macos.integration.test.ts",
+      "src/main/notebook/research-service.macos.integration.test.ts",
+      "src/main/session-package/research-reproduction.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

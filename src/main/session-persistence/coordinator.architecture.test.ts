@@ -1817,7 +1817,10 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/acp/approved-handoff-outcome.integration.test.ts',
       'src/main/acp/approved-handoff-outcome.test.ts',
       'src/renderer/src/pages/workspace/ConversationPanel.interaction.test.tsx',
-      'src/renderer/src/lib/acp/workspace-prompt-rollback-failure.test.ts'
+      'src/renderer/src/lib/acp/workspace-prompt-rollback-failure.test.ts',
+      'src/main/session-package/research-reproduction.integration.test.ts',
+      'src/main/notebook/research-service.macos.integration.test.ts',
+      'src/main/notebook/local-service.macos.integration.test.ts'
     ])
     expect(sessionPersistence.capabilityOverlays).toEqual([
       'windows_sensitive',

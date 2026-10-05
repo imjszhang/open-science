@@ -942,7 +942,10 @@ describe('User Skill repository architecture', () => {
           'src/main/session-persistence/attention-projection.test.ts',
           'src/main/acp/approved-handoff-outcome.integration.test.ts',
           'src/main/acp/approved-handoff-outcome.test.ts',
-          'src/main/agent-framework/claude-shared-settings.integration.test.ts'
+          'src/main/agent-framework/claude-shared-settings.integration.test.ts',
+          'src/main/session-package/research-reproduction.integration.test.ts',
+          'src/main/notebook/local-service.macos.integration.test.ts',
+          'src/main/notebook/research-service.macos.integration.test.ts'
         ]
       },
       capabilityOverlays: ['windows_sensitive', 'e2e_regressions', 'e2e_delegation'],
