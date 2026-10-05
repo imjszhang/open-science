@@ -66,6 +66,8 @@ type Acceptance = {
   title: string
   descriptorFilename: string
   planKey: string
+  // Older reviewed engineering fixtures predate this optional harness expectation.
+  planScope?: 'end-to-end' | 'downstream-only' | 'alternative-conditions' | 'engineering-check'
   command: string
   localServicePort?: number
   timeoutMs: number
@@ -101,7 +103,7 @@ async function client(
   service?: ManagedExecutionService
 ): Promise<import('../../../packages/open-science/index').OpenScienceClient> {
   const forbidModel = vi.fn(async (): Promise<never> => {
-    throw new Error('Engineering acceptance must not start another Agent or model.')
+    throw new Error('Research execution acceptance must not start another Agent or model.')
   })
   const tasks = new HeadlessTaskApi({
     commands: { commandNames: () => [], invoke: forbidModel },
@@ -189,7 +191,7 @@ async function publishMaterials(
     requestId: 'publish-reviewed-materials',
     requestFingerprint: sha(index.descriptionSha256),
     requestText:
-      'Publish the selected reviewed materials for an offline engineering study. No experiment has run.',
+      'Publish the selected reviewed research materials. Publication does not execute their research plan.',
     execute: async (context, signal) => {
       // A real copying command records exactly how these selected public input copies were published.
       // It does not fabricate a historical study, Notebook Run or producer assertion.
@@ -239,6 +241,13 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
     const acceptance = JSON.parse(
       await readFile(join(root, 'acceptance.json'), 'utf8')
     ) as Acceptance
+    const expectedPlanScope = acceptance.planScope ?? 'engineering-check'
+    expect([
+      'end-to-end',
+      'downstream-only',
+      'alternative-conditions',
+      'engineering-check'
+    ]).toContain(expectedPlanScope)
     const archive = await publishMaterials(root, output, acceptance)
     const evidence: unknown[] = []
     const sourcePackageSha256 = sha(await readFile(archive))
@@ -246,7 +255,14 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
       await writeFile(
         join(output, 'acceptance-results.json'),
         JSON.stringify(
-          { status, title: acceptance.title, sourcePackageSha256, entries: evidence },
+          {
+            status,
+            title: acceptance.title,
+            planKey: acceptance.planKey,
+            planScope: expectedPlanScope,
+            sourcePackageSha256,
+            entries: evidence
+          },
           null,
           2
         )
@@ -346,11 +362,11 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
         })) as ResearchMaterialInspection
         expect(inspected.status).toBe('ready')
         const plan = inspected.description!.plans.find((item) => item.key === acceptance.planKey)!
-        expect(plan.scope).toBe('engineering-check')
+        expect(plan.scope).toBe(expectedPlanScope)
         const available = await api.execution.runtimes()
         const prepared = await api.execution.prepare({
           ...target,
-          requestId: 'prepare-engineering',
+          requestId: 'prepare-research',
           sourceSessionId: imported.sessionId,
           sourceIdentity: inspected.source.identity,
           runtimeId: available.runtimes[0].runtimeId,
@@ -361,13 +377,13 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
         })
         const request = {
           ...target,
-          requestId: 'run-engineering',
+          requestId: 'run-research',
           environmentId: prepared.environmentId,
           command: acceptance.command,
           timeoutMs: acceptance.timeoutMs,
           localServicePort: acceptance.localServicePort,
           outputs: acceptance.outputs,
-          description: `Execute the ${acceptance.title} engineering plan in Open Science.`
+          description: `Execute the ${acceptance.title} plan in Open Science with scope ${expectedPlanScope}.`
         }
         const previousRuns = new Set(
           (
@@ -397,8 +413,9 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
                 ...target,
                 ownerExecutionId: context.operationId,
                 artifactRunId: h.artifactTurns.snapshot(handle).runId,
+                artifactStorageSessionId: target.sessionId,
                 workspaceCwd: context.workspaceCwd,
-                invocationId: 'engineering-call',
+                invocationId: 'research-execution-call',
                 provenanceContext: context.provenanceContext as ManagedExecutionProvenance,
                 signal,
                 assertActive: () => signal.throwIfAborted()
@@ -406,7 +423,7 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
               expect(result).toMatchObject({ status: 'completed' })
               nativeRunId = (result as { runId: string }).runId
               expect(typeof nativeRunId).toBe('string')
-              return { text: 'Engineering task completed in the existing turn.' }
+              return { text: 'Declared research task completed in the existing turn.' }
             }
           })
         }
@@ -448,7 +465,7 @@ it.skipIf(process.platform !== 'darwin' || !materialsRoot || !evidenceRoot)(
           if (artifact) await copyFile(artifact.path, join(resultRoot, selection.filename))
         }
         expect(done, JSON.stringify(done)).toMatchObject({ status: 'completed' })
-        if (!done) throw new Error('The admitted engineering operation disappeared.')
+        if (!done) throw new Error('The admitted research operation disappeared.')
         // The native port borrows a current turn; it does not write an external-operation ledger.
         // Both entries must instead prove their actual new Notebook Run and output provenance.
         expect(runs).toHaveLength(1)

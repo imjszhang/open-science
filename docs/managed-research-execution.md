@@ -155,6 +155,37 @@ prove product-wide integration or native behavior.
   signal or incomplete process-tree confirmation, so its cause is not claimed. The prior
   package-installer stop-confirmation case passed in this run. Final verification will use the
   repository's supported worker cap without changing test coverage, assertions or timeouts.
+- The complete current-source run at `947173326` subsequently passed 50,306 tests, with 847
+  skips (2,589 passing files and 59 skipped files). It used the supported four-worker setting and
+  unchanged assertions and timeouts. This is evidence for that source revision, before the
+  storage-alias and later recovery changes; skipped cases are not claimed as verified.
+- The installed external SDK acceptance (`installed-acceptance-20261005-restart-01`) completed
+  a fresh new-Project Tuanzi import, one bounded offline execution, publication of fourteen
+  declared outputs plus the collection receipt, result export and reimport, and environment
+  release. An independent read-only provenance audit verified source material identities,
+  output bytes and mapped producer Runs. The earlier interrupted publication also recovered
+  using its original Project and Session identities without creating a second source.
+- A real installed Main Agent then discovered the tools in an ordinary Session and executed
+  the offline driver, but output collection failed: the foreground Agent's Artifact storage
+  Session is a legitimate alias, while the new turn adapter incorrectly required it to equal
+  the application Session. Only a scope/failure report was published. This is a failed product
+  acceptance, even though the driver reported its engineering assertions passed. Releasing
+  that environment also exposed the need to retain uncollected output and retry collection
+  without rerunning the experiment. Synthetic current-turn tests had used identical storage
+  and application Session identities and therefore missed this integration boundary.
+- The storage alias now travels explicitly from the Main-owned Artifact turn through Local RPC
+  and the managed output writer. Public payloads cannot choose it, missing bindings are rejected,
+  and mismatched aliases still fail the original ownership checks. A real Owner/HTTP/Artifact
+  persistence regression verifies this boundary with a stubbed business execution; it is not
+  evidence of a completed installed Agent journey. The readonly-source copy now also explains
+  that ordinary conversations can use the materials and presents a working copy as optional.
+- A separate `managed-tabular-downstream-v2` fixture passed the three-entry native harness with
+  the explicit scope `downstream-only` (`acceptance-20261005-01`). Only public group summaries
+  are shared; the original-input plan requires withheld rows. The actual downstream calculation
+  produces group means 5 and 7 and difference 2 while reporting that the raw data, original
+  aggregation and original conclusion are unverified. All declared outputs and producer identity
+  round trips passed. This is arithmetic on synthetic CC0 materials, not evidence of an effect
+  or proof that a real Agent can explain the compromise without further client validation.
 
 ## Real-material acceptance
 
@@ -167,7 +198,7 @@ OPEN_SCIENCE_MANAGED_RESEARCH_OUTPUT=/absolute/new-evidence-directory \
 npm test -- src/main/notebook/managed-research-acceptance.macos.integration.test.ts
 ```
 
-The local preparation index and `acceptance.json` are inputs to this engineering harness, not
+The local preparation index and `acceptance.json` are inputs to this execution harness, not
 `.science` protocol entries. The harness verifies the material hashes and publishes selected
 material copies through a real copying Run. It exports the source package through the public SDK,
 imports it into fresh storage, uses the production material authority and native sandbox, and
@@ -175,6 +206,12 @@ executes the same engineering plan through external, ordinary-turn and actual fo
 SDK calls cross the actual authenticated loopback HTTP server and shared external adapter. It
 compares declared output checks, reimports the result archives, checks remapped producer Run IDs
 and verifies that environment release leaves the immutable outputs readable.
+
+An acceptance configuration can declare `planScope` to check the selected description's actual
+scope (`end-to-end`, `downstream-only`, `alternative-conditions`, or `engineering-check`). Historical
+fixtures without this field keep their engineering-only expectation. The harness must not relabel
+a downstream analysis as an engineering plan merely to pass admission. This expectation remains
+local test configuration and does not add a `.science` field.
 
 Project-specific drivers, analysis and fixed source snapshots remain outside Open Science core.
 They must declare their actual scope and keep private values out of outputs. A failed experiment
@@ -186,9 +223,10 @@ An independent Test build containing the publication fix was produced and instal
 `6dfbc510b136983a5f3fe9631403f26b36541e9d`. Build, signature and local maintenance checks passed.
 Installation alone does not establish startup recovery or Agent usability.
 
-Remaining release gates: final repository-wide required checks, installed-client import/recovery,
-external execution and ordinary/fork Agent journeys. Focused test results are evidence for their
-covered boundaries, not substitutes for these gates.
+Remaining release gates include the ordinary-Agent storage-alias fix and actual ordinary/fork
+journeys, uncollected-output retention and recovery, installed-client unavailable-material and
+lifecycle checks, the downstream-only compromise case, and required checks on the final source.
+The completed external journey does not substitute for these gates.
 
 No upstream publication, formal client replacement, live-model scientific trial or public research
 release is included in this implementation authorization.

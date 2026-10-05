@@ -435,6 +435,7 @@ type NotebookExecutionAuthorization = Readonly<{
 
 type ActiveArtifactTurnBinding = Readonly<{
   artifactRunId?: string
+  artifactStorageSessionId?: string
   ownerExecutionId: string
   projectId: string
   provenanceContext: NotebookRunProvenanceContext
@@ -2014,6 +2015,7 @@ class NotebookLocalRpcServer {
               sessionBinding.activeControlInvocation !== initialControlInvocation ||
               !initialControlLifetime ||
               !initialTurn?.artifactRunId ||
+              !initialTurn.artifactStorageSessionId ||
               !sessionBinding.executionCwd ||
               !sessionBinding.projectId ||
               sessionBinding.projectId !== initialTurn.projectId ||
@@ -2361,6 +2363,7 @@ class NotebookLocalRpcServer {
               sessionId: initialSessionId!,
               ownerExecutionId: initialTurn.ownerExecutionId,
               artifactRunId: initialTurn.artifactRunId!,
+              artifactStorageSessionId: initialTurn.artifactStorageSessionId!,
               workspaceCwd: initialSessionBinding.executionCwd!,
               invocationId: initialControlInvocation.toolInvocationId,
               provenanceContext: Object.freeze(

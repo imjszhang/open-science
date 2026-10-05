@@ -426,6 +426,7 @@ it('applies the same handoff fence to native Agent calls as to authenticated ext
     sessionId: scope.sessionId,
     ownerExecutionId: 'root',
     artifactRunId: 'artifacts',
+    artifactStorageSessionId: scope.sessionId,
     workspaceCwd: (await h.read(scope))!.cwd,
     invocationId: 'invocation',
     provenanceContext: {

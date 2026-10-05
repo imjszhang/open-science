@@ -2090,7 +2090,7 @@ const ConversationPanel = ({
                         </p>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
                           {t(
-                            'The original research is read-only. Discuss it alongside the replay, or create a copy to run experiments.'
+                            'The original record is read-only. Use its materials in a regular conversation to continue analysis or experiments, or create a working copy.'
                           )}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2103,7 +2103,7 @@ const ConversationPanel = ({
                               }}
                             >
                               <GitBranch className="size-4" aria-hidden="true" />
-                              {t('Fork to run experiments')}
+                              {t('Create a working copy')}
                             </Button>
                           ) : null}
                           <Button

@@ -3899,6 +3899,7 @@ gate('managed execution Host SDK bridge', () => {
       projectId: 'project',
       ownerExecutionId: 'execution',
       artifactRunId: 'artifact-run',
+      artifactStorageSessionId: 'artifact-storage-session',
       provenanceContext: {
         rootFrameId: 'root-frame-session',
         agentFrameId: 'root-frame-session',

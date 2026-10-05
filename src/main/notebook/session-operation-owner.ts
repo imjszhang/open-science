@@ -499,6 +499,7 @@ export class SessionOperationOwner {
           operationId: live.record.operationId,
           workspaceCwd: session.cwd,
           artifactRunId,
+          artifactStorageSessionId: session.id,
           writeNamespace: live.record.operationId,
           provenanceContext: provenance,
           messageAncestry

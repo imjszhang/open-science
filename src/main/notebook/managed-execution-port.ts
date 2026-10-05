@@ -47,6 +47,7 @@ export type ManagedExecutionTurnContext = Readonly<{
   sessionId: string
   ownerExecutionId: string
   artifactRunId: string
+  artifactStorageSessionId: string
   workspaceCwd: string
   invocationId: string
   provenanceContext: Readonly<ManagedExecutionProvenance>
@@ -134,6 +135,7 @@ export function createManagedExecutionTurnPort(dependencies: {
         operationId: turn.ownerExecutionId,
         workspaceCwd: turn.workspaceCwd,
         artifactRunId: turn.artifactRunId,
+        artifactStorageSessionId: turn.artifactStorageSessionId,
         writeNamespace: parsed.requestId,
         provenanceContext: turn.provenanceContext,
         messageAncestry: [turn.provenanceContext.promptMessageId]
@@ -182,7 +184,7 @@ export function createManagedExecutionTurnPort(dependencies: {
                   actual.executionId !== turn.ownerExecutionId ||
                   actual.projectId !== turn.projectId ||
                   actual.appSessionId !== turn.sessionId ||
-                  actual.artifactStorageSessionId !== turn.sessionId ||
+                  actual.artifactStorageSessionId !== turn.artifactStorageSessionId ||
                   actual.artifactRunId !== turn.artifactRunId ||
                   Object.entries(turn.provenanceContext).some(
                     ([key, value]) => actual[key as keyof ManagedExecutionProvenance] !== value

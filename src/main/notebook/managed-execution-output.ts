@@ -35,6 +35,7 @@ export type ManagedExecutionOutputScope = {
   operationId: string
   workspaceCwd: string
   artifactRunId: string
+  artifactStorageSessionId: string
   writeNamespace: string
   provenanceContext: ManagedExecutionProvenance
   messageAncestry: readonly string[]
@@ -157,7 +158,7 @@ export function createManagedExecutionOutputWriter(
         {
           projectId: scope.projectId,
           appSessionId: scope.sessionId,
-          artifactStorageSessionId: scope.sessionId,
+          artifactStorageSessionId: scope.artifactStorageSessionId,
           artifactRunId: scope.artifactRunId,
           writeOperationId: `operation-write-${writeIdentity}`,
           ...scope.provenanceContext,

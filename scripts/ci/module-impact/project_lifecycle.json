@@ -159,6 +159,7 @@
       "src/main/managed-file-versions/service.integration.test.ts",
       "src/main/memory/service.test.ts",
       "src/main/notebook/input-registry.test.ts",
+      "src/main/notebook/local-rpc-server.managed-execution.test.ts",
       "src/main/notebook/local-rpc-server.test.ts",
       "src/main/notifications/notification-inbox-repository.test.ts",
       "src/main/office-preview/office-preview-ipc-lifecycle.test.ts",

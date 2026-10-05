@@ -144,6 +144,7 @@ it.skipIf(process.platform === 'win32').each(['external', 'ordinary', 'fork'])(
             sessionId: scope.sessionId,
             ownerExecutionId: context.operationId,
             artifactRunId,
+            artifactStorageSessionId: scope.sessionId,
             workspaceCwd: context.workspaceCwd,
             invocationId: 'native-call',
             provenanceContext: context.provenanceContext as ManagedExecutionProvenance,

@@ -152,6 +152,7 @@ type ArtifactTurnOwnerOptions = {
       binding: {
         ownerExecutionId: string
         artifactRunId?: string
+        artifactStorageSessionId: string
         projectId: string
         provenanceContext: {
           rootFrameId: string
@@ -278,6 +279,7 @@ class ArtifactTurnOwner {
           this.options.notebook?.setArtifactTurnBinding?.(turn.appSessionId, {
             ownerExecutionId: turn.executionId,
             artifactRunId: turn.runId,
+            artifactStorageSessionId: turn.artifactStorageSessionId,
             projectId: turn.projectId,
             provenanceContext: {
               rootFrameId: turn.rootFrameId,

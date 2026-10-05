@@ -472,6 +472,7 @@ it('reports unsupported native services separately from available Node and prese
             ...scope,
             ownerExecutionId: 'operation',
             artifactRunId: 'artifact-run',
+            artifactStorageSessionId: scope.sessionId,
             workspaceCwd: h.root,
             invocationId: 'invocation',
             provenanceContext: provenance,

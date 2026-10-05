@@ -662,6 +662,7 @@ it.skipIf(process.platform === 'win32').each(['ordinary', 'fork'])(
           ...scope,
           ownerExecutionId: outer.operationId,
           artifactRunId,
+          artifactStorageSessionId: scope.sessionId,
           workspaceCwd: outer.workspaceCwd,
           invocationId: 'single-repl-call',
           provenanceContext,
