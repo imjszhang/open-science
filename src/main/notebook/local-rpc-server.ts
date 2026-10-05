@@ -1488,10 +1488,22 @@ class NotebookLocalRpcServer {
     const connection = await this.ensureStarted()
     const token = randomUUID()
     const resolvedSessionId = this.sessionAliases.get(sessionId) ?? sessionId
-    const resolvedAgentFrameId =
+    let resolvedAgentFrameId =
       resolvedSessionId !== sessionId && agentFrameId === `root-frame-${sessionId}`
         ? `root-frame-${resolvedSessionId}`
         : agentFrameId
+    const activeTurn = this.activeArtifactTurnBindings.get(resolvedSessionId)
+    // A Notebook state read can create the root aggregate before a restored Session's turn.
+    // Its first REPL capability is issued later, so adopt only that exact root placeholder from
+    // the same Project's active Main turn; explicit Frames and delegates keep their own authority.
+    if (
+      delegatedWorkIdentity.role === 'main' &&
+      resolvedAgentFrameId === `root-frame-${resolvedSessionId}` &&
+      activeTurn?.projectId === projectId &&
+      activeTurn.provenanceContext.agentFrameId === activeTurn.provenanceContext.rootFrameId
+    ) {
+      resolvedAgentFrameId = activeTurn.provenanceContext.agentFrameId
+    }
     const binding: NotebookRpcSessionBinding = {
       sessionId: resolvedSessionId,
       projectId,

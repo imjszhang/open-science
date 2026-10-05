@@ -1107,7 +1107,8 @@ describe('Settings backend ownership architecture', () => {
       'src/main/composition/managed-execution.integration.test.ts',
       'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
       'src/main/composition/session-packages.test.ts',
-      'src/main/composition/handoff.test.ts'
+      'src/main/composition/handoff.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts'
     ])
     expect(manifest.modules.settings_backend_resolution.testFiles.consumer).toEqual([
       'src/main/storage/wsl-npm-migration.integration.test.ts',
@@ -1568,7 +1569,11 @@ describe('Settings backend ownership architecture', () => {
       'src/main/session-package/headless.test.ts',
       'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
       'src/main/composition/handoff.test.ts',
-      'src/main/composition/session-packages.test.ts'
+      'src/main/composition/session-packages.test.ts',
+      'src/main/notebook/managed-nested-generation.integration.test.ts',
+      'src/main/notebook/managed-execution-collection.integration.test.ts',
+      'src/main/notebook/managed-output-publication.integration.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts'
     ])
     expect(
       [

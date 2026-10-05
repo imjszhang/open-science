@@ -47,7 +47,7 @@ afterEach(async () => {
   }
 })
 
-async function producerFixture(): Promise<{
+async function producerFixture(restoredRoot = false): Promise<{
   fixture: Awaited<ReturnType<typeof createProvenanceTestFixture>>
   repository: ArtifactProvenanceRepository
   inputAuthority: ImmutableInputAuthority
@@ -90,6 +90,18 @@ async function producerFixture(): Promise<{
     createdAt: 1,
     updatedAt: 2
   })
+  if (restoredRoot) {
+    const rootFrameId = '77e08941-e525-4f61-bc31-c54db2f4b80a'
+    conversationGraph.rootFrameId = rootFrameId
+    conversationGraph.activeFrameId = rootFrameId
+    conversationGraph.frames[0].id = rootFrameId
+    for (const item of [
+      ...conversationGraph.messages,
+      ...conversationGraph.branches,
+      ...conversationGraph.runtimeSegments
+    ])
+      item.agentFrameId = rootFrameId
+  }
   const session: PersistedChatSession = {
     id: 'session-1',
     projectId: 'project-1',
@@ -143,7 +155,7 @@ async function producerFixture(): Promise<{
   const connection = await server.issueControlConnection(
     'session-1',
     'project-1',
-    provenanceContext.agentFrameId
+    restoredRoot ? 'root-frame-session-1' : provenanceContext.agentFrameId
   )
   const invocation = {
     rootExecutionId: 'execution-1',
@@ -179,26 +191,29 @@ async function producerFixture(): Promise<{
 }
 
 describe('artifactsCall RPC', () => {
-  it('reads the exact current-turn pending bytes without publishing them into the Project catalog', async () => {
-    const { fixture, version, connection } = await producerFixture()
-    const params = { op: 'path', version_id: version.versionId }
-    const resolved = await callArtifacts(connection, connection.token, params)
-    expect(resolved.response.status, JSON.stringify(resolved.payload)).toBe(200)
-    const bytes = await readFile(resolved.payload.result as string)
-    expect(createHash('sha256').update(bytes).digest('hex')).toBe(version.checksum)
-    expect(
-      await callArtifacts(connection, connection.token, { op: 'list', options: {} })
-    ).toMatchObject({
-      payload: { result: { count: 0, artifacts: [] } }
-    })
-    expect(
-      await fixture.client.artifactVersion.findUnique({ where: { id: version.versionId } })
-    ).toMatchObject({
-      state: 'pending',
-      messageId: null,
-      managedVisibleAt: null
-    })
-  })
+  it.each([false, true])(
+    'reads current-turn pending bytes with restored root %s without publishing them into the Project catalog',
+    async (restoredRoot) => {
+      const { fixture, version, connection } = await producerFixture(restoredRoot)
+      const params = { op: 'path', version_id: version.versionId }
+      const resolved = await callArtifacts(connection, connection.token, params)
+      expect(resolved.response.status, JSON.stringify(resolved.payload)).toBe(200)
+      const bytes = await readFile(resolved.payload.result as string)
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(version.checksum)
+      expect(
+        await callArtifacts(connection, connection.token, { op: 'list', options: {} })
+      ).toMatchObject({
+        payload: { result: { count: 0, artifacts: [] } }
+      })
+      expect(
+        await fixture.client.artifactVersion.findUnique({ where: { id: version.versionId } })
+      ).toMatchObject({
+        state: 'pending',
+        messageId: null,
+        managedVisibleAt: null
+      })
+    }
+  )
 
   it.each(['session', 'project', 'root', 'frame', 'branch', 'segment', 'prompt', 'run'] as const)(
     'rejects a pending Version belonging to another %s despite forged producer fields',

@@ -12,6 +12,7 @@ import {
   type ManagedExecutionTurnContext
 } from './managed-execution-port'
 import { NotebookLocalRpcServer } from './local-rpc-server'
+import { NotebookRuntimeService } from './runtime-service'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -110,6 +111,153 @@ it.each(['ordinary', 'fork'])(
     end()
     expect(captured.signal.aborted).toBe(true)
     expect(() => captured.assertActive()).toThrow()
+    connection.release()
+  }
+)
+
+it('binds the first control invocation to a restored root after an earlier Notebook state read', async () => {
+  const fixture = await createProvenanceTestFixture()
+  cleanups.push(fixture.dispose)
+  const sessionId = 'fork-session'
+  const projectId = 'fork-project'
+  const rootFrameId = '77e08941-e525-4f61-bc31-c54db2f4b80a'
+  const restoredProvenance = { ...provenance, rootFrameId, agentFrameId: rootFrameId }
+  const workspaceCwd = join(fixture.storageRoot, 'workspace')
+  await mkdir(workspaceCwd)
+  await fixture.client.project.create({ data: { id: projectId, name: 'Restored root routing' } })
+  const call = vi.fn<ManagedExecutionPort['call']>(async (_method, _payload, context) => {
+    context.assertActive()
+    return { status: 'ready' }
+  })
+  const responses: Array<Awaited<ReturnType<typeof send>>> = []
+  const runtime = new NotebookRuntimeService({
+    configRoot: fixture.storageRoot,
+    dataRoot: fixture.storageRoot,
+    projectId,
+    repository: fixture.notebookRepository,
+    executorFactory: () => ({
+      execute: async (request) => {
+        responses.push(
+          await send(
+            { endpoint: request.mcpRpcEndpoint!, token: request.mcpRpcToken! },
+            { method: 'inspectMaterials', payload: { sourceSessionId: 'imported-research' } }
+          )
+        )
+        return {
+          status: 'completed',
+          stdout: '',
+          stderr: '',
+          traceback: '',
+          cwdAfter: request.cwd,
+          outputs: []
+        }
+      },
+      shutdown: async () => ({ reaped: true })
+    })
+  })
+  const server = new NotebookLocalRpcServer(runtime, {
+    transport: 'tcp',
+    managedExecution: { call }
+  })
+  servers.push(server)
+  cleanups.push(async () => {
+    await runtime.shutdownAll()
+  })
+  const resolver = vi.fn<Parameters<NotebookRuntimeService['setMcpRpcConnectionResolver']>[0]>(
+    ({ sessionId, projectId, agentFrameId, executionCwd }) =>
+      server.issueControlConnection(
+        sessionId,
+        projectId,
+        agentFrameId,
+        { role: 'main' },
+        executionCwd
+      )
+  )
+  runtime.setMcpRpcConnectionResolver(resolver)
+  // Opening the Notebook before the Agent turn creates its one root aggregate with the default
+  // Frame placeholder. Its persistent REPL capability is only issued during the first execution.
+  await runtime.state({ projectId, sessionId, workspaceCwd })
+  expect(resolver).not.toHaveBeenCalled()
+  const owner = new ArtifactTurnOwner({
+    dataRoot: fixture.storageRoot,
+    repository: fixture.compatibilityRepository,
+    runRegistry: new ArtifactRunRegistry(),
+    provenance: fixture.repository,
+    notebookArtifactSourceScope: createNotebookArtifactSourceScopeProvider(fixture.storageRoot),
+    notebook: {
+      setArtifactTurnBinding: (id, turn) => server.setArtifactTurnBinding(id, turn),
+      clearArtifactTurnBinding: (id, executionId) =>
+        server.clearArtifactTurnBinding(id, executionId)
+    }
+  })
+  const handle = await owner.openRootExecution({
+    executionId: invocation.rootExecutionId,
+    projectId,
+    appSessionId: sessionId,
+    artifactStorageSessionId: 'fork-artifact-storage',
+    workspaceCwd,
+    agentName: 'Restored root fixture',
+    provenanceContext: restoredProvenance
+  })
+  cleanups.push(() => owner.dispose(handle))
+  await runtime.executeControl({
+    projectId,
+    sessionId,
+    workspaceCwd,
+    rootExecutionId: invocation.rootExecutionId,
+    provenanceContext: restoredProvenance,
+    code: 'await host.managedExecution.inspectMaterials({sourceSessionId: "imported-research"})'
+  })
+  expect(resolver).toHaveBeenCalledTimes(1)
+  expect(resolver).toHaveBeenCalledWith(
+    expect.objectContaining({ projectId, sessionId, agentFrameId: `root-frame-${sessionId}` })
+  )
+  expect(responses).toEqual([{ status: 200, body: { result: { status: 'ready' } } }])
+  expect(call).toHaveBeenCalledTimes(1)
+  expect(call).toHaveBeenCalledWith(
+    'inspectMaterials',
+    { sourceSessionId: 'imported-research' },
+    expect.objectContaining({
+      projectId,
+      sessionId,
+      artifactRunId: owner.snapshot(handle).runId,
+      provenanceContext: restoredProvenance
+    })
+  )
+  const runs = await fixture.notebookRepository.readSessionRuns(projectId, sessionId)
+  expect(runs).toHaveLength(1)
+  expect(runs[0]).toMatchObject(restoredProvenance)
+})
+
+it.each(['project', 'session', 'explicit-frame', 'delegate', 'child-turn', 'background'] as const)(
+  'does not lend a restored root to a late control capability with mismatched %s authority',
+  async (mode) => {
+    const call = vi.fn(async () => ({}))
+    const server = serverFor(call)
+    const rootFrameId = 'restored-root'
+    server.setArtifactTurnBinding('session', {
+      ...binding,
+      provenanceContext: {
+        ...provenance,
+        rootFrameId,
+        agentFrameId: mode === 'child-turn' ? 'restored-child' : rootFrameId
+      }
+    })
+    const sessionId = mode === 'session' ? 'other-session' : 'session'
+    const connection = await server.issueControlConnection(
+      sessionId,
+      mode === 'project' ? 'other-project' : 'project',
+      mode === 'explicit-frame' ? 'foreign-root' : `root-frame-${sessionId}`,
+      mode === 'delegate' ? { role: 'delegate', attemptId: 'attempt' } : { role: 'main' },
+      '/workspace'
+    )
+    const end = connection.beginControlInvocation({
+      ...invocation,
+      executionMode: mode === 'background' ? 'background' : 'foreground'
+    })
+    expect((await send(connection)).status).toBe(mode === 'background' ? 409 : 403)
+    expect(call).not.toHaveBeenCalled()
+    end()
     connection.release()
   }
 )
