@@ -1,4 +1,5 @@
 import type { SetResearchMembershipRequest } from '../../shared/session-replay'
+import type { SessionPackagePublication } from '../storage/session-package-state'
 import { assertLiteratureAttachmentsUnreferenced } from './literature-attachment-removal'
 import { ProjectFilesReconciliationError } from '../project-files/repository'
 import type { ProjectFileSource, ProjectFilesChangedEvent } from '../../shared/project-files'
@@ -124,7 +125,11 @@ type SessionMutationRepository = {
   loadSessionWithDiagnostics(
     projectId: string,
     sessionId: string,
-    options?: { mode?: 'repair' | 'read-only'; preserveRuntimeState?: boolean }
+    options?: {
+      mode?: 'repair' | 'read-only'
+      preserveRuntimeState?: boolean
+      packagePublication?: SessionPackagePublication
+    }
   ): Promise<
     | { status: 'found'; session: PersistedChatSession }
     | { status: 'missing' }
@@ -503,10 +508,17 @@ class SessionPersistenceCoordinator implements DelegatedWorkRecordCommands {
 
   // Package publication commits through its own recovery journal. Adopt only durable authority
   // into this live catalog before the new Session is exposed to runtime admission or renderers.
-  adoptPublishedSession(projectId: string, sessionId: string): Promise<void> {
+  adoptPublishedSession(
+    projectId: string,
+    sessionId: string,
+    publication?: SessionPackagePublication
+  ): Promise<void> {
     return this.operationScheduler.runSession(projectId, sessionId, async () => {
       this.assertMutable(projectId, sessionId, 'mutate')
-      const loaded = await this.repository.loadSessionWithDiagnostics(projectId, sessionId)
+      const loaded = await this.repository.loadSessionWithDiagnostics(projectId, sessionId, {
+        mode: 'read-only',
+        ...(publication ? { packagePublication: publication } : {})
+      })
       if (loaded.status !== 'found') {
         throw new Error(`Cannot adopt a published ${loaded.status} Session.`)
       }

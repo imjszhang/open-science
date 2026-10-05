@@ -36,6 +36,7 @@ import {
   type PersistedChatSession
 } from '../../shared/session-persistence'
 import { preserveImportedSession } from '../session-persistence/imported-session'
+import type { SessionPackagePublication } from '../storage/session-package-state'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -627,6 +628,288 @@ it('retains committed identity when live catalog adoption fails and recovers wit
   await service.close()
   await original.close()
 })
+
+it.each(['new-project', 'existing-project', 'adoption-recovery'] as const)(
+  'adopts a committed import with live persistence while retaining its visibility fence (%s)',
+  async (scenario) => {
+    const { fixture, service: exporter } = await setup()
+    const archive = join(fixture.storageRoot, 'publication.science')
+    await exporter.exportTo({ projectId: 'project-1', sessionId: 'session-1' }, archive)
+    const configRoot = join(fixture.storageRoot, 'receiver-config')
+    const getClient = async (): Promise<typeof fixture.client> => fixture.client
+    const repository = new SessionRepository(
+      configRoot,
+      {},
+      new SessionProjectionRepository(getClient)
+    )
+    const files = new ManagedFileIndexRepository(
+      getClient,
+      fixture.storageRoot,
+      new ManagedFileVersionService({ storageRoot: fixture.storageRoot, getClient }),
+      new UploadRepository(fixture.storageRoot, { getClient })
+    )
+    const persistence = new SessionPersistenceCoordinator(repository, files)
+    await persistence.loadAll()
+    let failAdoption = scenario === 'adoption-recovery'
+    const publications: SessionPackagePublication[] = []
+    const identities: Array<{ projectId: string; sessionId: string }> = []
+    const importer = new SessionPackageService({
+      configRoot,
+      storageRoot: fixture.storageRoot,
+      getClient,
+      onSessionPublished: async (identity, publication) => {
+        identities.push({ projectId: identity.projectId, sessionId: identity.sessionId })
+        publications.push(publication)
+        const imported = await repository.loadSessionWithDiagnostics(
+          identity.projectId,
+          identity.sessionId,
+          {
+            mode: 'read-only',
+            packagePublication: publication
+          }
+        )
+        expect(imported.status).toBe('found')
+        if (imported.status !== 'found') throw new Error('Published Session is unavailable')
+        const operation = imported.session.packageOrigin!.importId
+        expect(await stat(join(configRoot, 'session-package-imports', operation))).toBeDefined()
+        expect(
+          await fixture.client.fileOriginSession.findUnique({
+            where: {
+              projectId_sessionId: { projectId: identity.projectId, sessionId: identity.sessionId }
+            }
+          })
+        ).not.toBeNull()
+        if (scenario !== 'existing-project') {
+          expect(
+            await repository.loadSessionWithDiagnostics(identity.projectId, identity.sessionId)
+          ).toEqual({ status: 'missing' })
+          expect((await repository.loadAll()).sessions).toEqual([])
+          await expect(
+            persistence.adoptPublishedSession(identity.projectId, identity.sessionId)
+          ).rejects.toThrow('published missing Session')
+        }
+        await expect(
+          repository.loadSessionWithDiagnostics(identity.projectId, 'unrelated', {
+            packagePublication: publication
+          })
+        ).rejects.toThrow('belongs to another Session')
+        await expect(
+          repository.loadSessionWithDiagnostics('unrelated', identity.sessionId, {
+            packagePublication: publication
+          })
+        ).rejects.toThrow('belongs to another Session')
+        await expect(
+          repository.loadSessionWithDiagnostics(identity.projectId, identity.sessionId, {
+            packagePublication: {} as SessionPackagePublication
+          })
+        ).rejects.toThrow('authority is unavailable')
+        if (failAdoption) throw new Error('Live catalog temporarily unavailable')
+        await persistence.adoptPublishedSession(identity.projectId, identity.sessionId, publication)
+        expect(await persistence.sessionProjectId(identity.sessionId)).toBe(identity.projectId)
+      }
+    })
+    try {
+      const pending = importer.importFrom(
+        archive,
+        undefined,
+        undefined,
+        undefined,
+        scenario === 'existing-project' ? { projectId: 'project-1' } : {}
+      )
+      if (scenario === 'adoption-recovery') {
+        await expect(pending).rejects.toThrow('Live catalog temporarily unavailable')
+        const first = identities[0]
+        expect((await persistence.sessionMetadataSnapshot()).sessions).toEqual([])
+        expect(
+          await repository.loadSessionWithDiagnostics(first.projectId, first.sessionId)
+        ).toEqual({ status: 'missing' })
+        await expect(
+          repository.loadSessionWithDiagnostics(first.projectId, first.sessionId, {
+            packagePublication: publications[0]
+          })
+        ).rejects.toThrow('authority is unavailable')
+        failAdoption = false
+        await importer.recover()
+        expect(identities).toEqual([first, first])
+        expect(publications[1]).not.toBe(publications[0])
+      } else {
+        expect(await pending).toEqual(identities[0])
+      }
+      const imported = identities.at(-1)!
+      expect(await persistence.sessionProjectId(imported.sessionId)).toBe(imported.projectId)
+      expect(
+        await repository.loadSessionWithDiagnostics(imported.projectId, imported.sessionId)
+      ).toMatchObject({
+        status: 'found',
+        session: { projectId: imported.projectId, id: imported.sessionId }
+      })
+      await expect(
+        repository.loadSessionWithDiagnostics(imported.projectId, imported.sessionId, {
+          packagePublication: publications.at(-1)!
+        })
+      ).rejects.toThrow('authority is unavailable')
+      expect(await fileSystem.readdir(join(configRoot, 'session-package-imports'))).toEqual([])
+      expect(
+        await fixture.client.session.count({
+          where: { projectId: imported.projectId, id: imported.sessionId }
+        })
+      ).toBe(1)
+      await importer.recover()
+      expect(identities).toHaveLength(scenario === 'adoption-recovery' ? 2 : 1)
+    } finally {
+      await importer.close()
+      await exporter.close()
+    }
+  }
+)
+
+it.each(['missing-witness', 'mismatched-receipt'] as const)(
+  'retains a committed import behind its fence until publication evidence is repaired (%s)',
+  async (fault) => {
+    const { fixture, repository: sourceRepository, service: exporter } = await setup()
+    await sourceRepository.saveSession({
+      id: 'empty-source',
+      projectId: 'project-1',
+      title: 'Empty source',
+      cwd: '',
+      status: 'idle',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1
+    })
+    const archive = join(fixture.storageRoot, 'empty-publication.science')
+    await exporter.exportTo({ projectId: 'project-1', sessionId: 'empty-source' }, archive)
+    const configRoot = join(fixture.storageRoot, 'receiver-config')
+    const getClient = async (): Promise<typeof fixture.client> => fixture.client
+    const repository = new SessionRepository(
+      configRoot,
+      {},
+      new SessionProjectionRepository(getClient)
+    )
+    const files = new ManagedFileIndexRepository(
+      getClient,
+      fixture.storageRoot,
+      new ManagedFileVersionService({ storageRoot: fixture.storageRoot, getClient }),
+      new UploadRepository(fixture.storageRoot, { getClient })
+    )
+    const persistence = new SessionPersistenceCoordinator(repository, files)
+    await persistence.loadAll()
+    const onSessionPublished = vi.fn(
+      async (
+        identity: { projectId: string; sessionId: string },
+        publication: SessionPackagePublication
+      ) => {
+        expect(
+          await repository.loadSessionWithDiagnostics(identity.projectId, identity.sessionId)
+        ).toEqual({ status: 'missing' })
+        await persistence.adoptPublishedSession(identity.projectId, identity.sessionId, publication)
+      }
+    )
+    const importer = new SessionPackageService({
+      configRoot,
+      storageRoot: fixture.storageRoot,
+      getClient,
+      onSessionPublished
+    })
+    let witness:
+      Awaited<ReturnType<typeof fixture.client.fileOriginSession.findFirstOrThrow>> | undefined
+    let receiptPath = ''
+    let receiptBytes = ''
+    const transaction = fixture.client.$transaction.bind(fixture.client)
+    vi.spyOn(fixture.client, '$transaction').mockImplementationOnce(async (...args) => {
+      // The native transaction genuinely completes before evidence is removed or corrupted.
+      // Injecting inside an INSERT would instead make Prisma roll back before publication.
+      const result = await Reflect.apply(transaction, fixture.client, args)
+      witness = await fixture.client.fileOriginSession.findFirstOrThrow({
+        where: { projectId: { startsWith: 'import-' } }
+      })
+      expect(
+        await fixture.client.project.findUnique({ where: { id: witness.projectId } })
+      ).not.toBeNull()
+      receiptPath = join(
+        fixture.storageRoot,
+        'artifacts',
+        witness.projectId,
+        witness.sessionId,
+        '.session-package',
+        'receipt.json'
+      )
+      receiptBytes = await readFile(receiptPath, 'utf8')
+      if (fault === 'missing-witness') {
+        await fixture.client.fileOriginSession.delete({
+          where: {
+            projectId_sessionId: { projectId: witness.projectId, sessionId: witness.sessionId }
+          }
+        })
+      } else {
+        const receipt = JSON.parse(receiptBytes)
+        receipt.importId = '00000000-0000-0000-0000-000000000000'
+        await writeFile(receiptPath, JSON.stringify(receipt))
+      }
+      return result
+    })
+    try {
+      await expect(importer.importFrom(archive)).rejects.toThrow('no matching committed receipt')
+      expect(witness).toBeDefined()
+      const identity = { projectId: witness!.projectId, sessionId: witness!.sessionId }
+      const operation = identity.projectId.slice('import-'.length)
+      expect(onSessionPublished).not.toHaveBeenCalled()
+      expect((await persistence.sessionMetadataSnapshot()).sessions).toEqual([])
+      expect((await repository.loadAll()).sessions).toEqual([])
+      expect(
+        await repository.loadSessionWithDiagnostics(identity.projectId, identity.sessionId)
+      ).toEqual({ status: 'missing' })
+      expect(await fileSystem.readdir(join(configRoot, 'session-package-imports'))).toEqual([
+        operation
+      ])
+      expect(await fixture.client.session.count({ where: { projectId: identity.projectId } })).toBe(
+        0
+      )
+      if (fault === 'missing-witness') {
+        expect(
+          await fixture.client.fileOriginSession.findUnique({
+            where: { projectId_sessionId: identity }
+          })
+        ).toBeNull()
+        await fixture.client.fileOriginSession.create({ data: witness! })
+      } else {
+        expect(
+          await fixture.client.fileOriginSession.findUnique({
+            where: { projectId_sessionId: identity }
+          })
+        ).not.toBeNull()
+        await expect(importer.recover()).rejects.toThrow('no matching committed receipt')
+        expect(onSessionPublished).not.toHaveBeenCalled()
+        expect(await fileSystem.readdir(join(configRoot, 'session-package-imports'))).toEqual([
+          operation
+        ])
+        await writeFile(receiptPath, receiptBytes)
+      }
+      await importer.recover()
+      expect(onSessionPublished).toHaveBeenCalledTimes(1)
+      expect(onSessionPublished.mock.calls[0][0]).toMatchObject(identity)
+      expect(await persistence.sessionProjectId(identity.sessionId)).toBe(identity.projectId)
+      expect(
+        await repository.loadSessionWithDiagnostics(identity.projectId, identity.sessionId)
+      ).toMatchObject({
+        status: 'found',
+        session: { id: identity.sessionId, projectId: identity.projectId }
+      })
+      expect(await fixture.client.session.count({ where: { projectId: identity.projectId } })).toBe(
+        1
+      )
+      expect(await fixture.client.project.count({ where: { id: { startsWith: 'import-' } } })).toBe(
+        1
+      )
+      expect(await fileSystem.readdir(join(configRoot, 'session-package-imports'))).toEqual([])
+      await importer.recover()
+      expect(onSessionPublished).toHaveBeenCalledTimes(1)
+    } finally {
+      await importer.close()
+      await exporter.close()
+    }
+  }
+)
 
 it('copies writable file versions, file bookmarks and historical Plan references without sharing source edits', async () => {
   const { fixture, repository, service } = await setup()
