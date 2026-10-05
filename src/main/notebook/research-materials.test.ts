@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   inspectResearchMaterials,
   prepareResearchMaterials,
+  ResearchMaterialUnavailableError,
   type ResearchMaterialAuthority,
   type ResearchMaterialVersion
 } from './research-materials'
@@ -186,6 +187,81 @@ describe('research material discovery', () => {
 })
 
 describe('verified preparation into caller-owned staging', () => {
+  it.each(['missing', 'withheld', 'external', 'mismatch'] as const)(
+    'reports the diagnosed %s material as unavailable before reading or restoring it',
+    async (reason) => {
+      const payload = Buffer.from('original')
+      const declared = JSON.parse(description(payload).toString('utf8'))
+      if (reason === 'withheld' || reason === 'external')
+        declared.materials = [
+          {
+            key: 'source',
+            role: 'source',
+            availability: reason,
+            description: '/private/research/secret'
+          }
+        ]
+      const authority = withDescription(payload, Buffer.from(JSON.stringify(declared)))
+      if (reason === 'missing')
+        authority.versions = authority.versions.filter((version) => version.versionId !== 'data')
+      if (reason === 'mismatch')
+        authority.versions = authority.versions.map((version) =>
+          version.versionId === 'data' ? { ...version, sha256: 'a'.repeat(64) } : version
+        )
+      const path = await staging()
+      const error = await prepareResearchMaterials(authority, {
+        stagingDirectory: path,
+        descriptorVersionId: 'descriptor',
+        materialKeys: ['source']
+      }).catch((cause: unknown) => cause)
+      expect(error).toBeInstanceOf(ResearchMaterialUnavailableError)
+      expect(error).toMatchObject({ reason })
+      expect((error as Error).message).not.toContain('/private/')
+      expect(vi.mocked(authority.readVersion).mock.calls.map(([id]) => id)).toEqual(['descriptor'])
+      expect(await readdir(path)).toEqual([])
+    }
+  )
+
+  it('reports a selected legacy Version whose catalogue content is unavailable without reading it', async () => {
+    const authority = fixture({ data: { filename: 'data', content: Buffer.from('data') } })
+    authority.versions = authority.versions.map((version) => ({
+      ...version,
+      contentAvailable: false
+    }))
+    const path = await staging()
+    await expect(
+      prepareResearchMaterials(authority, {
+        stagingDirectory: path,
+        files: [{ versionId: 'data', restorePath: 'data' }]
+      })
+    ).rejects.toMatchObject({ name: 'ResearchMaterialUnavailableError', reason: 'missing' })
+    expect(authority.readVersion).not.toHaveBeenCalled()
+    expect(await readdir(path)).toEqual([])
+  })
+
+  it('does not classify unknown keys or read failures as diagnosed material availability', async () => {
+    const authority = withDescription(Buffer.from('data'))
+    const path = await staging()
+    const unknown = await prepareResearchMaterials(authority, {
+      stagingDirectory: path,
+      descriptorVersionId: 'descriptor',
+      materialKeys: ['unknown']
+    }).catch((cause: unknown) => cause)
+    expect(unknown).toBeInstanceOf(Error)
+    expect(unknown).not.toBeInstanceOf(ResearchMaterialUnavailableError)
+    const failure = new Error('ENOENT missing /private/research/secret')
+    authority.readVersion = vi.fn(async () => {
+      throw failure
+    })
+    await expect(
+      prepareResearchMaterials(authority, {
+        stagingDirectory: path,
+        files: [{ versionId: 'data', restorePath: 'data' }]
+      })
+    ).rejects.toBe(failure)
+    expect(await readdir(path)).toEqual([])
+  })
+
   it('prepares an explicit legacy file verbatim with immutable provenance inputs', async () => {
     const data = Buffer.from('plain file, not executable instructions')
     const authority = fixture({ data: { filename: 'data.csv', content: data } })

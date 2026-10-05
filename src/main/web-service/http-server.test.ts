@@ -24,6 +24,10 @@ vi.mock('electron', () => ({
 
 import { WEB_INVOKE_CHANNELS } from '../../shared/web-api-map.generated'
 import { ApplicationCommandError } from '../../shared/application-command-contract'
+import {
+  prepareManagedEnvironmentRequestSchema,
+  type PrepareManagedEnvironmentRequest
+} from '../../shared/managed-execution'
 import { TASK_EVENT_STREAM_PROTOCOL_VERSION } from '../../shared/task-api'
 import {
   isWebRpcChannel,
@@ -33,6 +37,15 @@ import {
 } from '../../shared/web-rpc-contract'
 import { ApplicationEventHub } from '../application-events'
 import type { CallerContext } from '../caller-context'
+import {
+  createManagedExecutionExternalPort,
+  type ManagedExecutionExternalMethod
+} from '../managed-execution-external-port'
+import {
+  prepareResearchMaterials,
+  ResearchMaterialUnavailableError,
+  type ResearchMaterialAuthority
+} from '../notebook/research-materials'
 import { createLogger, flushLogs, initLogger } from '../logger'
 import { PermissionApprovalPresence } from '../permission-approval-presence'
 import {
@@ -5080,6 +5093,207 @@ describe('managed execution HTTP API', () => {
       },
       body: JSON.stringify(body)
     })
+
+  const materialRequest = (
+    materials: PrepareManagedEnvironmentRequest['materials']
+  ): PrepareManagedEnvironmentRequest =>
+    prepareManagedEnvironmentRequestSchema.parse({
+      projectId: 'project',
+      sessionId: 'discussion',
+      requestId: 'prepare-materials',
+      sourceSessionId: 'research',
+      sourceIdentity: 'source',
+      runtimeId: 'b'.repeat(64),
+      materials
+    })
+  const materialClient = async (
+    prepare: (request: PrepareManagedEnvironmentRequest) => Promise<unknown>
+  ): Promise<OpenScienceClient> => {
+    const { base, call, contexts } = await setup()
+    const adapter = createManagedExecutionExternalPort({
+      service: {
+        runtimes: vi.fn(),
+        createSession: vi.fn(),
+        inspectMaterials: vi.fn(),
+        prepare: (value) => prepare(prepareManagedEnvironmentRequestSchema.parse(value)),
+        execute: vi.fn(),
+        getOperation: vi.fn(),
+        cancelOperation: vi.fn(),
+        waitOperation: vi.fn(),
+        getEnvironment: vi.fn(),
+        releaseEnvironment: vi.fn()
+      },
+      assertOpen: () => undefined,
+      withDataRootWrite: (work) => work()
+    })
+    call.mockImplementation((method: ManagedExecutionExternalMethod, payload: unknown) =>
+      adapter.call(method, payload, contexts.at(-1))
+    )
+    return new OpenScienceClient({ baseUrl: base, token: 'execution-token' })
+  }
+
+  it.each([
+    [
+      'missing',
+      'The selected research material is unavailable. Inspect the research materials and select an available version.'
+    ],
+    [
+      'withheld',
+      'The selected research material was withheld from the package. Select materials that were shared.'
+    ],
+    [
+      'external',
+      'The selected research material is external to the package and is not available for preparation.'
+    ],
+    [
+      'mismatch',
+      'The available research material does not match the declared version. Inspect the research materials and select a matching version.'
+    ]
+  ] as const)(
+    'reports diagnosed %s materials through the real preparation, adapter, HTTP and SDK',
+    async (reason, message) => {
+      const root = await mkdtemp(join(tmpdir(), 'execution-materials-http-'))
+      roots.push(root)
+      const payload = Buffer.from('original')
+      const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
+      const descriptor = Buffer.from(
+        JSON.stringify({
+          format: 'open-science-reproduction-description',
+          descriptionVersion: 1,
+          title: 'Material check',
+          materials: [
+            reason === 'external' || reason === 'withheld'
+              ? {
+                  key: 'source',
+                  role: 'source',
+                  availability: reason,
+                  description: '/private/research/secret'
+                }
+              : {
+                  key: 'source',
+                  role: 'source',
+                  availability: 'included',
+                  filename: 'data.csv',
+                  sha256: sha(payload),
+                  sizeBytes: payload.length,
+                  restorePath: 'data.csv'
+                }
+          ],
+          plans: [
+            {
+              key: 'inspect',
+              title: 'Inspect',
+              scope: 'engineering-check',
+              materialKeys: ['source'],
+              claim: 'Engineering only',
+              limitations: []
+            }
+          ]
+        })
+      )
+      const readVersion = vi.fn(async (id: string) => (id === 'descriptor' ? descriptor : payload))
+      const authority: ResearchMaterialAuthority = {
+        source: { projectId: 'project', sessionId: 'research', identity: 'source' },
+        versions: [
+          {
+            versionId: 'descriptor',
+            sourceIdentity: 'source',
+            filename: 'research-reproduction.json',
+            sha256: sha(descriptor),
+            sizeBytes: descriptor.length
+          },
+          ...(reason === 'mismatch'
+            ? [
+                {
+                  versionId: 'data',
+                  sourceIdentity: 'source',
+                  filename: 'data.csv',
+                  sha256: 'a'.repeat(64),
+                  sizeBytes: payload.length
+                }
+              ]
+            : [])
+        ],
+        readVersion
+      }
+      const request = materialRequest({
+        descriptorVersionId: 'descriptor',
+        materialKeys: ['source']
+      })
+      const client = await materialClient((received) =>
+        prepareResearchMaterials(authority, {
+          stagingDirectory: root,
+          ...received.materials
+        })
+      )
+      await expect(client.execution.prepare(request)).rejects.toMatchObject({
+        status: 409,
+        code: 'conflict',
+        message
+      })
+      expect(readVersion.mock.calls.map(([id]) => id)).toEqual(['descriptor'])
+    }
+  )
+
+  it.each(['io', 'content-verification', 'size-verification', 'same-name-error'] as const)(
+    'keeps %s failures internal without exposing private details as material guidance',
+    async (reason) => {
+      const root = await mkdtemp(join(tmpdir(), 'execution-materials-internal-'))
+      roots.push(root)
+      const bytes = Buffer.from('expected')
+      const failure = new Error('missing /private/research/secret')
+      if (reason === 'same-name-error') failure.name = 'ResearchMaterialUnavailableError'
+      const authority: ResearchMaterialAuthority = {
+        source: { projectId: 'project', sessionId: 'research', identity: 'source' },
+        versions: [
+          {
+            versionId: 'data',
+            sourceIdentity: 'source',
+            filename: 'data.csv',
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            sizeBytes: bytes.length
+          }
+        ],
+        readVersion: async () => {
+          if (reason === 'content-verification') return Buffer.from('tampered')
+          if (reason === 'size-verification') return Buffer.from('truncated')
+          throw failure
+        }
+      }
+      const request = materialRequest({ files: [{ versionId: 'data', restorePath: 'data.csv' }] })
+      const client = await materialClient((received) =>
+        prepareResearchMaterials(authority, {
+          stagingDirectory: root,
+          ...received.materials
+        })
+      )
+      await expect(client.execution.prepare(request)).rejects.toMatchObject({
+        status: 500,
+        code: 'internal_error',
+        message: 'Internal server error'
+      })
+    }
+  )
+
+  it('reconstructs material guidance from its known reason rather than forwarding Error text', async () => {
+    const error = new ResearchMaterialUnavailableError('missing')
+    error.message = 'missing /private/research/secret'
+    const client = await materialClient(async () => {
+      throw error
+    })
+    await expect(
+      client.execution.prepare(
+        materialRequest({
+          files: [{ versionId: 'data', restorePath: 'data.csv' }]
+        })
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'conflict',
+      message:
+        'The selected research material is unavailable. Inspect the research materials and select an available version.'
+    })
+  })
 
   it('authenticates all methods and retains a local automation caller', async () => {
     const { base, call, contexts } = await setup()

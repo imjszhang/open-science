@@ -125,6 +125,36 @@ prove product-wide integration or native behavior.
   The service adapter loads only when its managed local-service capability is used. All seven real
   crash-recovery scenarios and the affected native service checks then passed. The corrected
   repository-wide run and installed-client delivery remain separate gates below.
+- The next complete run reported 50,285 passing tests, 847 skips and one failure in the existing
+  package-installer process-tree stop confirmation. The entire affected file then passed 108 tests
+  with two skips, including real parent/child exit checks. That combination is not a fully green
+  full-suite invocation; final validation must still exercise the complete current source.
+- An installed-client SDK attempt exposed a new-Project import publication failure that the
+  core harness's existing-Project imports did not cover. The package had committed its records,
+  but the ordinary Session repository correctly hid it behind the pending-import visibility
+  fence when the live coordinator tried to adopt it. Publication now verifies the native commit
+  witness and retained receipt, then uses a short-lived Main-only capability bound to the exact
+  Project, Session and import identity. Ordinary readers remain fenced. Five real persistence
+  regressions cover new/existing Projects, callback failure and recovery, missing witness and
+  mismatched receipt; the related nine-file suite passed 487 tests. The installed-client retry
+  and recovery check are still separate requirements.
+- A second reviewed fixture uses a small synthetic CSV and a Node arithmetic script, without
+  Tuanzi code, a local HTTP service or an archive. The same real-material harness passed all three
+  entry points, including result export/reimport and producer-identity checks. Each execution
+  produced count 4, sum 20 and mean 5 with no model calls. A withheld synthetic input slot is
+  included for a separate negative admission check; the successful arithmetic run does not prove
+  that the withheld-input plan is executable or that any scientific finding was reproduced.
+- Diagnosed unavailable materials now return HTTP 409 with fixed guidance distinguishing missing,
+  withheld, external and metadata-mismatched inputs. The same domain error reaches internal tools.
+  Arbitrary I/O errors and failures of actual byte-length/hash verification remain internal errors;
+  the external adapter never forwards raw exception text or private paths as guidance. Real
+  preparation-to-HTTP/SDK tests cover these boundaries. Installed-client verification is pending.
+- The complete publication-fix run reported 50,290 passing tests, 847 skips and one failure in the
+  unchanged Shell output-capacity test (`exitCode` was null instead of 7). Its entire file then
+  passed 71 tests; the failing case took 35 ms. The original log does not distinguish timeout,
+  signal or incomplete process-tree confirmation, so its cause is not claimed. The prior
+  package-installer stop-confirmation case passed in this run. Final verification will use the
+  repository's supported worker cap without changing test coverage, assertions or timeouts.
 
 ## Real-material acceptance
 
@@ -152,9 +182,13 @@ can still provide useful complete evidence; neither an exit code nor a successfu
 establishes a scientific conclusion. Package export retains its existing sensitive-content and
 dependency-closure checks.
 
-Remaining release gates: final repository-wide required checks, installed-client Agent journeys
-and the independent Test build. Focused test results are evidence
-for their covered boundaries, not substitutes for these gates.
+An independent Test build containing the publication fix was produced and installed from
+`6dfbc510b136983a5f3fe9631403f26b36541e9d`. Build, signature and local maintenance checks passed.
+Installation alone does not establish startup recovery or Agent usability.
+
+Remaining release gates: final repository-wide required checks, installed-client import/recovery,
+external execution and ordinary/fork Agent journeys. Focused test results are evidence for their
+covered boundaries, not substitutes for these gates.
 
 No upstream publication, formal client replacement, live-model scientific trial or public research
 release is included in this implementation authorization.

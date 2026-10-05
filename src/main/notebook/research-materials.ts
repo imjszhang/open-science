@@ -60,6 +60,31 @@ type MaterialStatus = {
   status: 'available' | 'external' | 'withheld' | 'missing' | 'mismatch'
   versionIds?: string[]
 }
+export type ResearchMaterialUnavailableReason = Exclude<MaterialStatus['status'], 'available'>
+
+// Public explanations are selected only from this fixed vocabulary, never from file paths,
+// author-provided descriptions, material keys, or the message of an arbitrary underlying error.
+export const researchMaterialUnavailableMessage = (reason: unknown): string | undefined => {
+  switch (reason) {
+    case 'missing':
+      return 'The selected research material is unavailable. Inspect the research materials and select an available version.'
+    case 'withheld':
+      return 'The selected research material was withheld from the package. Select materials that were shared.'
+    case 'external':
+      return 'The selected research material is external to the package and is not available for preparation.'
+    case 'mismatch':
+      return 'The available research material does not match the declared version. Inspect the research materials and select a matching version.'
+    default:
+      return undefined
+  }
+}
+
+export class ResearchMaterialUnavailableError extends Error {
+  constructor(readonly reason: ResearchMaterialUnavailableReason) {
+    super(researchMaterialUnavailableMessage(reason))
+    this.name = 'ResearchMaterialUnavailableError'
+  }
+}
 export type ResearchMaterialInspection = {
   source: ResearchMaterialSource
   status: 'no-description' | 'choose-description' | 'ready' | 'unsupported' | 'invalid'
@@ -108,7 +133,7 @@ const readVerified = async (
   signal?: AbortSignal
 ): Promise<Buffer> => {
   signal?.throwIfAborted()
-  if (version.contentAvailable === false) failure('the selected version is unavailable.')
+  if (version.contentAvailable === false) throw new ResearchMaterialUnavailableError('missing')
   if (version.sizeBytes > maxBytes) failure('input byte limit exceeded.')
   const received = await authority.readVersion(version.versionId, { maxBytes, signal })
   signal?.throwIfAborted()
@@ -283,7 +308,10 @@ export const prepareResearchMaterials = async (
     for (const key of options.materialKeys) {
       const material = inspection.description.materials.find((row) => row.key === key)
       const state = inspection.materials?.find((row) => row.key === key)
-      if (!material || material.availability !== 'included' || state?.status !== 'available')
+      if (!material || !state)
+        return failure('a selected material is outside the selected description.')
+      if (state.status !== 'available') throw new ResearchMaterialUnavailableError(state.status)
+      if (material.availability !== 'included')
         return failure('a selected material is missing, withheld, external or mismatched.')
       const selected = options.materialVersions?.[key]
       const versionId =
