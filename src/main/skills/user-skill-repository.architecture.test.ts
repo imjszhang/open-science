@@ -910,6 +910,7 @@ describe('User Skill repository architecture', () => {
           'src/main/settings/classification-settings.test.ts',
           'src/main/connectors/descriptors/genomes-blast.test.ts',
           'src/main/connectors/descriptors/genomes-clustal.test.ts',
+          'src/main/connectors/descriptors/interproscan.test.ts',
           'src/main/connectors/descriptors/genomes.test.ts',
           'src/main/artifacts/resumed-finalization-ownership.test.ts',
           'src/main/session-persistence/resumed-artifact-publication.integration.test.ts',
@@ -940,7 +941,8 @@ describe('User Skill repository architecture', () => {
           'src/main/session-persistence/turn-outcome-reconciliation.test.ts',
           'src/main/session-persistence/attention-projection.test.ts',
           'src/main/acp/approved-handoff-outcome.integration.test.ts',
-          'src/main/acp/approved-handoff-outcome.test.ts'
+          'src/main/acp/approved-handoff-outcome.test.ts',
+          'src/main/agent-framework/claude-shared-settings.integration.test.ts'
         ]
       },
       capabilityOverlays: ['windows_sensitive', 'e2e_regressions', 'e2e_delegation'],

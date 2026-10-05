@@ -135,6 +135,8 @@
     "More items": "Plus de sessions"
   },
   "renderer": {
+    "List GWAS summary statistics files, YAML metadata, reference genomes and standard column definitions by GCST accession.": "Lister les fichiers de statistiques récapitulatives GWAS, les métadonnées YAML, les génomes de référence et les définitions standard des colonnes à partir d’un identifiant GCST.",
+    "PDF analysis options": "Options d’analyse du PDF",
     "Retrieve GEO series metadata, samples and supplementary-file links.": "Récupérer les métadonnées, les échantillons et les liens vers les fichiers supplémentaires d’une série GEO.",
     "Find GEO Series Matrix and NCBI RNA-seq count file links for manual download.": "Rechercher les liens vers les fichiers Series Matrix de GEO et les fichiers de comptages RNA-seq du NCBI pour un téléchargement manuel.",
     "Check decompressed GEO matrix structure, dimensions and sample alignment before analysis.": "Vérifier la structure, les dimensions et la correspondance des échantillons d’une matrice GEO décompressée avant l’analyse.",
@@ -6625,7 +6627,8 @@
     "Automatic updates pause after {{run}} requests per run or {{day}} across all collections in 24 hours. Retries count toward these limits.": "Les mises à jour automatiques sont suspendues après {{run}} requêtes par exécution ou {{day}} pour toutes les collections sur 24 heures. Les nouvelles tentatives sont comptabilisées.",
     "Check an InterProScan job once. Wait at least 10 seconds between checks.": "Vérifier une fois le statut d’une tâche InterProScan. Attendre au moins 10 secondes entre les vérifications.",
     "Retrieve the complete TSV report for a finished InterProScan job. Results expire at the service.": "Récupérer le rapport TSV complet d’une tâche InterProScan terminée. Les résultats expirent sur le service.",
-    "InterProScan job status and TSV result retrieval via EMBL-EBI.": "État des tâches InterProScan et récupération des résultats TSV via l’EMBL-EBI.",
+    "InterProScan protein sequence submission, job status and TSV result retrieval via EMBL-EBI.": "Soumission de séquences protéiques à InterProScan, suivi de l’état des tâches et récupération des résultats TSV via l’EMBL-EBI.",
+    "Submit protein sequences to InterProScan and retain the returned job ID.": "Soumettre des séquences protéiques à InterProScan et conserver l’identifiant de tâche renvoyé.",
     "Genome annotation, sequence similarity search, multiple sequence alignment and browser tracks via NCBI, EMBL-EBI, Ensembl and UCSC.": "Annotation des génomes, recherche de similarité de séquences, alignement multiple et pistes de navigateur via NCBI, l’EMBL-EBI, Ensembl et UCSC.",
     "Submit three or more protein, DNA or RNA sequences to Clustal Omega for asynchronous multiple sequence alignment.": "Soumettre au moins trois séquences protéiques, ADN ou ARN à Clustal Omega pour un alignement multiple asynchrone.",
     "Check a Clustal Omega job once. Wait at least 10 seconds between checks.": "Vérifier une fois le statut d’une tâche Clustal Omega. Attendre au moins 10 secondes entre les vérifications.",
@@ -7244,6 +7247,22 @@
     "Could not update research ownership. Close this dialog and try again.": "Impossible de modifier l’association à la recherche. Fermez cette boîte de dialogue et réessayez.",
     "Collapse research": "Réduire la recherche",
     "Expand research": "Développer la recherche",
-    "View original record": "Voir l’enregistrement original"
+    "View original record": "Voir l’enregistrement original",
+    "The current data location contains spaces. R environments cannot run reliably here. Use Change location to move your data to a path without spaces. You can cancel and keep the current location; your existing data will remain available.": "Le chemin actuel des données contient des espaces. Les environnements R ne peuvent pas y fonctionner de manière fiable. Utilisez « Changer d’emplacement » pour déplacer vos données vers un chemin sans espaces. Vous pouvez annuler et conserver l’emplacement actuel ; vos données existantes resteront accessibles.",
+    "What would you like to research?": "Que souhaitez-vous étudier ?",
+    "Previous research ideas": "Idées de recherche précédentes",
+    "Next research ideas": "Autres idées de recherche",
+    "Find literature": "Chercher des publications",
+    "Create charts": "Créer des graphiques",
+    "Explain a paper": "Expliquer un article",
+    "Design an experiment": "Concevoir une expérience",
+    "Write code": "Écrire du code",
+    "Draft a report": "Rédiger un rapport",
+    "Find research papers on my topic and summarize the relevant evidence.": "Trouvez des articles scientifiques sur mon sujet et résumez les éléments probants pertinents.",
+    "Create clear charts from my data and explain what they show.": "Créez des graphiques clairs à partir de mes données et expliquez les résultats.",
+    "Explain this paper’s research question, methods, findings, and limitations.": "Expliquez la question de recherche, les méthodes, les résultats et les limites de cet article.",
+    "Help me design an experiment, including controls, measurements, and analysis.": "Aidez-moi à concevoir une expérience avec des témoins, des mesures et une méthode d’analyse.",
+    "Help me write reproducible code for my analysis and explain each step.": "Aidez-moi à écrire du code reproductible pour mon analyse et expliquez chaque étape.",
+    "Help me draft a research report with methods, results, and limitations.": "Aidez-moi à rédiger un rapport de recherche présentant les méthodes, les résultats et les limites."
   }
 }

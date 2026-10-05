@@ -94,6 +94,31 @@ afterEach(() => {
 
 describe('ConnectorAddForm copy', () => {
   it.each(['de', 'es', 'fr', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru'] as const)(
+    'renders the GWAS summary statistics description from the %s catalog without fallback',
+    async (locale) => {
+      await prepareI18nLocale(locale)
+      const english =
+        'List GWAS summary statistics files, YAML metadata, reference genomes and standard column definitions by GCST accession.'
+      const fallback = 'Full API contract from the main process'
+      const id = 'human-genetics/gwas_get_summary_statistics'
+      const translated = i18next.getResource(locale, 'renderer', english)
+      expect(typeof translated).toBe('string')
+      expect(translated).not.toBe('')
+      expect(translated).not.toBe(english)
+      act(() => {
+        root.render(
+          <p>{connectorToolDescription(id, fallback, i18next.getFixedT(locale, 'renderer'))}</p>
+        )
+      })
+      expect(container.textContent).toBe(translated)
+      expect(container.textContent).not.toContain(fallback)
+      expect(connectorToolDescription(id, fallback, i18next.getFixedT('en', 'renderer'))).toBe(
+        english
+      )
+    }
+  )
+
+  it.each(['de', 'es', 'fr', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru'] as const)(
     'localizes IEDB discovery and evidence tools in %s',
     async (locale) => {
       await prepareI18nLocale(locale)
@@ -415,7 +440,10 @@ describe('ConnectorAddForm copy', () => {
         'cellxgene-discover',
         'Public collections, datasets, versions and file download links from CELLxGENE Discover.'
       ],
-      ['interproscan', 'InterProScan job status and TSV result retrieval via EMBL-EBI.'],
+      [
+        'interproscan',
+        'InterProScan protein sequence submission, job status and TSV result retrieval via EMBL-EBI.'
+      ],
       ['zenodo', 'Public research records, versions and file metadata from Zenodo.'],
       [
         'genes',
@@ -523,6 +551,10 @@ describe('ConnectorAddForm copy', () => {
       [
         'pathway-commons/pathway_commons_export',
         'Export Pathway Commons entities in BioPAX, GSEA, SIF, TXT, SBGN, or JSON-LD.'
+      ],
+      [
+        'interproscan/submit',
+        'Submit protein sequences to InterProScan and retain the returned job ID.'
       ],
       [
         'interproscan/status',
