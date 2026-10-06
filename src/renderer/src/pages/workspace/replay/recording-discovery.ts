@@ -47,7 +47,10 @@ export const recordingCandidates = (
     )
       continue
     const target = {
-      ...source,
+      // ReplayDocument.source also carries title/fingerprint presentation metadata. Project the
+      // strict receiving identity explicitly instead of forwarding its extra runtime properties.
+      projectId: source.projectId,
+      sessionId: source.sessionId,
       artifactId: resource.artifactId,
       versionId: resource.versionId
     }

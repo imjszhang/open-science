@@ -9,6 +9,7 @@ import { useSessionReplayStore } from '@/stores/session-replay-store'
 import { usePreviewWorkbenchStore, type PreviewToolItem } from '@/stores/preview-workbench-store'
 import type { ReplayDocument, ReplayResource, ReplayStep } from '../../../../shared/replay'
 import type { ReplayViewState, SessionReplaySnapshot } from '../../../../shared/session-replay'
+import { recordedObservationTargetSchema } from '../../../../shared/run-observation-recorded'
 import { SessionReplayPreview } from './SessionReplayPreview'
 import type { ReplayPanelProps } from './replay/ReplayPanel'
 
@@ -154,17 +155,18 @@ describe('SessionReplayPreview lifecycle', () => {
     ).toBe('true')
     expect(props().active).toBe(false)
     fireEvent.click(open[0])
-    expect(
-      usePreviewWorkbenchStore
-        .getState()
-        .items.find((entry) => entry.id === 'tool:source:replay-recording:archive:v1')
-    ).toMatchObject({
-      replayRecordingTarget: {
-        projectId: 'project',
-        sessionId: 'source',
-        artifactId: 'archive',
-        versionId: 'v1'
-      }
+    const preview = usePreviewWorkbenchStore
+      .getState()
+      .items.find(
+        (entry) => entry.id === 'tool:source:replay-recording:archive:v1'
+      ) as PreviewToolItem
+    // Exercise the actual strict IPC target contract; a partial matcher misses accidental
+    // Replay source fields (title/fingerprint) that make a displayed archive impossible to open.
+    expect(recordedObservationTargetSchema.parse(preview.replayRecordingTarget)).toEqual({
+      projectId: 'project',
+      sessionId: 'source',
+      artifactId: 'archive',
+      versionId: 'v1'
     })
     expect(window.api.observations.openRecorded).not.toHaveBeenCalled()
     expect(useSessionStore.getState().selectedSessionId).toBe(selected)

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ReplayResource } from '../../../../../shared/replay'
+import { recordedObservationTargetSchema } from '../../../../../shared/run-observation-recorded'
 import {
   discoverRecordingPage,
   recordingCandidates,
@@ -25,6 +26,22 @@ const archive = {
 }
 
 describe('receiving source recording discovery', () => {
+  it('projects only the receiving viewer identity from a complete Replay source', async () => {
+    const replaySource = { ...source, title: 'Received study', fingerprint: 'source-fingerprint' }
+    const page = await discoverRecordingPage(
+      recordingCandidates([resource()], replaySource),
+      vi.fn().mockResolvedValue(archive)
+    )
+    expect(page.recordings).toHaveLength(1)
+    // openRecorded and its recorded reader deliberately use this strict schema. Source display
+    // metadata must not cross that IPC boundary, even though structural typing accepts it here.
+    expect(recordedObservationTargetSchema.parse(page.recordings[0].target)).toEqual({
+      projectId: source.projectId,
+      sessionId: source.sessionId,
+      artifactId: 'artifact',
+      versionId: 'version'
+    })
+  })
   it('retains every immutable version and never searches another import, upload or binary file', async () => {
     const candidates = recordingCandidates(
       [
