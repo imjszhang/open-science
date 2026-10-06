@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto'
 import type { Socket } from 'node:net'
 import { z } from 'zod'
 import type { CallerContext } from '../caller-context'
+import {
+  desktopObservationFrameRegistry,
+  type DesktopObservationRegistration
+} from './desktop-frame-registry'
 import type { ManagedRuntimeViews } from '../managed-runtime-views'
 import type {
   ObservationViewers,
@@ -17,7 +21,10 @@ import {
 } from '../../shared/run-observation'
 
 import type { RecordedObservationTarget } from '../../shared/run-observation-recorded'
-import type { RunObservationRecordingStatus } from '../../shared/run-observation-recording-status'
+import {
+  runObservationRecordingStatusSchema,
+  type RunObservationRecordingStatus
+} from '../../shared/run-observation-recording-status'
 import {
   observationMediaCaptureRequestSchema,
   observationCaptureContentRequestSchema,
@@ -114,6 +121,7 @@ type Binding = {
   active: number
   requests: number
   projectOrigin?: string
+  desktopFrames?: DesktopObservationRegistration
   captureEvidence: Map<string, NonNullable<ObservationViewerCapture['viewerEvidence']>>
 }
 const maxBody = 8192,
@@ -409,6 +417,55 @@ export class ReplayViewerHttpHost {
     return { ...result, ...(evidence ? { viewerEvidence: structuredClone(evidence) } : {}) }
   }
 
+  private async openBoundArchive(
+    binding: Binding,
+    signal: AbortSignal
+  ): Promise<ReplayViewerHttpAccess> {
+    this.assertCurrent(binding)
+    if (
+      binding.caller.surface === 'electron' ||
+      binding.descriptor.mode === 'recorded' ||
+      !this.dependencies.recordingStatus
+    )
+      throw new HostError(403, 'forbidden')
+    const target = binding.descriptor.target
+    const status = runObservationRecordingStatusSchema.parse(
+      await this.dependencies.recordingStatus(target)
+    )
+    if (
+      status.state !== 'saved' ||
+      !status.archive ||
+      (['projectId', 'sessionId', 'operationId', 'executionInvocationId', 'runId'] as const).some(
+        (field) => status.target[field] !== target[field]
+      ) ||
+      status.archive.projectId !== target.projectId ||
+      status.archive.sessionId !== target.sessionId
+    )
+      throw new HostError(409, 'unavailable')
+    await this.dependencies.viewers.describe(binding.descriptor.viewerId, {
+      caller: binding.caller
+    })
+    this.assertCurrent(binding)
+    signal.throwIfAborted()
+    // Only Main's finalized, published receipt selects the next scope. No browser target or
+    // execution declaration is accepted. The existing recorded reader verifies the Version.
+    const opened = await this.openRecorded(status.archive, binding.caller)
+    try {
+      await this.dependencies.viewers.describe(binding.descriptor.viewerId, {
+        caller: binding.caller
+      })
+      this.assertCurrent(binding)
+      signal.throwIfAborted()
+      return opened
+    } catch (error) {
+      this.closeViewer(opened.viewerId)
+      await this.dependencies.viewers
+        .revoke(opened.viewerId, { caller: binding.caller })
+        .catch(() => undefined)
+      throw error
+    }
+  }
+
   async open(
     target: RunObservationTarget,
     caller: CallerContext,
@@ -505,6 +562,14 @@ export class ReplayViewerHttpHost {
       binding.origin = `http://viewer-${access.viewerId}.localhost:${address.port}`
       await this.dependencies.viewers.describe(access.viewerId, { caller })
       this.assertCurrent(binding)
+      if (caller.surface === 'electron' && options.desktopParent === 'file:') {
+        binding.desktopFrames = desktopObservationFrameRegistry.registerViewer({
+          origin: binding.origin,
+          caller: binding.caller,
+          expiresAt: access.expiresAt,
+          assertCurrent: () => this.assertCurrent(binding)
+        })
+      }
       binding.expiry = setTimeout(
         () => this.closeViewer(access.viewerId),
         Math.max(1, access.expiresAt - Date.now())
@@ -555,6 +620,7 @@ export class ReplayViewerHttpHost {
     if (!binding) return
     this.bindings.delete(viewerId)
     binding.closed = true
+    binding.desktopFrames?.close()
     binding.signal.abort()
     if (binding.expiry) clearTimeout(binding.expiry)
     if (binding.revalidation) clearInterval(binding.revalidation)
@@ -568,9 +634,11 @@ export class ReplayViewerHttpHost {
     for (const viewerId of this.bindings.keys()) this.closeViewer(viewerId)
   }
   private access(binding: Binding, grant: ObservationViewAccess): ReplayViewerHttpAccess {
+    const url = `${binding.origin}/__open_science_viewer?grant=${grant.grant}`
+    binding.desktopFrames?.issueGrant(url, grant.grantExpiresAt)
     return {
       ...structuredClone(binding.descriptor),
-      url: `${binding.origin}/__open_science_viewer?grant=${grant.grant}`
+      url
     }
   }
   private assertCurrent(binding: Binding): void {
@@ -625,6 +693,7 @@ export class ReplayViewerHttpHost {
         this.assertCurrent(binding)
         await this.dependencies.viewers.describe(viewerId, { capability: auth.capability })
         this.assertCurrent(binding)
+        binding.desktopFrames?.authenticateGrant(url.searchParams.get('grant') ?? '')
         response.writeHead(303, {
           location: '/',
           'set-cookie': `${binding.cookie}=${auth.capability}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/`,
@@ -655,6 +724,7 @@ export class ReplayViewerHttpHost {
         if (request.method === 'GET' && url.pathname === '/api/context')
           return {
             ...descriptor,
+            presentation: binding.caller.surface === 'electron' ? 'desktop' : 'browser',
             canInteract:
               descriptor.mode !== 'recorded' && binding.options.allowInteraction === true,
             canCancel:
@@ -686,6 +756,10 @@ export class ReplayViewerHttpHost {
         }
         if (request.method === 'GET' && url.pathname === '/api/captures') {
           return this.readCaptures(binding, signal)
+        }
+        if (request.method === 'POST' && url.pathname === '/api/open-archive') {
+          emptyBody.parse(await readBody(request))
+          return this.openBoundArchive(binding, signal)
         }
         if (request.method === 'GET' && url.pathname === '/api/capture-options')
           return this.readCaptureOptions(binding)

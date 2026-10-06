@@ -401,6 +401,25 @@ describe('window navigation policy', () => {
     expect(guard('file:///private', false)).toBe(false)
   })
 
+  it('delegates only framed HTTP navigation to the Main-owned registry', async () => {
+    const { createFrameNavigationGuard } = await import('./navigation-policy')
+    const main = { frameTreeNodeId: 1, name: '', url: 'file:///app/index.html', parent: null }
+    const child = { ...main, frameTreeNodeId: 2, url: 'about:blank', parent: main }
+    const registry = vi.fn(() => false)
+    const guard = createFrameNavigationGuard(registry)
+    const viewer = 'http://viewer-example.localhost:43123/'
+    expect(guard(viewer, false, main.url, child)).toBe(false)
+    expect(registry).toHaveBeenLastCalledWith(viewer, child)
+    registry.mockReturnValueOnce(true)
+    expect(guard(viewer, false, main.url, child)).toBe(true)
+    registry.mockClear()
+    expect(guard(viewer, true, main.url, main)).toBe(false)
+    expect(guard(viewer, false, main.url)).toBe(false)
+    expect(guard('https://example.com', false, main.url, child)).toBe(false)
+    expect(guard('file:///private', false, main.url, child)).toBe(false)
+    expect(registry).not.toHaveBeenCalled()
+  })
+
   it('denies sensitive Chromium permissions regardless of frame', () => {
     createMainWindow()
     const window = lastWindow!

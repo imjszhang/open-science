@@ -260,3 +260,76 @@ by service/recorder restart. Status reconciliation recovers the same published V
 calling the mutable write-replay path or increasing the Artifact count. Relevant Node/Sandbox/Web
 type checks and changed-file lint passed; no new renderer strings or package-format changes were
 introduced by these corrections.
+
+## Second installed checkpoint and production embedding
+
+The independent Test was upgraded to `0.35.0-test.ba303ec9923c.2` from
+`ba303ec9923cf62286906ebfd56f17866835aa69`. Recovery of the first completed operation
+confirmed its original published archive, all 14 retained outputs and 21 engineering assertions
+without starting another Run. Recovery stopped at duplicate-content media identity resolution;
+the failed recovery receipt and original acceptance receipt are both retained.
+
+Separately identified attempt `20261006-live-02` completed one bounded offline engineering case
+in normal Session #67. The Notebook now exposes Observe run and opens a right-hand Replay tab.
+Its archive reached `saved` normally. Actual client embedding still failed, and the UI preference
+save still wrote an incorrect interrupted status. No Tuanzi image capture or complete UI acceptance
+is claimed for this attempt. Its immutable evidence remains under
+`/Users/jszhang/github/projects/tuanzi-gs-research/tuanzi-v056-replay-live-stage3/installed-20261006-live-02`.
+
+The remaining preference-save path is now covered by a real `SessionPersistenceStateOwner`
+regression. Its separate live-runtime predicate also recognizes the exact Main operation lease;
+the test failed against the previous wiring and passes with the correction. Previously persisted
+interruption records are not rewritten.
+
+Native recordings have no import receipt. Duplicate-content media now use a Main publication
+attestation bound to the exact Project, Session, Artifact, Version and immutable archive bytes.
+Each referenced receiving Version must also be finalized, published and match its declared hash
+and size. The reader does not depend on private observation caches, infer identities from names,
+or trust IDs declared by an arbitrary archive copy. Actual cache removal and package import are
+included in the regression coverage. This changes neither `.science` v1 nor archive bytes.
+
+Production embedding needs both the renderer CSP and the window navigation guard. The original
+standalone Electron fixture exercised neither and therefore could not certify installed-client
+embedding. The new integration test uses the production CSP, Replay bundle, frame guard and
+real viewer/runtime HTTP hosts. A Main registry admits only exact, still-authorized origins owned
+by the current Electron window and its actual parent-frame chain. Single-use bootstrap grants
+bind one frame; HTTP authentication, expiry, revocation and Run lifetime retain their existing
+authorities. Unregistered localhost services remain denied.
+
+The global `upgrade-insecure-requests` directive also upgraded the local bootstrap's HTTP redirect
+to unsupported HTTPS. Explicit resource source restrictions remain in force instead: remote
+images/media are HTTPS-only, scripts and renderer requests remain self-bound, and HTTP frame
+navigation requires the exact Main registration. Local TLS infrastructure and certificate
+exceptions are not introduced. The existing desktop embedding contract is `file://`; an Electron
+Vite development-server origin is not newly authorized by this correction.
+
+The production Electron embedding regression now passes both cases. It also exercises real
+Playwright right-clicks at 1.25 zoom through the production preview context-menu bridge: viewer
+and project HTTP frames are not admitted as managed file previews; the two existing custom
+preview protocols retain correct CSS coordinates, editable exclusion and passthrough behavior.
+
+Further product-path checks found two completed-run transitions needing explicit handling:
+
+- The live image cache ends with the Run. Both hosts now provide a saved-archive entry instead
+  of suggesting that released live images were never recorded. Electron switches the complete
+  preview item through the existing archive opener so selected-step polling still reaches the
+  current draft. The standalone browser receives a new recorded viewer from a Main-bound,
+  empty-body admission; it cannot supply an arbitrary target or dispatch execution.
+- Re-sharing a received recording remaps Version IDs again. The import reader now uses the
+  existing reproducibility `sourceScope` chain and verified native receipt to resolve original
+  media IDs to current published Versions. This is a Main-only projection, with no public
+  `readOrigin` contract change. Two real export/import rounds preserve two equal-content image
+  identities. Colliding aliases, foreign scope, damaged receipts and unpublished Versions are
+  rejected; Session metadata is read without repair or runtime-state normalization.
+
+Actual completed-run file cards exposed an independent renderer cache issue: managed operations
+publish through durable Session updates, while the historical descriptor cache retained an earlier
+`isPublished: false` indefinitely unless an ACP artifact event arrived. On a Session/files revision
+change, only unconfirmed exact Versions are now re-read. Published Versions remain cached, and old
+in-flight responses cannot replace the new read. Three regression cases fail before the correction
+and pass after it; the full 100-case message-scroller interaction suite also passes. Publication
+authorization itself remains unchanged, and no stored Session metadata is rewritten.
+
+These are implementation and partial acceptance checkpoints. Final delivery still requires the
+fixed installed Test, actual product capture and draft delivery, current Codex interaction, and
+published screenshot/result export and import with native provenance verification.

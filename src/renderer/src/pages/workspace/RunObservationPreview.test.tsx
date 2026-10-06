@@ -7,6 +7,7 @@ import type { RunObservationViewerAccess } from '../../../../shared/run-observat
 import { RunObservationPreview } from './RunObservationPreview'
 import { useRunObservationQuestion } from './use-run-observation-question'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
+import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import type { ComposerDoc } from './composer/composer-doc'
 const target = { projectId: 'p', sessionId: 's', runId: 'run' }
 const access = (viewerId = 'viewer', scope = target): RunObservationViewerAccess => ({
@@ -69,6 +70,106 @@ afterEach(() => {
 })
 
 describe('desktop scoped Run observation preview', () => {
+  it('opens the saved archive as a recorded preview and keeps the current draft and recorded Ask owner', async () => {
+    const live = install()
+    const archive = {
+      projectId: 'p',
+      sessionId: 's',
+      artifactId: 'saved-archive',
+      versionId: 'saved-version'
+    }
+    const selection = {
+      kind: 'recorded-run-observation' as const,
+      selectionId: 'transition-ask',
+      selectedAt: 1000,
+      receiving: archive,
+      recordingId: 'saved-recording',
+      stepKey: 'step-1',
+      mediaKeys: [],
+      record: {
+        stepKey: 'step-1',
+        observedAt: 500,
+        phase: 'completed' as const,
+        sourceEvidence: {
+          identity: { projectId: 'author-p', sessionId: 'author-s', runId: 'author-run' },
+          cursor: { epoch: 'author-e', sequence: 0 },
+          stepId: 'author-step'
+        },
+        run: null,
+        artifactEvidence: [],
+        artifactsTruncated: false
+      }
+    }
+    const openRecorded = vi
+      .fn()
+      .mockResolvedValue({ ...access('recorded-viewer'), mode: 'recorded', target: archive })
+    const recordingSelection = vi.fn().mockResolvedValue(selection)
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        observations: {
+          ...live,
+          openRecorded,
+          recordingSelection,
+          recordingStatus: vi.fn().mockResolvedValue({ target, state: 'saved', archive })
+        }
+      }
+    })
+    usePreviewWorkbenchStore.setState({ activeProjectId: 'p', items: [], activeItemId: undefined })
+    const Harness = (): React.JSX.Element => {
+      const [doc, setDoc] = useState<ComposerDoc>({
+        nodes: [{ type: 'text', text: 'Existing draft before archive' }]
+      })
+      useRunObservationQuestion({
+        projectId: 'p',
+        sessionId: 's',
+        draftKey: 'transition-draft',
+        editable: true,
+        doc,
+        changeDoc: setDoc
+      })
+      const item = usePreviewWorkbenchStore((state) =>
+        state.items.find((entry) => entry.id === state.activeItemId)
+      )
+      const receiving = item?.type === 'tool' ? item.replayRecordingTarget : undefined
+      return (
+        <>
+          <div data-testid="transition-draft">{JSON.stringify(doc)}</div>
+          {receiving ? (
+            <RunObservationPreview
+              mode="recorded"
+              target={receiving}
+              title="Saved replay"
+              isActive
+              onAskArchiveSelection={(selected) => {
+                if (!useRunObservationQuestionStore.getState().askRecorded(selected))
+                  throw new Error('Draft unavailable')
+              }}
+            />
+          ) : (
+            <RunObservationPreview target={target} title="Live replay" isActive />
+          )}
+        </>
+      )
+    }
+    const rendered = render(<Harness />)
+    fireEvent.click(await screen.findByRole('button', { name: 'View archived replay' }))
+    await screen.findByTitle('Saved replay')
+    await screen.findByText('Selected step added to the current draft. Review it before sending.')
+    const draft = screen.getByTestId('transition-draft').textContent
+    expect(draft).toContain('Existing draft before archive')
+    expect(draft).toContain('open-science-selected-recorded-evidence')
+    expect(draft).toContain('saved-version')
+    expect(draft).toContain('author-run')
+    expect(openRecorded).toHaveBeenCalledExactlyOnceWith({ target: archive })
+    expect(live.open).toHaveBeenCalledOnce()
+    expect(live.revoke).toHaveBeenCalledWith({ viewerId: 'viewer' })
+    expect(live.selection).not.toHaveBeenCalled()
+    expect(recordingSelection).toHaveBeenCalledWith({ viewerId: 'recorded-viewer' })
+    rendered.unmount()
+    usePreviewWorkbenchStore.setState({ items: [], activeItemId: undefined })
+  })
+
   it('acknowledges a selected step only after the current composer has accepted it', async () => {
     const api = install()
     api.selection.mockResolvedValue(selected())

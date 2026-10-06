@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { chmod, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RecordedObservationTarget } from '../../shared/run-observation-recorded'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
@@ -17,6 +17,8 @@ import { initDataRoot } from '../storage-root'
 import { UploadRepository } from '../uploads/repository'
 import { buildRunObservationArchive } from './archive'
 import { createRecordedObservationReader, type RecordedObservationReader } from './recorded-reader'
+import { ManagedRunObservationCoordinator } from './managed-coordinator'
+import { RunObservationRecorder } from './recorder'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -531,6 +533,453 @@ describe('receiving-session recorded observation reader', () => {
       expect(session?.packageOrigin).toBeDefined()
       expect(session?.activeRun).toBeUndefined()
     } finally {
+      await exporter.close()
+      await importer.close()
+    }
+  }, 60000)
+
+  it('attests native duplicate-content Versions through the exact Main publication and preserves them through .science', async () => {
+    const h = await setup()
+    const runTarget = {
+      ...scope,
+      operationId: 'native-operation',
+      executionInvocationId: 'native-invocation',
+      runId: snapshot.run!.runId
+    }
+    const recorder = new RunObservationRecorder({
+      dataRoot: h.fixture.storageRoot,
+      intervalMs: 60000,
+      read: async () => ({
+        ...snapshot,
+        identity: runTarget,
+        run: { ...snapshot.run!, executionInvocationId: runTarget.executionInvocationId }
+      }),
+      isPublished: async (_target, reference) =>
+        (
+          await h.provenance.resolveVersionDescriptors({
+            projectId: scope.projectId,
+            appSessionId: scope.sessionId,
+            versionIds: [reference.versionId]
+          })
+        ).some((version) => version.isPublished && version.state === 'finalized')
+    })
+    const coordinator = new ManagedRunObservationCoordinator({
+      dataRoot: h.fixture.storageRoot,
+      recorder: () => recorder,
+      artifacts: h.provenance
+    })
+    const provenanceContext = {
+      rootFrameId: 'native-root',
+      agentFrameId: 'native-root',
+      messageBranchId: 'native-branch',
+      runtimeSegmentId: 'native-segment',
+      promptMessageId: 'native-prompt'
+    }
+    const writePublished = async (output: {
+      filename: string
+      contentType?: string
+      source: { content: string; encoding?: 'base64' }
+    }): Promise<Awaited<ReturnType<ArtifactProvenanceRepository['writeAppGeneratedVersion']>>> => {
+      const artifact = await h.provenance.writeAppGeneratedVersion({
+        projectId: scope.projectId,
+        appSessionId: scope.sessionId,
+        artifactStorageSessionId: scope.sessionId,
+        artifactRunId: 'native-artifact-run',
+        ...provenanceContext,
+        filename: output.filename,
+        content: output.source.content,
+        encoding: output.source.encoding,
+        contentType: output.contentType
+      })
+      await h.fixture.client.artifactVersion.update({
+        where: { id: artifact.versionId },
+        data: { state: 'finalized', managedVisibleAt: new Date() }
+      })
+      await h.fixture.client.artifactLineage.update({
+        where: { id: artifact.artifactId },
+        data: { currentVersionId: artifact.versionId }
+      })
+      return artifact
+    }
+    const nativeMedia = await writePublished({
+      filename: 'first-native-screen.png',
+      contentType: 'image/png',
+      source: { content: bytes.toString('base64'), encoding: 'base64' }
+    })
+    const duplicate = await writePublished({
+      filename: 'second-screen.png',
+      contentType: 'image/png',
+      source: { content: bytes.toString('base64'), encoding: 'base64' }
+    })
+    const saveAuxiliaryOutput = vi.fn(async (output: Parameters<typeof writePublished>[0]) => ({
+      status: 'saved' as const,
+      artifact: await writePublished(output)
+    }))
+    const context = { ...scope, provenanceContext, saveAuxiliaryOutput }
+    const receiving = await createProvenanceTestFixture()
+    fixtures.push(receiving)
+    const exporter = new SessionPackageService({
+      storageRoot: h.fixture.storageRoot,
+      getClient: async () => h.fixture.client
+    })
+    const importer = new SessionPackageService({
+      storageRoot: receiving.storageRoot,
+      getClient: async () => receiving.client
+    })
+    try {
+      const started = await coordinator.begin(runTarget, context)
+      expect(started.handle).toBeDefined()
+      const published = await coordinator.publish({
+        target: runTarget,
+        context,
+        handle: started.handle,
+        media: [nativeMedia, duplicate].map((version, index) => ({
+          mediaKey: `native-frame-${index}`,
+          name: index ? 'second-screen.png' : 'first-native-screen.png',
+          mimeType: 'image/png',
+          sourceVersionId: version.versionId,
+          checksum,
+          sizeBytes: bytes.length,
+          stepKeys: ['observation-0']
+        })),
+        recovery: false
+      })
+      expect(published.result.status).toBe('published')
+      const [artifact] = await h.provenance.resolveVersionDescriptors({
+        projectId: scope.projectId,
+        appSessionId: scope.sessionId,
+        versionIds: [published.output!.versionId]
+      })
+      const target = { ...scope, artifactId: artifact.artifactId, versionId: artifact.versionId }
+      const withoutAttestation = await h.reader.read(target)
+      const identity = {
+        recordingId: published.result.recordingId!,
+        checksum: artifact.checksum!,
+        sizeBytes: artifact.size,
+        content: Buffer.from(JSON.stringify(withoutAttestation.archive))
+      }
+      // Exact same bytes and filenames alone still provide no permission to select a Version.
+      expect(withoutAttestation.media).toEqual([])
+      const mapping = await coordinator.readNativeSourceVersionMapping(target, identity)
+      expect(mapping).toEqual({
+        [nativeMedia.versionId]: nativeMedia.versionId,
+        [duplicate.versionId]: duplicate.versionId
+      })
+      await recorder.close()
+      await rm(join(h.fixture.storageRoot, 'managed-run-observations'), {
+        recursive: true,
+        force: true
+      })
+      const restarted = new ManagedRunObservationCoordinator({
+        dataRoot: h.fixture.storageRoot,
+        recorder: () => undefined,
+        artifacts: h.provenance
+      })
+      const reader = createRecordedObservationReader({
+        immutableInputAuthority: h.authority,
+        projectFilesRepository: h.files,
+        artifactProvenanceRepository: h.provenance,
+        authorizeScope: h.authorize,
+        readSourceVersionMapping: (target, identity) =>
+          restarted.readNativeSourceVersionMapping(target, identity)
+      })
+      const native = await reader.read(target)
+      expect(native.media.map((media) => media.versionId)).toEqual([
+        nativeMedia.versionId,
+        duplicate.versionId
+      ])
+      for (const media of native.media)
+        expect((await reader.readMedia(target, media.mediaKey)).body).toEqual(new Uint8Array(bytes))
+      for (const altered of [
+        { ...identity, checksum: 'f'.repeat(64) },
+        { ...identity, sizeBytes: identity.sizeBytes + 1 },
+        { ...identity, content: Buffer.alloc(identity.sizeBytes, 1) },
+        { ...identity, recordingId: 'f'.repeat(64) }
+      ])
+        expect(await coordinator.readNativeSourceVersionMapping(target, altered)).toBeUndefined()
+      for (const altered of [
+        { ...target, projectId: 'foreign-project' },
+        { ...target, sessionId: 'foreign-session' },
+        { ...target, artifactId: 'forged-artifact' },
+        { ...target, versionId: h.target.versionId }
+      ])
+        expect(await coordinator.readNativeSourceVersionMapping(altered, identity)).toBeUndefined()
+      const forged = await writePublished({
+        filename: artifact.name,
+        source: { content: JSON.stringify(native.archive) },
+        contentType: 'application/json'
+      })
+      expect(forged.artifactId).toBe(target.artifactId)
+      expect(forged.versionId).not.toBe(target.versionId)
+      expect(
+        (
+          await reader.read({
+            ...scope,
+            artifactId: forged.artifactId,
+            versionId: forged.versionId
+          })
+        ).media
+      ).toEqual([])
+      const noAttestation = new ManagedRunObservationCoordinator({
+        dataRoot: join(h.fixture.storageRoot, 'no-private-receipt'),
+        recorder: () => recorder,
+        artifacts: h.provenance
+      })
+      expect(await noAttestation.readNativeSourceVersionMapping(target, identity)).toBeUndefined()
+      await h.fixture.client.artifactVersion.update({
+        where: { id: target.versionId },
+        data: { managedVisibleAt: null }
+      })
+      expect(await coordinator.readNativeSourceVersionMapping(target, identity)).toBeUndefined()
+      await h.fixture.client.artifactVersion.update({
+        where: { id: target.versionId },
+        data: { managedVisibleAt: new Date() }
+      })
+      // A media Version must still be published in the attested original Session.
+      await h.fixture.client.artifactVersion.update({
+        where: { id: duplicate.versionId },
+        data: { state: 'pending' }
+      })
+      expect(await coordinator.readNativeSourceVersionMapping(target, identity)).toEqual({
+        [nativeMedia.versionId]: nativeMedia.versionId
+      })
+      await h.fixture.client.artifactVersion.update({
+        where: { id: duplicate.versionId },
+        data: { state: 'finalized' }
+      })
+      expect(saveAuxiliaryOutput).toHaveBeenCalledOnce()
+      const path = join(h.fixture.storageRoot, 'native-duplicates.science')
+      await exporter.exportTo(scope, path)
+      initDataRoot(receiving.storageRoot)
+      const imported = await importer.importFrom(path)
+      const origin = await importer.readOrigin(imported)
+      const importedTarget = {
+        projectId: imported.projectId,
+        sessionId: imported.sessionId,
+        artifactId: origin.identities[target.artifactId],
+        versionId: origin.identities[target.versionId]
+      }
+      const receiver = adapters(receiving)
+      const diagnosticRead = vi.spyOn(SessionRepository.prototype, 'loadSessionWithDiagnostics')
+      const defaultRead = vi
+        .spyOn(SessionRepository.prototype, 'loadSession')
+        .mockRejectedValue(new Error('Observation must not invoke Session read repair.'))
+      await expect(
+        importer.readArtifactSourceVersionMapping(imported, {
+          artifactId: importedTarget.artifactId,
+          versionId: importedTarget.versionId,
+          checksum: identity.checksum,
+          sizeBytes: identity.sizeBytes
+        })
+      ).resolves.toMatchObject({
+        [nativeMedia.versionId]: origin.identities[nativeMedia.versionId]
+      })
+      expect(diagnosticRead).toHaveBeenCalledWith(imported.projectId, imported.sessionId, {
+        mode: 'read-only',
+        preserveRuntimeState: true
+      })
+      expect(defaultRead).not.toHaveBeenCalled()
+      defaultRead.mockRestore()
+      diagnosticRead.mockRestore()
+      const importedReader = createRecordedObservationReader({
+        immutableInputAuthority: receiver.authority,
+        projectFilesRepository: receiver.files,
+        artifactProvenanceRepository: receiver.provenance,
+        authorizeScope: async (request) => {
+          expect(request.projectId).toBe(imported.projectId)
+          expect(request.sessionId).toBe(imported.sessionId)
+        },
+        readSourceVersionMapping: (target, archive) =>
+          importer.readArtifactSourceVersionMapping(
+            { projectId: target.projectId, sessionId: target.sessionId },
+            {
+              artifactId: target.artifactId,
+              versionId: target.versionId,
+              checksum: archive.checksum,
+              sizeBytes: archive.sizeBytes
+            }
+          )
+      })
+      const received = await importedReader.read(importedTarget)
+      expect(received.archive).toEqual(native.archive)
+      expect(received.media.map((media) => media.versionId)).toEqual([
+        origin.identities[nativeMedia.versionId],
+        origin.identities[duplicate.versionId]
+      ])
+      for (const media of received.media)
+        expect((await importedReader.readMedia(importedTarget, media.mediaKey)).body).toEqual(
+          new Uint8Array(bytes)
+        )
+      // The sender's private native publication receipt cannot authorize an imported scope.
+      expect(
+        await coordinator.readNativeSourceVersionMapping(importedTarget, identity)
+      ).toBeUndefined()
+      const copy = await importer.fork(imported)
+      const copyOrigin = await importer.readOrigin(copy)
+      const copiedArchive = {
+        artifactId: copyOrigin.identities[target.artifactId],
+        versionId: copyOrigin.identities[target.versionId]
+      }
+      const second = await createProvenanceTestFixture()
+      fixtures.push(second)
+      const nextImporter = new SessionPackageService({
+        storageRoot: second.storageRoot,
+        getClient: async () => second.client
+      })
+      const next = adapters(second)
+      try {
+        const secondPath = join(receiving.storageRoot, 'reshared-duplicates.science')
+        await importer.exportTo(copy, secondPath)
+        initDataRoot(second.storageRoot)
+        const secondImport = await nextImporter.importFrom(secondPath)
+        const secondOrigin = await nextImporter.readOrigin(secondImport)
+        // This is a true second native export: its direct receipt no longer knows the author ID.
+        expect(secondOrigin.identities[nativeMedia.versionId]).toBeUndefined()
+        const secondTarget = {
+          projectId: secondImport.projectId,
+          sessionId: secondImport.sessionId,
+          artifactId: secondOrigin.identities[copiedArchive.artifactId],
+          versionId: secondOrigin.identities[copiedArchive.versionId]
+        }
+        const secondReader = createRecordedObservationReader({
+          immutableInputAuthority: next.authority,
+          projectFilesRepository: next.files,
+          artifactProvenanceRepository: next.provenance,
+          authorizeScope: async () => undefined,
+          readSourceVersionMapping: (target, archive) =>
+            nextImporter.readArtifactSourceVersionMapping(
+              { projectId: target.projectId, sessionId: target.sessionId },
+              {
+                artifactId: target.artifactId,
+                versionId: target.versionId,
+                checksum: archive.checksum,
+                sizeBytes: archive.sizeBytes
+              }
+            )
+        })
+        const secondPayload = await secondReader.read(secondTarget)
+        expect(secondPayload.archive).toEqual(native.archive)
+        expect(secondPayload.media.map((media) => media.versionId)).toEqual([
+          secondOrigin.identities[copyOrigin.identities[nativeMedia.versionId]],
+          secondOrigin.identities[copyOrigin.identities[duplicate.versionId]]
+        ])
+        for (const media of secondPayload.media)
+          expect((await secondReader.readMedia(secondTarget, media.mediaKey)).body).toEqual(
+            new Uint8Array(bytes)
+          )
+        const secondReference = {
+          artifactId: secondTarget.artifactId,
+          versionId: secondTarget.versionId,
+          checksum: identity.checksum,
+          sizeBytes: identity.sizeBytes
+        }
+        await expect(
+          nextImporter.readArtifactSourceVersionMapping(secondImport, {
+            ...secondReference,
+            checksum: 'f'.repeat(64)
+          })
+        ).rejects.toThrow('exact archive')
+        await expect(
+          nextImporter.readArtifactSourceVersionMapping(imported, secondReference)
+        ).rejects.toThrow()
+        await second.client.artifactVersion.update({
+          where: { id: secondTarget.versionId },
+          data: { managedVisibleAt: null }
+        })
+        await expect(
+          nextImporter.readArtifactSourceVersionMapping(secondImport, secondReference)
+        ).rejects.toThrow('not published')
+        await second.client.artifactVersion.update({
+          where: { id: secondTarget.versionId },
+          data: { managedVisibleAt: new Date() }
+        })
+        // Two valid current Versions claiming the same ancestral identity stay ambiguous.
+        const copiedDuplicate = await receiving.client.artifactVersion.findUniqueOrThrow({
+          where: { id: copyOrigin.identities[duplicate.versionId] }
+        })
+        const sourcePath = join(
+          receiving.storageRoot,
+          dirname(copiedDuplicate.contentStorageKey!),
+          'reproducibility-source.json'
+        )
+        const sourceText = await readFile(sourcePath, 'utf8')
+        for (const mode of ['collision', 'foreign-scope']) {
+          const duplicateSource = JSON.parse(sourceText)
+          duplicateSource.sourceScope.versionId = nativeMedia.versionId
+          duplicateSource.sourceScope.artifactId = nativeMedia.artifactId
+          if (mode === 'foreign-scope')
+            duplicateSource.sourceScope.projectId = 'foreign-author-project'
+          await writeFile(sourcePath, JSON.stringify(duplicateSource))
+          const collisionPath = join(receiving.storageRoot, `${mode}-duplicates.science`)
+          await importer.exportTo(copy, collisionPath)
+          const collision = await nextImporter.importFrom(collisionPath)
+          const collisionOrigin = await nextImporter.readOrigin(collision)
+          const collisionTarget = {
+            projectId: collision.projectId,
+            sessionId: collision.sessionId,
+            artifactId: collisionOrigin.identities[copiedArchive.artifactId],
+            versionId: collisionOrigin.identities[copiedArchive.versionId]
+          }
+          const collisionMapping = await nextImporter.readArtifactSourceVersionMapping(collision, {
+            ...secondReference,
+            artifactId: collisionTarget.artifactId,
+            versionId: collisionTarget.versionId
+          })
+          const collisionPayload = await secondReader.read(collisionTarget)
+          if (mode === 'collision') {
+            expect(collisionMapping[nativeMedia.versionId]).toBeUndefined()
+            expect(collisionPayload.media).toEqual([])
+          } else {
+            // A foreign ancestral scope cannot collide with or redirect this archive's alias.
+            expect(collisionMapping[nativeMedia.versionId]).toBe(
+              collisionOrigin.identities[copyOrigin.identities[nativeMedia.versionId]]
+            )
+            expect(collisionPayload.media.map((media) => media.mediaKey)).toEqual([
+              'native-frame-0'
+            ])
+          }
+        }
+        const secondSessions = new SessionRepository(second.storageRoot)
+        const secondSession = await secondSessions.loadSession(
+          secondImport.projectId,
+          secondImport.sessionId
+        )
+        const inconsistentScope = vi
+          .spyOn(SessionRepository.prototype, 'loadSessionWithDiagnostics')
+          .mockResolvedValueOnce({
+            status: 'found',
+            session: {
+              ...secondSession!,
+              packageOrigin: {
+                ...secondSession!.packageOrigin!,
+                importId: 'incorrect-import'
+              }
+            }
+          })
+        await expect(
+          nextImporter.readArtifactSourceVersionMapping(secondImport, secondReference)
+        ).rejects.toThrow('receiving Session')
+        inconsistentScope.mockRestore()
+        // A retained records document whose checksum chain changed cannot supply aliases.
+        const recordsPath = join(
+          second.storageRoot,
+          'artifacts',
+          secondImport.projectId,
+          secondImport.sessionId,
+          '.session-package',
+          'source',
+          'records.json'
+        )
+        const recordsText = await readFile(recordsPath, 'utf8')
+        await writeFile(recordsPath, recordsText + '\n')
+        await expect(
+          nextImporter.readArtifactSourceVersionMapping(secondImport, secondReference)
+        ).rejects.toThrow('source records checksum mismatch')
+      } finally {
+        await nextImporter.close()
+      }
+    } finally {
+      await recorder.close()
       await exporter.close()
       await importer.close()
     }

@@ -32,10 +32,13 @@ export type ViewerAppProps = {
   /** An explicitly installed host adapter may forward a selection. The standalone page never
    * trusts a parent URL parameter and never sends wildcard postMessage notifications. */
   onSelectionCaptured?: (selection: RunObservationSelection) => void | Promise<void>
+  /** Trusted host/test navigation adapter; no destination comes from the project iframe. */
+  navigateToArchive?: (url: string) => void
 }
 export const ViewerApp = ({
   client: providedClient,
-  onSelectionCaptured
+  onSelectionCaptured,
+  navigateToArchive = (url) => window.location.replace(url)
 }: ViewerAppProps): React.JSX.Element => {
   const { t } = useTranslation()
   const [client] = useState(() => providedClient ?? new ReplayViewerClient())
@@ -65,6 +68,9 @@ export const ViewerApp = ({
   const [access, setAccess] = useState<RuntimeViewAccess>()
   const [opening, setOpening] = useState(false)
   const [projectError, setProjectError] = useState(false)
+  const [archiveOpening, setArchiveOpening] = useState(false)
+  const [archiveError, setArchiveError] = useState(false)
+  const archivePending = useRef(false)
   const openPending = useRef(false)
   const current = useRef({ snapshot, connection })
   useLayoutEffect(() => {
@@ -105,6 +111,28 @@ export const ViewerApp = ({
     setSelection(captured)
     await onSelectionCaptured?.(captured)
   }
+  const openArchive = async (): Promise<void> => {
+    if (!recordingStatus?.archive || context?.presentation !== 'browser' || archivePending.current)
+      return
+    archivePending.current = true
+    setArchiveOpening(true)
+    setArchiveError(false)
+    try {
+      const opened = await client.openArchive(recordingStatus.archive)
+      navigateToArchive(opened.url)
+    } catch {
+      setArchiveError(true)
+    } finally {
+      archivePending.current = false
+      setArchiveOpening(false)
+    }
+  }
+  const archiveAction =
+    context?.presentation === 'browser' && recordingStatus?.archive
+      ? () => {
+          void openArchive()
+        }
+      : undefined
   const openProject = async (): Promise<void> => {
     if (
       !context?.canInteract ||
@@ -230,8 +258,28 @@ export const ViewerApp = ({
       </div>
       {recordingStatus ? (
         <div className="shrink-0 border-b border-border-200 px-3 py-2">
-          <ObservationRecordingStatus status={recordingStatus} />
+          <ObservationRecordingStatus
+            status={recordingStatus}
+            onOpenArchive={archiveAction}
+            openingArchive={archiveOpening}
+          />
         </div>
+      ) : null}
+      {archiveError ? (
+        <ErrorNotice
+          inline
+          title={t('Could not open the research viewer.')}
+          description={t(
+            'The archived observation could not be loaded. Retry to read this saved Version.'
+          )}
+          primaryButton={{
+            label: t('Retry'),
+            onClick: () => {
+              void openArchive()
+            },
+            disabled: archiveOpening
+          }}
+        />
       ) : null}
       {projectError ? (
         <ErrorNotice
@@ -270,6 +318,22 @@ export const ViewerApp = ({
           }
           runtimeSurface={runtimeSurface}
           renderRecordedSurface={(record) => {
+            // The Run owner releases its live image cache at cleanup. Absence from that cache
+            // after completion is not evidence that no image was recorded in the archive.
+            if (snapshot.run?.status !== 'running' && snapshot.run?.status !== 'queued')
+              return (
+                <div className="p-4 text-sm text-muted-foreground">
+                  {recordingStatus ? (
+                    <ObservationRecordingStatus
+                      status={recordingStatus}
+                      onOpenArchive={archiveAction}
+                      openingArchive={archiveOpening}
+                    />
+                  ) : (
+                    <p role="status">{t('Recording status is unavailable.')}</p>
+                  )}
+                </div>
+              )
             const frames = capturesForObservation(captured.captures, record)
             return frames.length ? (
               <RecordedProjectImages

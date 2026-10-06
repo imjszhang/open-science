@@ -262,7 +262,8 @@
       "src/main/runtime-view/browser-host.integration.test.ts",
       "src/main/runtime-view/tuanzi.macos.integration.test.ts",
       "src/renderer/replay-viewer/browser.integration.test.ts",
-      "src/main/run-observation/capture-package.integration.test.ts"
+      "src/main/run-observation/capture-package.integration.test.ts",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

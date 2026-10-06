@@ -10,6 +10,11 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { RuntimeViewAccess, RuntimeViewScope } from '../../shared/runtime-view'
 import { OwnedRuntimeViewService } from './owned-service'
 import { RuntimeViewOwner, type OpenRuntimeViewOptions, type RuntimeViewLimits } from './owner'
+import { createElectronCallerContext } from '../caller-context'
+import {
+  desktopObservationFrameRegistry,
+  type DesktopObservationFrame
+} from '../replay-viewer/desktop-frame-registry'
 
 const loopbackLookup = {
   family: 4,
@@ -259,6 +264,63 @@ function assertSocketProof(seen: SeenRequest[]): void {
 }
 
 describe.skipIf(process.platform === 'win32')('owned interactive runtime view transport', () => {
+  it('registers only its granted runtime frame under the exact authenticated viewer until Run release', async () => {
+    const viewerOrigin = 'http://viewer-runtime-fixture.localhost:32123'
+    const grant = randomBytes(32).toString('hex')
+    const viewerUrl = `${viewerOrigin}/__open_science_viewer?grant=${grant}`
+    const viewer = desktopObservationFrameRegistry.registerViewer({
+      origin: viewerOrigin,
+      caller: createElectronCallerContext(17),
+      expiresAt: Date.now() + 60000,
+      assertCurrent: () => undefined
+    })
+    const mainFrame: DesktopObservationFrame = {
+      frameTreeNodeId: 100,
+      url: 'file:///app/index.html',
+      parent: null
+    }
+    const viewerFrame: DesktopObservationFrame = {
+      frameTreeNodeId: 101,
+      url: viewerOrigin + '/',
+      parent: mainFrame
+    }
+    const projectFrame: DesktopObservationFrame = {
+      frameTreeNodeId: 102,
+      url: 'about:blank',
+      parent: viewerFrame
+    }
+    const allows = (url: string, frame = projectFrame): boolean =>
+      desktopObservationFrameRegistry.allows({ url, webContentsId: 17, frame, mainFrame })
+    try {
+      viewer.issueGrant(viewerUrl, Date.now() + 60000)
+      expect(allows(viewerUrl, viewerFrame)).toBe(true)
+      viewer.authenticateGrant(grant)
+      const f = await fixture()
+      const controller = new AbortController()
+      const service = await openService(f, controller)
+      const owner = new RuntimeViewOwner()
+      owners.push(owner)
+      const access = await owner.open({
+        scope,
+        service,
+        title: 'Desktop',
+        allowedParentOrigins: [viewerOrigin, 'file:'],
+        adaptFrameAncestors: true
+      })
+      const origin = new URL(access.url).origin
+      expect(allows(access.url, viewerFrame)).toBe(false)
+      expect(allows(origin + '/')).toBe(false)
+      expect(allows(access.url)).toBe(true)
+      expect((await http(access.url)).status).toBe(303)
+      expect(allows(origin + '/')).toBe(true)
+      expect(allows(access.url)).toBe(false)
+      controller.abort()
+      expect(allows(origin + '/')).toBe(false)
+    } finally {
+      viewer.close()
+    }
+  })
+
   it('serves assets and POST on the same proven Unix connections without forwarding management credentials', async () => {
     const v = await openView({ allowedRequestHeaders: ['x-project-csrf'] })
     expect(v.bootstrap.status).toBe(303)

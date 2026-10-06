@@ -346,7 +346,8 @@
       "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
       "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
       "src/renderer/src/pages/workspace/RunObservationPreview.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

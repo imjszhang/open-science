@@ -1,8 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
 import type { ObservationQuestionRecovery } from './replay/use-observation-question-recovery'
+import { useObservationRecordingStatus } from './replay/use-observation-recording-status'
+import { ObservationRecordingStatus } from './replay/ObservationRecordingStatus'
+import { showRecordedObservation } from './replay/open-run-observation'
 import type {
   RunObservationSelection,
   RunObservationTarget
@@ -120,6 +123,24 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
   const [openFailed, setOpenFailed] = useState(false)
   const [selectionFailed, setSelectionFailed] = useState<'read' | 'ask'>()
   const [retry, setRetry] = useState(0)
+  const liveTarget = admission.mode === 'live' ? admission.target : undefined
+  const readRecordingStatus = useCallback(
+    () => window.api.observations.recordingStatus({ target: liveTarget! }),
+    [liveTarget]
+  )
+  const { status: recordingStatus } = useObservationRecordingStatus({
+    target: liveTarget,
+    read: readRecordingStatus,
+    active: Boolean(
+      liveTarget &&
+      access &&
+      props.isActive &&
+      typeof window.api?.observations?.recordingStatus === 'function'
+    ),
+    // The outer host does not own the iframe's live snapshot. Keep checking until the
+    // exact archive receipt settles or the preview becomes inactive.
+    running: true
+  })
   const delivered = useRef(new Set<string>())
   const [requestedSelectionId, setRequestedSelectionId] = useState<string>()
   const [recovering, setRecovering] = useState(false)
@@ -258,6 +279,16 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
         />
       ) : access ? (
         <>
+          {recordingStatus?.archive ? (
+            <div className="shrink-0 border-b border-border-200 px-3 py-2">
+              <ObservationRecordingStatus
+                status={recordingStatus}
+                onOpenArchive={() =>
+                  showRecordedObservation(recordingStatus.archive!, t('Archived observation'))
+                }
+              />
+            </div>
+          ) : null}
           {draftReceived ? (
             <p role="status" className="shrink-0 border-b border-border-200 px-3 py-2 text-xs">
               {t('Selected step added to the current draft. Review it before sending.')}

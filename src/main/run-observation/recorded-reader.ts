@@ -25,9 +25,11 @@ export type RecordedObservationReaderDependencies = {
     'resolvePublishedSessionVersionsByContent'
   >
   authorizeScope(target: RecordedObservationTarget): Promise<void>
-  /** Main-only retained import receipt; never supplied by archive content or a public request. */
+  /** Main-only retained import receipt or exact native publication attestation. The fingerprint
+   * describes the bytes this reader verified, and is never accepted from a public request. */
   readSourceVersionMapping?(
-    target: RecordedObservationTarget
+    target: RecordedObservationTarget,
+    archive: { recordingId: string; checksum: string; sizeBytes: number; content: Uint8Array }
   ): Promise<Readonly<Record<string, string>> | undefined>
 }
 export type RecordedObservationReader = {
@@ -171,7 +173,15 @@ export function createRecordedObservationReader(
         checksum: candidate.checksum!,
         size: candidate.size
       }))
-    const mapping = await dependencies.readSourceVersionMapping?.({ ...target })
+    const mapping = await dependencies.readSourceVersionMapping?.(
+      { ...target },
+      {
+        recordingId: archive.recordingId,
+        checksum: checksum(bytes),
+        sizeBytes: bytes.byteLength,
+        content: bytes
+      }
+    )
     const historical = dependencies.artifactProvenanceRepository
     if (historical) {
       const contents = [

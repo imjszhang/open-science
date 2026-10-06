@@ -404,24 +404,25 @@ export async function composeManagedExecution({
     projectFilesRepository: sessionAuthority.projectFilesRepository,
     artifactProvenanceRepository: managedFiles.artifactProvenanceRepository,
     authorizeScope: authorizeObservationScope,
-    readSourceVersionMapping: async (target) => {
+    readSourceVersionMapping: async (target, archiveIdentity) => {
+      // A working copy can contain both imported archives and new native recordings.
+      const native = await service.readNativeObservationSourceVersionMapping(
+        target,
+        archiveIdentity
+      )
+      if (native) return native
       const source = await sessions.readSessionSnapshot(target.projectId, target.sessionId)
       const receipt = source?.packageOrigin ?? source?.forkOrigin
       if (!receipt) return undefined
-      const origin = await sessionPackages.sessionPackageService.readOrigin({
-        projectId: target.projectId,
-        sessionId: target.sessionId
-      })
-      if (
-        origin.receiptIdentity.importId !== receipt.importId ||
-        origin.receiptIdentity.manifestChecksum !== receipt.manifestChecksum ||
-        origin.sourceManifest.source.projectId !== receipt.sourceProjectId ||
-        origin.sourceManifest.source.sessionId !== receipt.sourceSessionId ||
-        origin.identities[receipt.sourceProjectId] !== target.projectId ||
-        origin.identities[receipt.sourceSessionId] !== target.sessionId
+      return sessionPackages.sessionPackageService.readArtifactSourceVersionMapping(
+        { projectId: target.projectId, sessionId: target.sessionId },
+        {
+          artifactId: target.artifactId,
+          versionId: target.versionId,
+          checksum: archiveIdentity.checksum,
+          sizeBytes: archiveIdentity.sizeBytes
+        }
       )
-        throw new Error('The recorded source receipt is unavailable.')
-      return origin.identities
     }
   })
   const observationViewers = new ObservationViewers({

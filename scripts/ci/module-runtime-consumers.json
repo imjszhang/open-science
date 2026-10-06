@@ -30,5 +30,21 @@
   ],
   "src/main/run-observation/electron-capture.ts": [
     "src/main/run-observation/electron-capture.integration.test.ts"
-  ]
+  ],
+  "src/main/navigation-policy.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/main/replay-viewer/desktop-frame-registry.ts": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/main/replay-viewer/http-host.ts": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/main/replay-viewer/assets.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/main/managed-runtime-views.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/main/run-observation/owner.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/main/run-observation/viewers.ts": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/main/caller-context.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/renderer/index.html": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/main/preview-context-menu.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"]
 }

@@ -706,7 +706,8 @@
       "src/main/artifacts/session-version-content-reader.test.ts",
       "src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx",
       "src/renderer/replay-viewer/ObservationCaptureControls.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

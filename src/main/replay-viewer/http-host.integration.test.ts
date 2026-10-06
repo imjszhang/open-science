@@ -8,6 +8,10 @@ import { recordedFixture } from '../run-observation/recorded-viewer.test-support
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import {
+  desktopObservationFrameRegistry,
+  type DesktopObservationFrame
+} from './desktop-frame-registry'
+import {
   ReplayViewerHttpHost,
   type ReplayViewerHttpAccess,
   type ReplayViewerHttpDependencies,
@@ -85,7 +89,7 @@ function harness(
       ? {
           recorded: {
             authorizeScope: async () => undefined,
-            read: async () => recordedFixture().payload
+            read: async (target) => ({ ...recordedFixture().payload, receiving: target })
           }
         }
       : {}),
@@ -226,6 +230,177 @@ async function open(
   }
 }
 describe('isolated Replay viewer HTTP host', () => {
+  it('opens a published archive on a new browser viewer from the current bound receipt without opening any project service', async () => {
+    const archive = {
+      projectId: scope.projectId,
+      sessionId: scope.sessionId,
+      artifactId: 'archive-artifact',
+      versionId: 'archive-version'
+    }
+    const h = harness({
+      recorded: true,
+      recordingStatus: async () => ({ target: scope, state: 'saved', archive })
+    })
+    h.source.run!.status = 'completed'
+    const v = await open(h)
+    expect(JSON.parse((await v.get('/api/context')).body).presentation).toBe('browser')
+    const response = await v.post('/api/open-archive', {})
+    expect(response.status).toBe(200)
+    const access = JSON.parse(response.body) as ReplayViewerHttpAccess
+    expect(access).toMatchObject({ mode: 'recorded', target: archive })
+    expect(access.viewerId).not.toBe(v.access.viewerId)
+    const boot = await http(access.url)
+    expect(boot.status).toBe(303)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(access.url).origin
+    const recorded = await http(origin + '/api/recording', { headers: { cookie } })
+    expect(recorded.status).toBe(200)
+    expect(JSON.parse(recorded.body).receiving).toEqual(archive)
+    const selected = await http(origin + '/api/recording/select', {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ stepKey: 'observation-0' })
+    })
+    expect(selected.status).toBe(200)
+    expect(JSON.parse(selected.body).receiving).toEqual(archive)
+    expect((await v.post('/api/open-archive', { target: archive })).status).toBe(400)
+    expect(h.projectOpen).not.toHaveBeenCalled()
+    expect(h.cancel).not.toHaveBeenCalled()
+  })
+
+  it.each(['saving', 'failed', 'not-recorded', 'foreign-target', 'foreign-archive'] as const)(
+    'rejects archive transition without this exact published receipt: %s',
+    async (state) => {
+      const archive = {
+        projectId: scope.projectId,
+        sessionId: scope.sessionId,
+        artifactId: 'archive-artifact',
+        versionId: 'archive-version'
+      }
+      const h = harness({
+        recorded: true,
+        recordingStatus: async () =>
+          state === 'foreign-target'
+            ? { target: { ...scope, operationId: 'other-operation' }, state: 'saved', archive }
+            : state === 'foreign-archive'
+              ? {
+                  target: scope,
+                  state: 'saved',
+                  archive: { ...archive, sessionId: 'other-session' }
+                }
+              : { target: scope, state }
+      })
+      const create = vi.spyOn(h.viewers, 'createRecorded')
+      const v = await open(h)
+      expect((await v.post('/api/open-archive', {})).status).toBe(409)
+      expect(create).not.toHaveBeenCalled()
+      expect(h.projectOpen).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not let an Electron iframe silently replace the outer selection owner', async () => {
+    const archive = {
+      projectId: scope.projectId,
+      sessionId: scope.sessionId,
+      artifactId: 'a',
+      versionId: 'v'
+    }
+    const h = harness({
+      recorded: true,
+      recordingStatus: async () => ({ target: scope, state: 'saved', archive })
+    })
+    const owner = createCallerContext({ ...h.owner, surface: 'electron', clientId: '17' })
+    const access = await h.host.open(scope, owner, { desktopParent: 'file:' })
+    const boot = await http(access.url)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(access.url).origin
+    expect(
+      JSON.parse((await http(origin + '/api/context', { headers: { cookie } })).body).presentation
+    ).toBe('desktop')
+    expect(
+      (
+        await http(origin + '/api/open-archive', {
+          method: 'POST',
+          headers: { cookie, origin, 'content-type': 'application/json' },
+          body: '{}'
+        })
+      ).status
+    ).toBe(403)
+    expect(h.projectOpen).not.toHaveBeenCalled()
+  })
+
+  it('rechecks original caller authorization after archive status is read', async () => {
+    const archive = {
+      projectId: scope.projectId,
+      sessionId: scope.sessionId,
+      artifactId: 'a',
+      versionId: 'v'
+    }
+    const h = harness({
+      recorded: true,
+      recordingStatus: async () => {
+        h.setAuthorized(false)
+        return { target: scope, state: 'saved', archive }
+      }
+    })
+    const create = vi.spyOn(h.viewers, 'createRecorded')
+    const v = await open(h)
+    // Revocation can close the in-flight socket as well as rejecting the HTTP response.
+    await expect(v.post('/api/open-archive', {}).then((response) => response.status)).resolves.toBe(
+      401
+    )
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('registers desktop navigation only for its actual Electron owner and HTTP-authenticated frame', async () => {
+    const h = harness()
+    const owner = createCallerContext({ ...h.owner, surface: 'electron', clientId: '17' })
+    const access = await h.host.open(scope, owner, { desktopParent: 'file:' })
+    const origin = new URL(access.url).origin
+    const mainFrame: DesktopObservationFrame = {
+      frameTreeNodeId: 100,
+      url: 'file:///app/index.html',
+      parent: null
+    }
+    const frame: DesktopObservationFrame = {
+      frameTreeNodeId: 101,
+      url: 'about:blank',
+      parent: mainFrame
+    }
+    const allows = (url: string, webContentsId = 17): boolean =>
+      desktopObservationFrameRegistry.allows({ url, webContentsId, frame, mainFrame })
+    expect(allows(access.url, 18)).toBe(false)
+    expect(allows(origin + '/')).toBe(false)
+    expect(allows(access.url)).toBe(true)
+    expect(allows(origin + '/')).toBe(false)
+    expect((await http(access.url)).status).toBe(303)
+    expect(allows(origin + '/')).toBe(true)
+    expect(allows(access.url)).toBe(false)
+    h.setAuthorized(false)
+    expect(allows(origin + '/')).toBe(false)
+    h.setAuthorized(true)
+    await h.viewers.revoke(access.viewerId, { caller: owner })
+    expect(allows(origin + '/')).toBe(false)
+  })
+
+  it('does not register an external SDK viewer as an Electron iframe capability', async () => {
+    const h = harness()
+    const access = await h.host.open(scope, h.owner, { desktopParent: 'file:' })
+    const mainFrame: DesktopObservationFrame = {
+      frameTreeNodeId: 100,
+      url: 'file:///app/index.html',
+      parent: null
+    }
+    expect(
+      desktopObservationFrameRegistry.allows({
+        url: access.url,
+        webContentsId: 17,
+        frame: { frameTreeNodeId: 101, url: 'about:blank', parent: mainFrame },
+        mainFrame
+      })
+    ).toBe(false)
+  })
+
   it('keeps capture permission separate and binds saved images to an actual viewer observation without guessing cursors', async () => {
     const image = Buffer.from('verified fixture bytes')
     let result:

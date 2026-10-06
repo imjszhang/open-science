@@ -31,6 +31,7 @@ import {
   type PersistedChatSession
 } from '../../shared/session-persistence'
 import { SessionRepository } from '../session-persistence/repository'
+import { SessionPersistenceStateOwner } from '../session-persistence/state-owner'
 import { initDataRoot } from '../storage-root'
 
 const createDeferred = <Value = void>(): {
@@ -137,9 +138,19 @@ describe('ordinary application operation admission', () => {
               .getActivePromptSessions()
               .some((scope) => scope.projectId === projectId && scope.sessionId === sessionId),
           hasLiveRuntimeSession: (projectId, sessionId) =>
+            owner.hasActiveSessionOperation(projectId, sessionId) ||
             owner.hasLiveSession(projectId, sessionId)
         })
       const repository = repositoryFor(coordinator)
+      const persistence = new SessionPersistenceStateOwner({
+        repository,
+        fileIndex: { syncSession: vi.fn(async () => []) },
+        assertMutable: vi.fn(),
+        notifyFilesChanged: vi.fn(),
+        notifyRuntimeContextSessionUpdated: vi.fn(),
+        notifyRuntimeTranscriptSessionUpdated: vi.fn(),
+        log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+      })
       const release = await coordinator.reserveSessionOperation(operationScope, vi.fn())
       try {
         const admitted = await repository.saveSession(
@@ -173,8 +184,24 @@ describe('ordinary application operation admission', () => {
         expect(live).toMatchObject({ status: 'running', activeRun: admitted.activeRun })
         expect(live?.error).toBeUndefined()
         expect(live?.resumeRecovery).toBeUndefined()
-        // A normal read-modify-write must not persist a false restart classification.
-        await repository.saveSession({ ...live!, title: 'Still observing the same operation' })
+        // Renderer preference saves use the StateOwner, which checks live runtime ownership
+        // before rebasing. A plain repository read alone does not cover this recovery path.
+        const preference = await persistence.saveSession(
+          {
+            ...live!,
+            agentConfiguration: {
+              providerId: 'provider-1',
+              model: 'alternate-model',
+              reasoningEffort: 'default'
+            }
+          },
+          { conflictRebaseFields: ['agentConfiguration'] }
+        )
+        expect(preference).toMatchObject({ status: 'running', activeRun: admitted.activeRun })
+        expect(preference.agentConfiguration?.model).toBe('alternate-model')
+        expect(preference.messages[0].turnOutcome).toBeUndefined()
+        expect(preference.resumeRecovery).toBeUndefined()
+        await persistence.prepareRuntimeResume(operationScope)
         const readBack = await repository.loadSession(
           operationScope.projectId,
           operationScope.sessionId

@@ -4,10 +4,12 @@ import type { RunObservationRecordingStatus } from '../../../../../shared/run-ob
 
 export const ObservationRecordingStatus = ({
   status,
-  onOpenArchive
+  onOpenArchive,
+  openingArchive = false
 }: {
   status: RunObservationRecordingStatus
   onOpenArchive?: () => void
+  openingArchive?: boolean
 }): React.JSX.Element => {
   const { t } = useTranslation()
   const label =
@@ -41,8 +43,8 @@ export const ObservationRecordingStatus = ({
       <p>{label}</p>
       {capacity ? <p className="text-status-warning-foreground">{capacity}</p> : null}
       {status.archive && onOpenArchive ? (
-        <Button size="sm" variant="outline" onClick={onOpenArchive}>
-          {t('View archived replay')}
+        <Button size="sm" variant="outline" onClick={onOpenArchive} disabled={openingArchive}>
+          {openingArchive ? t('Loading…') : t('View archived replay')}
         </Button>
       ) : null}
     </div>

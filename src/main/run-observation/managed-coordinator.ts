@@ -7,7 +7,12 @@ import {
   type ManagedObservationResult
 } from '../../shared/managed-execution'
 import { runObservationTargetSchema, type RunObservationTarget } from '../../shared/run-observation'
-import type { RunObservationArchiveMedia } from '../../shared/run-observation-archive'
+import {
+  MAX_RUN_OBSERVATION_ARCHIVE_BYTES,
+  parseRunObservationArchive,
+  type RunObservationArchiveMedia
+} from '../../shared/run-observation-archive'
+import { recordedObservationTargetSchema } from '../../shared/run-observation-recorded'
 import type { ArtifactVersionFile } from '../../shared/artifact-provenance'
 import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
 import type { SessionOperationContext } from '../notebook/session-operation-owner'
@@ -344,6 +349,97 @@ export class ManagedRunObservationCoordinator {
     return this.exclusive(target, async () => (await this.read(target))?.result).catch(
       () => undefined
     )
+  }
+
+  /** An author's native archive has no import receipt. Its private Main publication receipt,
+   * not a filename or self-declared source ID, can attest identity for duplicate-content media.
+   * This is read-only and deliberately cannot confirm, save, or recover an Artifact write. */
+  async readNativeSourceVersionMapping(
+    targetInput: z.infer<typeof recordedObservationTargetSchema>,
+    archiveInput: {
+      recordingId: string
+      checksum: string
+      sizeBytes: number
+      content: Uint8Array
+    }
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    try {
+      const target = recordedObservationTargetSchema.parse(targetInput)
+      const identity = z
+        .object({
+          recordingId: checksum,
+          checksum,
+          sizeBytes: count.max(MAX_RUN_OBSERVATION_ARCHIVE_BYTES),
+          content: z.instanceof(Uint8Array)
+        })
+        .strict()
+        .parse(archiveInput)
+      const result = await readDurableJsonFile(
+        join(this.directory, `${identity.recordingId}.json`),
+        this.decode,
+        {},
+        { maxBytes: MAX_RECORD_BYTES }
+      )
+      if (result.status !== 'found') return undefined
+      const record = result.value
+      const reference = record.reference
+      if (
+        record.recordingId !== identity.recordingId ||
+        record.target.projectId !== target.projectId ||
+        record.target.sessionId !== target.sessionId ||
+        record.result.status !== 'published' ||
+        !reference ||
+        reference.artifactId !== target.artifactId ||
+        reference.versionId !== target.versionId ||
+        reference.checksum !== identity.checksum ||
+        reference.sizeBytes !== identity.sizeBytes
+      )
+        return undefined
+      await this.verify(record.target, reference, true)
+      // These are the reader's already verified immutable Version bytes. Re-check their exact
+      // digest against the private publication receipt; recording caches may have been deleted.
+      if (
+        identity.content.byteLength !== identity.sizeBytes ||
+        createHash('sha256').update(identity.content).digest('hex') !== identity.checksum
+      )
+        return undefined
+      const archive = parseRunObservationArchive(
+        new TextDecoder('utf-8', { fatal: true }).decode(identity.content)
+      )
+      if (archive.recordingId !== record.recordingId) return undefined
+      const versionIds = [...new Set(archive.media.flatMap((media) => media.sourceVersionId ?? []))]
+      const mapping: Record<string, string> = Object.create(null)
+      for (let start = 0; start < versionIds.length; start += 100) {
+        const batch = versionIds.slice(start, start + 100)
+        const versions = await this.dependencies.artifacts.resolveVersionDescriptors({
+          projectId: target.projectId,
+          appSessionId: target.sessionId,
+          versionIds: batch
+        })
+        for (const versionId of batch) {
+          const exact = versions.filter((version) => version.versionId === versionId)
+          const version = exact.length === 1 ? exact[0] : undefined
+          if (
+            version?.projectId === target.projectId &&
+            version.sessionId === target.sessionId &&
+            version.state === 'finalized' &&
+            version.isPublished === true &&
+            id.safeParse(version.artifactId).success &&
+            archive.media
+              .filter((media) => media.sourceVersionId === versionId)
+              .every(
+                (media) => media.checksum === version.checksum && media.sizeBytes === version.size
+              )
+          )
+            mapping[versionId] = versionId
+        }
+      }
+      // Publication may have changed while reading the exact media Versions.
+      await this.verify(record.target, reference, true)
+      return mapping
+    } catch {
+      return undefined
+    }
   }
 
   /** Confirmation is independent of the execution environment and may be retried after release. */

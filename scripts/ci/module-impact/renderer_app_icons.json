@@ -220,7 +220,8 @@
       "src/renderer/replay-viewer/browser.integration.test.ts",
       "src/renderer/replay-viewer/recorded-viewer.test.tsx",
       "src/renderer/src/pages/workspace/RecordedRunObservationPreview.test.tsx",
-      "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx"
+      "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

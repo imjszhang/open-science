@@ -16,6 +16,10 @@ import type {
 } from '../../shared/runtime-view'
 import { isRuntimeViewPath } from '../../shared/runtime-view'
 import { OwnedRuntimeViewService, sameRuntimeViewScope } from './owned-service'
+import {
+  desktopObservationFrameRegistry,
+  type DesktopObservationRegistration
+} from '../replay-viewer/desktop-frame-registry'
 
 interface RuntimeViewLimits {
   maxViews: number
@@ -64,6 +68,7 @@ interface ViewRecord {
   expiry?: ReturnType<typeof setTimeout>
   onAbort: () => void
   webSockets: WebSocketServer
+  desktopFrames?: DesktopObservationRegistration
 }
 const defaults: RuntimeViewLimits = {
   maxViews: 8,
@@ -297,6 +302,16 @@ export class RuntimeViewOwner {
       // after the operating system reassigns a released TCP port to another view generation.
       view.origin = `http://rv-${viewId}.localhost:${address.port}`
       OwnedRuntimeViewService.assertOwned(options.service, options.scope)
+      view.desktopFrames = desktopObservationFrameRegistry.registerRuntime({
+        origin: view.origin,
+        parents: view.parents,
+        expiresAt: now + this.limits.lifetimeMs,
+        assertCurrent: () => {
+          this.assertAuthorization(view)
+          view.service.assertCurrent()
+        },
+        allowsPath: (path) => !!safePath(path) && view.service.permitsPath(path)
+      })
       view.expiry = setTimeout(
         () => this.closeRecord(view, 'closed', 'expired'),
         this.limits.lifetimeMs
@@ -330,8 +345,11 @@ export class RuntimeViewOwner {
     for (const [grant, expiry] of view.grants) if (expiry < Date.now()) view.grants.delete(grant)
     if (view.grants.size >= 8) throw new Error('Too many pending runtime view grants.')
     const grant = randomBytes(32).toString('hex')
-    view.grants.set(grant, Date.now() + 60000)
-    return { view: this.describe(view), url: `${view.origin}/__open_science_view?grant=${grant}` }
+    const expiresAt = Date.now() + 60000
+    const url = `${view.origin}/__open_science_view?grant=${grant}`
+    view.grants.set(grant, expiresAt)
+    view.desktopFrames?.issueGrant(url, expiresAt)
+    return { view: this.describe(view), url }
   }
 
   revoke(viewId: string, scope: RuntimeViewScope): void {
@@ -356,6 +374,7 @@ export class RuntimeViewOwner {
   private closeRecord(view: ViewRecord, state: 'closed' | 'failed', reason: string): void {
     if (view.descriptor.state !== 'ready') return
     view.descriptor = { ...view.descriptor, state, closedReason: reason }
+    view.desktopFrames?.close()
     view.grants.clear()
     if (view.expiry) clearTimeout(view.expiry)
     view.service.signal.removeEventListener('abort', view.onAbort)
@@ -437,6 +456,7 @@ export class RuntimeViewOwner {
         return
       }
       view.grants.delete(grant)
+      view.desktopFrames?.authenticateGrant(grant)
       const cookiePolicy =
         view.cookiePolicy === 'partitioned'
           ? 'Secure; SameSite=None; Partitioned'

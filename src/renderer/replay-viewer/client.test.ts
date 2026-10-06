@@ -25,6 +25,33 @@ const record = (sequence = 1): RunObservationSnapshot => ({
 const json = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 describe('scoped browser viewer transport', () => {
+  it('requests only its bound archive and validates the exact receiving Version and bootstrap destination', async () => {
+    const target = { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }
+    const access = {
+      mode: 'recorded',
+      viewerId: 'archive-viewer',
+      target,
+      expiresAt: 10000,
+      url: `http://viewer-archive-viewer.localhost:12345/__open_science_viewer?grant=${'a'.repeat(64)}`
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => json(access))
+    const client = new ReplayViewerClient(fetcher)
+    expect(await client.openArchive(target)).toEqual(access)
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      '/api/open-archive',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        redirect: 'error',
+        body: '{}'
+      })
+    )
+    fetcher.mockResolvedValueOnce(json({ ...access, target: { ...target, versionId: 'other' } }))
+    await expect(client.openArchive(target)).rejects.toMatchObject({ kind: 'invalid-response' })
+    fetcher.mockResolvedValueOnce(json({ ...access, url: 'http://localhost:12345/' }))
+    await expect(client.openArchive(target)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+
   it('only sends a cursor and step to the fixed same-origin endpoint, with no management token or target scope', async () => {
     const snapshot = record()
     const selection = {

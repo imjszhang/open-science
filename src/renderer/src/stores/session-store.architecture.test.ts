@@ -1418,7 +1418,8 @@ describe('Session Store architecture', () => {
           'src/renderer/src/pages/workspace/replay/recorded-file-entry.test.ts',
           'src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx',
           'src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx',
-          'src/renderer/src/pages/workspace/RunObservationPreview.test.tsx'
+          'src/renderer/src/pages/workspace/RunObservationPreview.test.tsx',
+          'src/main/replay-viewer/desktop-embed.integration.test.ts'
         ]
       },
       capabilityOverlays: ['renderer_state'],

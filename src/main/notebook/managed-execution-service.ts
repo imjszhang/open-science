@@ -470,6 +470,13 @@ export class ManagedExecutionService {
     }
   }
 
+  /** Main-only exact native archive attestation; no public request can supply this authority. */
+  async readNativeObservationSourceVersionMapping(
+    ...input: Parameters<ManagedRunObservationCoordinator['readNativeSourceVersionMapping']>
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    return this.observationCoordinator.readNativeSourceVersionMapping(...input)
+  }
+
   /** Status never publishes, restarts recording or creates an execution. */
   async recordingStatus(value: unknown): Promise<RunObservationRecordingStatus> {
     const target = inspectionTargetSchema.parse(value)

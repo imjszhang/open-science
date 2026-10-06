@@ -14,10 +14,12 @@ import {
   recordedObservationTargetSchema,
   recordedObservationPayloadSchema,
   type RecordedObservationPayload,
+  type RecordedObservationTarget,
   type RecordedRunObservationSelection
 } from '../../shared/run-observation-recorded'
 import type { ReplayResource } from '../../shared/replay'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
+import type { RecordedObservationViewerAccess } from '../../shared/run-observation-viewer'
 import type { ReplayPreparedResource } from '../src/pages/workspace/replay/replay-resources'
 import { replayImageSource } from '../src/pages/workspace/replay/replay-svg'
 import {
@@ -41,6 +43,7 @@ const liveContextSchema = z
     mode: z.literal('live').optional(),
     target: runObservationTargetSchema,
     expiresAt: z.number().finite(),
+    presentation: z.enum(['desktop', 'browser']).optional(),
     canInteract: z.boolean(),
     canCancel: z.boolean(),
     canCapture: z.boolean().optional(),
@@ -286,6 +289,45 @@ export class ReplayViewerClient {
       undefined,
       signal
     )
+  }
+  async openArchive(expected: RecordedObservationTarget): Promise<RecordedObservationViewerAccess> {
+    const access = await this.json(
+      '/api/open-archive',
+      z
+        .object({
+          mode: z.literal('recorded'),
+          viewerId: id,
+          target: recordedObservationTargetSchema,
+          expiresAt: z.number().finite(),
+          url: z.string().max(8192)
+        })
+        .strict(),
+      {}
+    )
+    let validUrl = false
+    try {
+      const url = new URL(access.url)
+      validUrl =
+        url.protocol === 'http:' &&
+        url.hostname === `viewer-${access.viewerId}.localhost` &&
+        Boolean(url.port) &&
+        !url.username &&
+        !url.password &&
+        !url.hash &&
+        url.pathname === '/__open_science_viewer' &&
+        /^[a-f0-9]{64}$/.test(url.searchParams.get('grant') ?? '') &&
+        [...url.searchParams.keys()].length === 1
+    } catch {
+      /* Invalid access is never a navigation destination. */
+    }
+    if (
+      !validUrl ||
+      (['projectId', 'sessionId', 'artifactId', 'versionId'] as const).some(
+        (field) => access.target[field] !== expected[field]
+      )
+    )
+      throw new ReplayViewerRequestError('invalid-response')
+    return access
   }
   captureOptions(signal?: AbortSignal): Promise<ObservationMediaCaptureOptions> {
     return this.json(

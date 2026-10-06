@@ -83,6 +83,159 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('standalone browser viewer', () => {
+  it('retries archive admission without reopening the completed project or losing the current evidence', async () => {
+    const client = makeClient()
+    const archive = {
+      projectId: 'p',
+      sessionId: 's',
+      artifactId: 'archive',
+      versionId: 'archive-v'
+    }
+    const terminal: RunObservationSnapshot = {
+      ...snapshot,
+      phase: 'completed',
+      run: { ...snapshot.run!, status: 'completed', endedAt: 2000 }
+    }
+    vi.mocked(client.context).mockResolvedValue({ ...context, presentation: 'browser' })
+    vi.mocked(client.history).mockResolvedValue({
+      coverage: 'process-local',
+      truncated: false,
+      snapshots: [terminal]
+    })
+    vi.mocked(client.recordingStatus).mockResolvedValue({
+      target: context.target,
+      state: 'saved',
+      archive
+    })
+    const url = `http://viewer-retry.localhost:12345/__open_science_viewer?grant=${'a'.repeat(64)}`
+    const open = vi
+      .spyOn(client, 'openArchive')
+      .mockRejectedValueOnce(new Error('private failure'))
+      .mockResolvedValue({
+        mode: 'recorded',
+        viewerId: 'retry',
+        target: archive,
+        expiresAt: 10000,
+        url
+      })
+    const project = vi.spyOn(client, 'projectView'),
+      navigate = vi.fn()
+    render(<ViewerApp client={client} navigateToArchive={navigate} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'View archived replay' }))
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(screen.queryByText('private failure')).toBeNull()
+    expect(screen.getByText('actual browser host output')).toBeTruthy()
+    expect(navigate).not.toHaveBeenCalled()
+    fireEvent.click(retry)
+    await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith(url))
+    expect(open.mock.calls).toEqual([[archive], [archive]])
+    expect(project).not.toHaveBeenCalled()
+  })
+
+  it.each(['browser', 'desktop'] as const)(
+    'offers the correct terminal archive handoff for %s without misreporting saved images',
+    async (presentation) => {
+      const client = makeClient()
+      const terminal: RunObservationSnapshot = {
+        ...snapshot,
+        cursor: { ...snapshot.cursor, sequence: 2 },
+        observedAt: 3000,
+        phase: 'completed',
+        run: { ...snapshot.run!, status: 'completed', endedAt: 2900 }
+      }
+      const archive = {
+        projectId: 'p',
+        sessionId: 's',
+        artifactId: 'archive',
+        versionId: 'archive-v'
+      }
+      vi.mocked(client.context).mockResolvedValue({
+        ...context,
+        presentation,
+        canCapture: true,
+        canReadArtifacts: true
+      })
+      vi.mocked(client.history).mockResolvedValue({
+        coverage: 'process-local',
+        truncated: false,
+        snapshots: [snapshot, terminal]
+      })
+      vi.mocked(client.changes).mockResolvedValue({
+        kind: 'delta',
+        from: terminal.cursor,
+        cursor: terminal.cursor,
+        changes: []
+      })
+      vi.mocked(client.recordingStatus).mockResolvedValue({
+        target: context.target,
+        state: 'saved',
+        archive
+      })
+      const url = `http://viewer-saved.localhost:12345/__open_science_viewer?grant=${'a'.repeat(64)}`
+      const open = vi.spyOn(client, 'openArchive').mockResolvedValue({
+        mode: 'recorded',
+        viewerId: 'saved',
+        target: archive,
+        expiresAt: 10000,
+        url
+      })
+      const capture = vi.spyOn(client, 'capture'),
+        project = vi.spyOn(client, 'projectView'),
+        navigate = vi.fn()
+      render(<ViewerApp client={client} navigateToArchive={navigate} />)
+      await screen.findByText('Observation archive saved')
+      fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(
+        screen.queryByText(
+          'No project screen was recorded for this step. The current live page is not historical evidence.'
+        )
+      ).toBeNull()
+      if (presentation === 'browser') {
+        fireEvent.click(screen.getAllByRole('button', { name: 'View archived replay' })[0])
+        await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith(url))
+        expect(open).toHaveBeenCalledExactlyOnceWith(archive)
+      } else {
+        expect(screen.queryByRole('button', { name: 'View archived replay' })).toBeNull()
+        expect(open).not.toHaveBeenCalled()
+        expect(navigate).not.toHaveBeenCalled()
+      }
+      expect(capture).not.toHaveBeenCalled()
+      expect(project).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ['saving', 'Saving observation archive…'],
+    ['failed', 'Observation recording could not be saved. The Run status is separate.']
+  ] as const)(
+    'shows truthful terminal %s guidance instead of declaring the captured image absent',
+    async (state, text) => {
+      const client = makeClient()
+      const terminal: RunObservationSnapshot = {
+        ...snapshot,
+        phase: 'completed',
+        run: { ...snapshot.run!, status: 'completed', endedAt: 2000 }
+      }
+      vi.mocked(client.history).mockResolvedValue({
+        coverage: 'process-local',
+        truncated: false,
+        snapshots: [terminal]
+      })
+      vi.mocked(client.recordingStatus).mockResolvedValue({ target: context.target, state })
+      render(<ViewerApp client={client} />)
+      await screen.findByText(text)
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(screen.getAllByText(text).length).toBeGreaterThan(0)
+      expect(
+        screen.queryByText(
+          'No project screen was recorded for this step. The current live page is not historical evidence.'
+        )
+      ).toBeNull()
+      expect(screen.queryByRole('button', { name: 'View archived replay' })).toBeNull()
+    }
+  )
+
   it('shows only images explicitly associated with the inspected viewer cursor and keeps multiple capture times distinct', async () => {
     const client = makeClient()
     vi.mocked(client.context).mockResolvedValue({

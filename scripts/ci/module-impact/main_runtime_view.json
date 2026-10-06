@@ -12,7 +12,10 @@
     "src/main/runtime-view/owner.integration.test.ts",
     "src/main/runtime-view/owner.ts",
     "src/main/runtime-view/tuanzi.macos.integration.test.ts",
-    "src/shared/runtime-view.ts"
+    "src/shared/runtime-view.ts",
+    "src/main/replay-viewer/desktop-frame-registry.ts",
+    "src/main/replay-viewer/desktop-frame-registry.test.ts",
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
   ],
   "interfacePaths": [
     "src/main/managed-runtime-views.ts",
@@ -20,7 +23,8 @@
     "src/main/replay-viewer/http-host.ts",
     "src/main/runtime-view/owned-service.ts",
     "src/main/runtime-view/owner.ts",
-    "src/shared/runtime-view.ts"
+    "src/shared/runtime-view.ts",
+    "src/main/replay-viewer/desktop-frame-registry.ts"
   ],
   "consumerModules": ["replay_observation"],
   "testFiles": {
@@ -31,7 +35,9 @@
       "src/main/runtime-view/browser-host.integration.test.ts",
       "src/main/runtime-view/launch-schema.test.ts",
       "src/main/runtime-view/owner.integration.test.ts",
-      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/replay-viewer/desktop-frame-registry.test.ts",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -127,7 +133,9 @@
       "src/main/run-observation/auxiliary-output.test.ts",
       "src/main/run-observation/media-collector.test.ts",
       "src/main/run-observation/capture-package.integration.test.ts",
-      "src/renderer/replay-viewer/ObservationCaptureControls.test.tsx"
+      "src/renderer/replay-viewer/ObservationCaptureControls.test.tsx",
+      "src/main/run-observation/recorded-reader.test.ts",
+      "src/main/windows.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],
