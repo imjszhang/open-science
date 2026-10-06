@@ -41,7 +41,7 @@ are untrusted data, and confer no execution or network authority.
       an inferred executable command.
 - [x] Tuanzi live runner, frozen small benchmark protocol, checker and bounded transport fixture
       prepared without provider inference requests.
-- [ ] Authorized actual external requests: establish the new Tuanzi baseline, export/import it,
+- [x] Authorized actual external requests: establish the new Tuanzi baseline, export/import it,
       then execute through external Codex, an ordinary Session and a working-copy Session under
       the single aggregate budget. Validate provider use and resulting evidence separately.
 - [x] Targeted unit/integration/native checks, eight-locale guards, contracts/module impact,
@@ -65,8 +65,8 @@ protocol is not a completed reference experiment. A separate v0.5.6 live-materia
 one small author baseline and three recipient executions. The first real G request reached the
 configured provider but hit the experiment's 60-second I/O timeout before a complete response.
 That failed trial is retained. A separately recorded timeout/output amendment has since completed
-the author G/S baseline and native result-package round trip with 14,037 reported tokens. The three
-recipient entries are still being verified. These four executions validate the product path,
+the author G/S baseline and all three recipient paths, including their native result-package
+round trips. The eight successful G/S requests reported 62,378 tokens. These four executions validate the product path,
 not the proposed 20-pair scientific study or a statistically supported treatment effect.
 
 The user authorized the existing Tuanzi `.env` configuration and then replaced the monetary limit
@@ -281,9 +281,10 @@ single-click project activation during overflowing logs, retained click state ac
 switches, manual upward scrolling entering inspection, and **Back to live** restoring the existing
 project page. A project screenshot was captured for subsequent historical viewing.
 
-No installed-client check made a paid provider request. The final application source is `2cf23e346`;
-later lease-count assertions and this ledger change only tests/documentation. Real provider
-acceptance remains unchecked.
+No installed-client check made a paid provider request. These installed-client checks used source
+`2cf23e346`; the later `188bf72ab` update adds actionable errors for ambiguous immutable material
+selection. Separate acceptance support changes add token accounting and verified resume. Real provider
+acceptance is recorded separately in the amended-study evidence below.
 
 The private-field acceptance is recorded under
 `tuanzi-v056-live-reproduction-20261007/private-fields-ui-01/`. It imported the pending live
@@ -363,3 +364,71 @@ trial reservation remains occupied. That reservation is not reported consumption
 trial or successful result-package round trip was started, and no scientific success is claimed.
 See `token-budget-delivery.json`, `live-token-02/author/validation.json` and the durable budget ledger
 beside the materials. A scan of retained evidence/packages found neither configured credential.
+
+## Amended real-provider acceptance (2026-10-07)
+
+The separately sealed study `tuanzi-v056-live-reproduction-timeout-amendment-20261007` retains the
+frozen v0.5.6 source and explicitly records G timeout 180 seconds, output cap 16,384, project/work/
+driver/Main deadlines 450/480/530/570 seconds. Its scope remains `alternative-conditions`. The
+original timeout failure and its 12,582,912-token reservation remain unchanged and are carried into
+the revised aggregate budget. No result from the earlier failure was rewritten as a success.
+
+The `live-01` author completed real G and S, exported its result, and passed native reimport and
+producer/Artifact-Version checks. Receiver preparation then encountered two equal-content material
+Versions with different provenance. Product commit `188bf72ab` preserves strict selection and
+returns actionable `invalid_request` instead of a generic 500. The acceptance caller now records
+an explicit verified Version for each material. A labelled operator attestation preserves the
+pre-execution failure, exact log/source/budget hashes, and zero usage; an explicit one-time
+reconciliation retains the reservation rather than resetting the budget or inventing a native Run.
+
+Acceptance commit `cc71750e3` adds verified-prefix resume. `live-02` verified and reimported the
+existing author evidence before starting only the remaining three entries. The resumed native
+suite passed in 493.35 seconds (one live test passed; the alternative package-only test skipped).
+
+| Entry                                 | Actual G / S requests | Reported input + output tokens | Native result round trip |
+| ------------------------------------- | --------------------- | -----------------------------: | ------------------------ |
+| Author baseline                       | 1 / 1                 |                         14,037 | Passed                   |
+| External Codex SDK                    | 1 / 1                 |                         14,900 | Passed                   |
+| Ordinary writable Session Host turn   | 1 / 1                 |                         15,222 | Passed                   |
+| Actual package working-copy Host turn | 1 / 1                 |                         18,219 | Passed                   |
+
+All four independent executions stopped their services and passed valid-G/S and evidence-integrity
+checks. Total known usage is 62,378 tokens across eight requests; the older incomplete G request
+still has unknown usage. Combined retained reservations are 62,914,560 tokens, not consumption.
+Every result remains `scientificConclusion: NOT_EVALUATED`; this is bounded product-path acceptance,
+not the twenty-pair study, scientific equivalence, or proof of a treatment effect. SDK/Host owners
+were exercised directly; autonomous natural-language Agent orchestration was not tested. These
+exact real runs did not opt into project-frame recording and contain no newly recorded project
+video. Shared observation and Replay coverage was verified separately as recorded above.
+
+The final privacy scan checked 136 retained files and 4,670 entries across 17 archives against both
+configured credential values, with no matches. Public material and output hashes, usage coverage,
+native Run/producer identities, original ledger preservation and input-package chains are retained
+in `live-02/acceptance-results.json`, `privacy-verification.json` and `token-budget-delivery.json`.
+The `.science` v1 and reproduction-description formats remain unchanged.
+
+Focused checks for the latest acceptance/error changes passed: 88 token/admission tests, 25 resume
+tests, 44 module-impact checks, 124 material/API regression tests and one actual-author-package
+prepare probe. Node/sandbox typechecks, lint, formatting and diff checks passed. The independent
+Test build ran all 777 locale guards and passed deep signature verification. No new renderer copy
+was introduced by the material-selection error change.
+
+## Final Test update and pending user action
+
+The actual author result archive was imported and its analysis report inspected in Test project
+`Tuanzi · 真实 G/S 复现验收 · 20261007`, read-only Session #97. The report visibly showed valid G/S,
+usage and the limited conclusion. That UI check used the preceding `2cf23e346` client.
+
+The latest product source `188bf72ab00e16d0baebd874e09306024c18bd5a` is now installed as
+`0.35.1-test.188bf72ab00e.2`, release `20261006T201236Z-188bf72ab00e`, with pre-install data backup
+`20261006T201535Z-23dc42f2`. Installed `app.asar` SHA-256 is
+`1bf551a8b46e7c7361e12cd4bc473f2a497440fbf3af9b81c0298f936d66e086`. The production app, original
+input package, source Tuanzi tree and root Open Science checkout remain unchanged.
+
+- [ ] Complete the new version's startup after the user finishes the macOS keychain dialog; verify
+      version, existing project/session/configuration readback, and absence of startup errors.
+
+The operating system blocks automation from this security dialog, so the user was asked to enter
+the local password there, never in chat. Installation/signature checks are complete; successful
+startup and post-upgrade UI checks are not yet claimed. This pending user action does not require
+repeating the paid experiments. No upstream or fork push has been performed.
