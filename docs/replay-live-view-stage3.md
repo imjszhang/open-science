@@ -1,9 +1,83 @@
 # Replay live viewing — stage three
 
-Status: implementation in progress. This ledger preserves the complete agreed scope; an isolated
-module test or a rendered mock-up does not establish delivery.
+Status: implemented and accepted locally on 2026-10-06. The installed functional commit is
+`134ca7841f96962abea7849eee15efdfdea1674b`; subsequent delivery documentation does not require a
+new application build. This ledger preserves both the final evidence and earlier failed attempts.
 
-## Installed acceptance follow-up, 2026-10-06
+## Final installed acceptance, 2026-10-06
+
+Independent release `0.35.0-test.134ca7841f96.2` completed the actual Tuanzi import, managed
+execution, observation, capture, selected-step question, export and receiving-import journey.
+The installed application is `/Users/jszhang/Applications/Open Science Test.app`, release
+`20261006T073643Z-134ca7841f96`, with application archive SHA-256
+`7c8d117c175baa28fe57837c7d3dcfb0fea378457b07a16565aefb28706c0604`.
+Its existing independent configuration/data/profile and pre-install backup are retained.
+
+Attempt `20261006-live-07` used the pinned v0.5.6 source and disclosed bounded viewing windows.
+The single engineering Run completed four offline actions, moving the actual game from world
+version 1 to 5, with 21 engineering assertions, zero external provider requests and zero
+scientific trials. Test Session #83 and the current Codex browser rendered the real project UI.
+Test published three genuine foreground PNGs: before the actions, afterwards, and after resizing
+the actual workspace splitter. The last image grew from 944 to 1070 pixels wide. The five-record
+archive observed the terminal Run with no dropped observations, sampling failures or missing media
+references. Steps without their own image still show an explicit missing-image state.
+
+In Test, asking about a step appended its exact evidence to the current writable draft, retained
+the existing Chinese text and showed the delivery acknowledgement. No message was sent and no
+Session was created. In Codex, the actual selected-step references were read through the installed
+SDK, including the receiving selection `b00739a3-8029-47fe-9727-f389ba4e73e6` for
+`observation-1` and its two images. The browser presents a copyable reference; it does not claim to
+inject a message into the Codex conversation.
+
+The exported `installed-20261006-live-07/observable-results.science` has SHA-256
+`d2f3f26c4b0d58ffdeeceab917bf463e1dcaa4e7de5498838b0dfb272bf9d2f9`.
+The native provenance audit verified all 18 receiving Versions, including auxiliary capture,
+archive and execution-report Versions. Source identities and capture timing remain evidence;
+receiving Artifact/Version identities are correctly remapped. `.science` v1 is unchanged.
+
+After runtime release and a normal restart of the same installed binary, a read-only verifier
+read both archives and all three source/receiving PNG pairs, checked identical bytes, checksums,
+dimensions and provenance, and retrieved eight source/receiving step selections. It started no
+Run, import or export. The actual receiving read-only Session #84 rendered the saved image in
+Test, and the current Codex tab rendered both images on the selected step. In the imported Session,
+the verified entry is the generated Replay archive file followed by **View archived replay**;
+the imported Notebook did not expose its own observation-archive button. The Codex receiving
+viewer is left open for inspection.
+
+The evidence root is
+`/Users/jszhang/github/projects/tuanzi-gs-research/tuanzi-v056-replay-live-stage3`:
+
+- `installed-20261006-live-07/{acceptance,installed-ui-audit,provenance-audit}.json` records the
+  execution, live/source-history interaction, package round trip and native producer audit.
+- `media-readback-20261006-live-07-20261006T075014108Z/{readback,post-restart-ui-audit,codex-received-selection}.json`
+  closes the released-runtime, restart, receiving-UI and exact selected-evidence checks. The three
+  `received-capture-*.png` files are actual imported Artifact bytes, not UI-automation screenshots.
+- `installed-20261006-live-06/installed-ui-audit.json` covers actual browser refresh, offline
+  indication, reconnection and Test View/Reload. `generic-lifecycle-20261006-exit-01/` covers actual
+  active-Run normal quit/restart, one cancelled Run, 48 saved observations and old-grant rejection.
+  These lifecycle checks used functional commit `14f0c743b57e`; the only subsequent functional
+  change reserves the preview splitter corridor and passed its own real native resizing checks.
+  The quit case establishes terminal cancellation, not crash or partial-history recovery.
+
+Earlier receipts are immutable. Their pending UI/provenance/restart fields describe the checkpoint
+when each helper finished; the separate later audits close those gates. Earlier capture failures
+remain failures and do not contribute to the three successful image Artifacts.
+
+The complete initial test sweep was not wholly green: 2620 suites and 50840 checks passed, with
+14 failing suites and 111 failures. After correcting the identified defects and interpreter
+configuration, the exact 14-suite rerun passed 669 checks, with 36 platform/opt-in skips and no
+errors. The separately enabled native/browser suites cover the relevant opt-in paths. Final
+capture, ownership, i18n, Node/Web type and changed-file lint checks passed as detailed below.
+
+Delivery remains local on `codex/replay-live-view`, without push or upstream PR. The formal checkout
+and Tuanzi source remain clean and unchanged. Capture is sampled evidence; arbitrary historical
+Web interaction reconstruction and MP4 encoding remain outside this stage. Timing, ordering,
+coverage and media metadata provide the groundwork for later video export.
+
+## Historical installed acceptance follow-ups, 2026-10-06
+
+The following checkpoints explain the fixes leading to the final acceptance above. Their
+then-outstanding gates are retained as history, rather than current delivery blockers.
 
 Release `0.35.0-test.484c7383e020.2` passed the confirmed existing-import read path without
 executing, exporting or importing again. The public SDK read all 15 receiving Versions and 13
@@ -154,8 +228,9 @@ the existing-import verifier writes a new receipt and cannot execute, import or 
 - Stage-three branch: `codex/replay-live-view`; upstream `bd9a61a80a` merged separately as
   `5285af282`. The Session-package test retains both the research-workspace wording and upstream
   mainline tag. The formal checkout remains on its existing main branch.
-- Independent Test functional baseline: `0.35.0-test.32191a29038d.2`. Preserve its configuration,
-  data, backups and maintenance procedure. Do not replace the formal client or recopy formal data.
+- Independent Test started at `0.35.0-test.32191a29038d.2` and is now
+  `0.35.0-test.134ca7841f96.2`. Its configuration, data, backups and maintenance procedure are
+  preserved. The formal client was not replaced and formal data was not recopied.
 - Tuanzi acceptance remains pinned to v0.5.6 (`b6d5810fef3baac1195c980fe728ce7a8a69408b`).
   New evidence belongs in a separate stage-three directory. Experimental provider calls and
   scientific trials remain zero. Existing stage-two evidence is historical and immutable.
@@ -236,17 +311,17 @@ the shared action-menu integration.
 
 | Gate | Required current-state evidence | Status |
 | --- | --- | --- |
-| Baseline | Separate branch, upstream merge, unaffected formal/stage-two checkouts and tests | Merge complete; formal and Tuanzi checkouts remain clean; final source commit pending |
-| Feasibility | Actual sandboxed generic service and Tuanzi in both browser/Electron hosts; assets, POST and continuous updates | Passed for genuine ready-state Web interaction; engineering run journey remains pending |
-| Observation | External, ordinary Main and fork active Runs observable before completion, scope-safe snapshot/delta/resync | Owner, adapters and native runtime tests passed; installed-client journey pending |
-| Replay | Follow/inspect/history, stable position and focus, true state, explicit stop and missing content | Renderer and production Chromium checks passed; installed Test/current Codex pending |
-| Interactive surface | HTTP/POST/SSE/WS; generation proof, revocation, isolation, bounded lifetime, no arbitrary proxy | Native and browser boundary checks passed; final installed-host parity pending |
-| Questions | Current-session selected evidence, frozen cutoff, no accidental new Session; usable Codex reference retrieval | Draft acknowledgement, repeat selection and public retrieval tested; actual host journey pending |
-| Archives | Saved captures/results readable after release; actual `.science` export/import preserves bytes and correct identities | Real PNG, SQLite, managed Shell and package round-trip passed after release/cache removal; installed-client journey pending |
-| Generality | Tuanzi fixed offline scenario plus unrelated interactive Web fixture, no core project-specific logic | Pending |
-| Host parity | Real interactions in independent Test and Codex browser, resizing, refresh, disconnect and recovery | Pending |
-| Regressions | Existing Replay/discussion/Notebook/static previews, stage-two publication/recovery, i18n/owners/API/types/lint | Pending |
-| Delivery | Independent Test build/installation/startup, complete evidence ledger, source clean with local commits | Pending |
+| Baseline | Separate branch, upstream merge, unaffected formal/stage-two checkouts and tests | Passed; local functional commit `134ca7841f96`, formal and Tuanzi source clean |
+| Feasibility | Actual sandboxed generic service and Tuanzi in both browser/Electron hosts; assets, POST and continuous updates | Passed; native fixtures plus actual installed live07 engineering journey |
+| Observation | External, ordinary Main and fork active Runs observable before completion, scope-safe snapshot/delta/resync | Passed; eight native entrypoint checks and installed live06/live07 observations |
+| Replay | Follow/inspect/history, stable position and focus, true state, explicit stop and missing content | Passed; actual Test/Codex live, source-history and receiving-history interaction |
+| Interactive surface | HTTP/POST/SSE/WS; generation proof, revocation, isolation, bounded lifetime, no arbitrary proxy | Passed; native/browser boundary checks, installed generic and Tuanzi surfaces |
+| Questions | Current-session selected evidence, frozen cutoff, no accidental new Session; usable Codex reference retrieval | Passed; actual same-draft acknowledgement and source/receiving Codex SDK reads |
+| Archives | Saved captures/results readable after release; actual `.science` export/import preserves bytes and correct identities | Passed; live07 native audit of 18 Versions; three PNG pairs verified after release/restart |
+| Generality | Tuanzi fixed offline scenario plus unrelated interactive Web fixture, no core project-specific logic | Passed; generic native fixtures and installed generic lifecycle case |
+| Host parity | Real interactions in independent Test and Codex browser, resizing, refresh, disconnect and recovery | Passed; live06 refresh/reconnect, live07 capture/resize and post-restart receiving UI |
+| Regressions | Existing Replay/discussion/Notebook/static previews, stage-two publication/recovery, i18n/owners/API/types/lint | Passed scoped checks and corrected 14-suite rerun; initial failures/skips disclosed above |
+| Delivery | Independent Test build/installation/startup, complete evidence ledger, source clean with local commits | Passed locally; exact installed binary verified, evidence recorded, no upstream push |
 
 Run targeted tests for changed behavior and the required repository guards; broaden based on
 actual impact. Real native/browser acceptance must cover cancellation, timeout, application exit,
@@ -298,11 +373,11 @@ production package/build ownership registration, native execution and package ro
 installed Test and current Codex interaction, regression/type/lint/i18n gates, and local commits.
 Historical gaps must remain explicit throughout. No upstream push or formal-client replacement.
 
-## Integration checks, 2026-10-06
+## Historical integration checks, 2026-10-06
 
 The preceding list was the earlier checkpoint. Auxiliary publication, segmented retention,
 media capture/intake, entry wiring and source ownership registration are now implemented. Their
-tests do not replace the outstanding installed-host acceptance.
+tests did not replace the then-outstanding installed-host acceptance, now closed above.
 
 - Auxiliary images use a Main-only, canonical Base64 input decoded into ordinary Artifact bytes.
   The collector binds a real Run, operation, invocation and environment generation. It accepts
@@ -358,7 +433,7 @@ the current Codex and Test import/run/view/question/capture/export/reimport jour
 bounded offline Tuanzi engineering run, production foreground capture after unlock, and a clean
 locally committed delivery checkout. Preserve existing evidence, Test data and the formal app.
 
-## First installed acceptance, 2026-10-06
+## Historical first installed acceptance, 2026-10-06
 
 The independent Test client was built and installed from
 `c93b4a48813ecc3cd7f935e966189e34a8e80911` as `0.35.0-test.c93b4a48813e.2`.
@@ -406,7 +481,7 @@ calling the mutable write-replay path or increasing the Artifact count. Relevant
 type checks and changed-file lint passed; no new renderer strings or package-format changes were
 introduced by these corrections.
 
-## Second installed checkpoint and production embedding
+## Historical second installed checkpoint and production embedding
 
 The independent Test was upgraded to `0.35.0-test.ba303ec9923c.2` from
 `ba303ec9923cf62286906ebfd56f17866835aa69`. Recovery of the first completed operation
@@ -475,6 +550,6 @@ in-flight responses cannot replace the new read. Three regression cases fail bef
 and pass after it; the full 100-case message-scroller interaction suite also passes. Publication
 authorization itself remains unchanged, and no stored Session metadata is rewritten.
 
-These are implementation and partial acceptance checkpoints. Final delivery still requires the
-fixed installed Test, actual product capture and draft delivery, current Codex interaction, and
-published screenshot/result export and import with native provenance verification.
+These are implementation and partial acceptance checkpoints. Their remaining installed capture,
+draft delivery, Codex interaction and screenshot/result package gates were subsequently closed by
+live07 and its separate final audits at the top of this document.
