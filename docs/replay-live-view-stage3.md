@@ -5,6 +5,46 @@ module test or a rendered mock-up does not establish delivery.
 
 ## Installed acceptance follow-up, 2026-10-06
 
+Release `0.35.0-test.484c7383e020.2` passed the confirmed existing-import read path without
+executing, exporting or importing again. The public SDK read all 15 receiving Versions and 13
+media references, checked 21 output assertions and selected first/middle/last records. The native
+provenance audit passed. Both actual hosts rendered the imported archive with the correct completed
+outcome; the Test viewer also used the desktop's Chinese locale. Evidence:
+`existing-import-20261006-live-01-20261006T060919057Z/{recovery,provenance-audit}.json`.
+
+The separately identified `20261006-live-03` bounded offline engineering attempt completed four
+actions with zero provider calls. Both the actual Test right pane and current Codex browser showed
+the project changing from world version 1 to 5. The Session completed normally and its 15 result
+Versions were available. Both hosts switched from live view to saved history. In Test, asking about
+a recorded step preserved the existing draft and acknowledged delivery in the same Session; Codex
+provided a copyable reference whose saved selection was read through the installed SDK.
+
+This attempt remains **failed-or-incomplete**: the actual screenshot button and one retry of the
+same capture failed, leaving zero image Artifacts. The fixed minimum project iframe height exceeded
+the real right pane's available height, while the Main capture boundary correctly requires a fully
+visible frame. The error surface normalized the original exception, so the per-request cause is not
+independently logged. A production viewer regression at the real small-pane dimensions is required
+before a fresh acceptance attempt. No screenshot from UI automation is counted as experiment media.
+Evidence: `installed-20261006-live-03/{acceptance,installed-ui-audit}.json`. The original receipt and
+all earlier attempts remain unchanged.
+
+The follow-up layout regression first failed on the fixed-height implementation, then passed with
+the production viewer in a real 1024×768 Electron window and a 40%-wide, 420px-high pane. Project
+content now takes the actual remaining height. Compact observation controls and a fixed-height
+capture feedback region prevent status changes from pushing the frame outside the viewport.
+Two consecutive captures at the original size and a third after resizing passed strict foreground
+capture; the iframe and its internal scroll position survived a new observation and resizing.
+The project viewport was 115 CSS pixels high and the native PNG 770×230 pixels. This test uses
+fixture Artifact IDs: it establishes layout and native capture, not the installed publication
+journey. Main's focus, clipping, occlusion and frame-origin checks remain unchanged.
+
+The existing generic entrypoint suite now passes eight real checks: the three original plain
+executions; external, ordinary Main and fork executions with observation and interactive project
+views; cancellation; and read-owner/operation-owner close and reconstruction. They use a real
+macOS sandbox and Notebook process. The close case preserves partial `app-exit` coverage, revokes
+old capabilities and confirms there is still only one Run. It is component lifecycle evidence,
+not an assertion that the installed desktop was exited during an active experiment.
+
 The independent Test release `0.35.0-test.2acd6eb5fccc.2` now renders the actual saved native
 Tuanzi observation in its right pane. A result file card opens, the Notebook's saved-archive
 entry works, and selecting a recorded step appends its evidence to the current draft while

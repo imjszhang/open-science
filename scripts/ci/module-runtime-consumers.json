@@ -29,7 +29,8 @@
     "src/main/notebook/managed-research-environment.ts"
   ],
   "src/main/run-observation/electron-capture.ts": [
-    "src/main/run-observation/electron-capture.integration.test.ts"
+    "src/main/run-observation/electron-capture.integration.test.ts",
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
   ],
   "src/main/navigation-policy.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
   "src/main/replay-viewer/desktop-frame-registry.ts": [

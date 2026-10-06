@@ -11,7 +11,12 @@ const enabled = process.env.RUN_OBSERVATION_DESKTOP_EMBED === '1' && process.pla
  * owners. A bare file:// iframe fixture cannot detect privileged desktop embedding regressions. */
 it
   .skipIf(!enabled)
-  .each(['production', 'catalog-load-failure', 'legacy-upgrade-absolute-redirect'] as const)(
+  .each([
+    'production',
+    'small-pane-capture',
+    'catalog-load-failure',
+    'legacy-upgrade-absolute-redirect'
+  ] as const)(
   'checks real owner-bound desktop embedding: %s',
   async (policy) => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'os-service-run-')))
@@ -30,7 +35,7 @@ it
       const html = join(directory, 'index.html')
       await writeFile(
         html,
-        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body style="margin:0"><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;width:100vw;height:100vh"></iframe></body></html>`
+        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body style="margin:0"><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:420px' : 'width:100vw;height:100vh'}"></iframe></body></html>`
       )
       const main = join(directory, 'main.cjs')
       await build({
@@ -39,9 +44,9 @@ it
           sourcefile: 'desktop-embed-fixture.ts',
           loader: 'ts',
           contents: `
-import { app, BrowserWindow, webFrameMain, protocol } from 'electron'
+import { app, BrowserWindow, webFrameMain, protocol, nativeImage } from 'electron'
 import { createServer, ServerResponse } from 'node:http'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { createFrameNavigationGuard } from './src/main/navigation-policy'
 import { installPreviewContextMenuBridge } from './src/main/preview-context-menu'
@@ -52,6 +57,7 @@ import { ManagedRuntimeViews } from './src/main/managed-runtime-views'
 import { RunObservationOwner } from './src/main/run-observation/owner'
 import { ObservationViewers } from './src/main/run-observation/viewers'
 import { createCallerContext } from './src/main/caller-context'
+import { captureElectronObservationView } from './src/main/run-observation/electron-capture'
 const entry = ${JSON.stringify(html)}
 const directory = ${JSON.stringify(directory)}
 const root = ${JSON.stringify(process.cwd())}
@@ -59,6 +65,9 @@ const decisions = []
 const diagnostics = []
 const menus = []
 const nativeMenus = []
+const capturePane = ${JSON.stringify(policy)} === 'small-pane-capture'
+const captures = []
+let observationRevision = 0
 if (${JSON.stringify(policy)} === 'legacy-upgrade-absolute-redirect') {
   const writeHead = ServerResponse.prototype.writeHead
   ServerResponse.prototype.writeHead = function(status,headers) {
@@ -73,7 +82,7 @@ const windows = []
 let unauthorizedRequests = 0
 protocol.registerSchemesAsPrivileged(['open-science-preview','open-science-office-preview'].map(scheme=>({scheme,privileges:{standard:true,secure:true,supportFetchAPI:true}})))
 function windowWithProductionNavigation() {
-  const window = new BrowserWindow({show:false,width:1200,height:1000,
+  const window = new BrowserWindow({show:capturePane,width:capturePane?1024:1200,height:capturePane?768:1000,
     webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}})
   windows.push(window)
   window.webContents.on('console-message', details=>diagnostics.push(String(details.message).replace(/grant=[a-f0-9]+/g,'grant=REDACTED')))
@@ -106,6 +115,7 @@ app.whenReady().then(async () => {
     protocol.handle(scheme,()=>new Response('<!doctype html><p id="legacy-preview">Existing managed preview</p><p id="passthrough" data-preview-context-menu-passthrough>Native menu area</p><input id="editable" value="Editable area">',{headers:{'Content-Type':'text/html'}}))
   const owner = windowWithProductionNavigation()
   await owner.loadFile(entry)
+  if(capturePane) {app.setActivationPolicy('regular');app.focus({steal:true});owner.show();owner.focus()}
   const caller = createCallerContext({clientId:String(owner.webContents.id),
     lifecycleClientId:'electron:'+owner.webContents.id,leaseId:'electron:'+owner.webContents.id,
     surface:'electron',location:'local',principalKind:'human',actionOrigin:'human',
@@ -118,8 +128,8 @@ app.whenReady().then(async () => {
   const project = createServer((request,response) => {
     if (request.url === proofPath) {response.end(proof);return}
     response.setHeader('Content-Type','text/html; charset=utf-8')
-    response.setHeader('Content-Security-Policy',"default-src 'self'; frame-ancestors 'none'")
-    response.end('<!doctype html><html><body><h1 id="project-ready">Real bound project</h1><a id="project-next" href="/next">Next page</a></body></html>')
+    response.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+    response.end('<!doctype html><html><head><style>body{margin:0;background:rgb(0,180,70)}#project-ready{font-size:16px;margin:0}#internal-scroll{height:30px;overflow:auto}#scroll-content{height:200px}</style></head><body><h1 id="project-ready">Real bound project</h1><a id="project-next" href="/next">Next page</a><div id="internal-scroll"><div id="scroll-content">Native scroll content</div></div></body></html>')
   })
   await new Promise(resolve=>project.listen(socketPath,resolve))
   const rogue = createServer((_request,response)=>{unauthorizedRequests++;response.end('unauthorized')})
@@ -136,20 +146,35 @@ app.whenReady().then(async () => {
     authorize:(target,viewer)=>viewers.assertViewer(target,viewer),
     read:async()=>({identity:target,phase:'running',artifacts:[],run:{
       runId:scope.runId,cellId:'cell',source:'agent',kernelKind:'bash',script:'printf observed',
-      status:'running',startedAt:1,text:{stdout:'project ready',stderr:'',traceback:'',plain:[]},outputs:[],workingFiles:[]}})
+      status:'running',startedAt:1,text:{stdout:'project ready '+observationRevision,stderr:'',traceback:'',plain:[]},outputs:[],workingFiles:[]}})
   })
   const viewers = new ObservationViewers({observer:observation,authorizeScope:async()=>undefined,
     onRevoked:viewerId=>host.closeViewer(viewerId)})
   const readAsset = createReplayViewerAssetReader(join(root,'out/replay-viewer'))
   const host = new ReplayViewerHttpHost({viewers,projectViews,
-    desktopLocale:()=> 'de',
+    desktopLocale:()=> capturePane?'en':'de',
+    recordingStatus:async()=>({target,state:'recording'}),
+    captureOptions:async(_target,hostViewAvailable)=>({hostView:hostViewAvailable,projectExports:[]}),
+    capture:async input=>{
+      input.assertAuthorized()
+      const startedAt=Date.now()
+      const {bytes}=await captureElectronObservationView({...input.host,signal:input.signal}).catch(error=>{diagnostics.push('capture: '+String(error));throw error})
+      input.assertAuthorized()
+      const image=nativeImage.createFromBuffer(Buffer.from(bytes));const size=image.getSize();const bitmap=image.toBitmap()
+      const index=(Math.floor(size.height*.9)*size.width+Math.floor(size.width/2))*4
+      captures.push({size,middle:[bitmap[index+2],bitmap[index+1],bitmap[index]],focused:owner.isFocused()})
+      return {created:true,result:{captureId:'capture-'+captures.length,recordingId:'recording',stepKey:'observation-'+randomUUID()+'-00000042',artifactId:'fixture-artifact',versionId:'fixture-version',
+        checksum:createHash('sha256').update(bytes).digest('hex'),sizeBytes:bytes.length,mimeType:'image/png',publication:'awaiting-publication',
+        capture:{source:'host-view',association:'current-observation',startedAt,finishedAt:Date.now(),observedAt:startedAt,width:size.width,height:size.height}}}
+    },
     readAsset:path=>${JSON.stringify(policy)} === 'catalog-load-failure' && path.startsWith('assets/de-') && path.endsWith('.js')
       ? Promise.resolve(undefined) : readAsset(path)})
-  const access = await host.open(target,caller,{allowInteraction:true,desktopParent:'file:'})
+  const access = await host.open(target,caller,{allowInteraction:true,allowCapture:capturePane,desktopParent:'file:'})
   await owner.webContents.executeJavaScript('document.getElementById("viewer").src='+JSON.stringify(access.url))
   globalThis.fixture = {
     ownerId:owner.webContents.id,viewerOrigin:new URL(access.url).origin,rogueOrigin,
-    decisions,diagnostics,menus,nativeMenus,requests:()=>unauthorizedRequests,
+    decisions,diagnostics,menus,nativeMenus,captures,requests:()=>unauthorizedRequests,
+    nextObservation:()=>observationRevision++,
     zoom:value=>owner.webContents.setZoomFactor(value),
     other:async()=>{const other=windowWithProductionNavigation();await other.loadFile(entry);
       await other.webContents.executeJavaScript('document.getElementById("viewer").src='+JSON.stringify(new URL(access.url).origin+'/'));return other.webContents.id},
@@ -214,6 +239,130 @@ app.on('window-all-closed',()=>app.quit())
       await project.locator('#project-ready').waitFor({ state: 'visible', timeout: 8000 })
       await project.locator('#project-next').click()
       await project.locator('#project-ready').waitFor({ state: 'visible' })
+      if (policy === 'small-pane-capture') {
+        type CaptureFixture = {
+          captures: Array<{
+            size: { width: number; height: number }
+            middle: number[]
+            focused: boolean
+          }>
+          nextObservation(): void
+        }
+        const actualViewer = page.frames().find((frame) => /^http:\/\/viewer-/.test(frame.url()))!
+        const projectElement = viewer.locator('iframe[title="Bound project"]')
+        // Exercise the production headers, recording row, action bar and footer; a flat iframe
+        // fixture misses their consumption of the actual remaining stage height.
+        await viewer.getByRole('button', { name: 'Save project screenshot' }).waitFor()
+        const initialHeight = await projectElement.evaluate(
+          (frame) => frame.getBoundingClientRect().height
+        )
+        expect(initialHeight).toBeGreaterThan(100)
+        await expect
+          .poll(() =>
+            electron!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused())
+          )
+          .toBe(true)
+        const captureResponse = page.waitForResponse(
+          (response) => new URL(response.url()).pathname === '/api/capture'
+        )
+        await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+        expect((await captureResponse).status()).toBe(200)
+        await viewer.getByText('This captured image is awaiting archive publication.').waitFor()
+        const captured = await electron.evaluate(
+          () => (globalThis as unknown as { fixture: CaptureFixture }).fixture.captures[0]
+        )
+        expect(captured.focused).toBe(true)
+        expect(captured.size.width).toBeGreaterThan(200)
+        expect(captured.size.height).toBeGreaterThan(120)
+        for (const [channel, value] of captured.middle.entries())
+          expect(Math.abs(value - [0, 180, 70][channel])).toBeLessThanOrEqual(2)
+        const node = await projectElement.elementHandle()
+        const geometry = await projectElement.evaluate((frame) => {
+          const bounds = frame.getBoundingClientRect()
+          return {
+            top: bounds.top,
+            bottom: bounds.bottom,
+            height: bounds.height,
+            viewportHeight: innerHeight
+          }
+        })
+        expect(geometry.height).toBeLessThan(384)
+        expect(geometry.height).toBe(initialHeight)
+        expect(geometry.top).toBeGreaterThan(0)
+        expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight)
+        // Keep the original small pane for a second real capture. Long step IDs and precise
+        // timestamps must not grow the feedback region or consume the project viewport.
+        const secondResponse = page.waitForResponse(
+          (response) => new URL(response.url()).pathname === '/api/capture'
+        )
+        await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+        expect((await secondResponse).status()).toBe(200)
+        await viewer.getByText('This captured image is awaiting archive publication.').waitFor()
+        expect(await projectElement.evaluate((frame) => frame.getBoundingClientRect().height)).toBe(
+          initialHeight
+        )
+        // Native project controls retain their own state while more evidence arrives and the
+        // actual right pane changes height. Neither path reloads or scrolls the interactive page.
+        const previousCursor = await actualViewer
+          .locator('[data-observation-record]')
+          .getAttribute('data-observation-record')
+        await project.locator('#internal-scroll').evaluate((element) => {
+          element.scrollTop = 65
+        })
+        await electron.evaluate(() =>
+          (globalThis as unknown as { fixture: CaptureFixture }).fixture.nextObservation()
+        )
+        await expect
+          .poll(() =>
+            actualViewer
+              .locator('[data-observation-record]')
+              .getAttribute('data-observation-record')
+          )
+          .not.toBe(previousCursor)
+        await page.locator('#viewer').evaluate((frame) => {
+          frame.style.height = '500px'
+        })
+        await expect
+          .poll(() => projectElement.evaluate((frame) => frame.getBoundingClientRect().height))
+          .toBeGreaterThan(geometry.height)
+        expect(
+          await node!.evaluate(
+            (frame) => frame === document.querySelector('iframe[title="Bound project"]')
+          )
+        ).toBe(true)
+        expect(
+          await project.locator('#internal-scroll').evaluate((element) => element.scrollTop)
+        ).toBe(65)
+        const resizedResponse = page.waitForResponse(
+          (response) => new URL(response.url()).pathname === '/api/capture'
+        )
+        await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+        expect((await resizedResponse).status()).toBe(200)
+        await writeFile(
+          join(tmpdir(), 'open-science-production-small-pane-capture.json'),
+          JSON.stringify(
+            {
+              window: { width: 1024, height: 768 },
+              pane: { width: '40%', initialHeight: 420, rightInset: 10 },
+              productionViewer: true,
+              strictForeground: true,
+              actualScreenshotButton: true,
+              consecutiveCapturesAtOriginalSize: 2,
+              scope:
+                'production layout and native capture; fixture Artifact IDs, no Artifact publication',
+              projectIframePreservedAfterResize: true,
+              internalScrollPreserved: true,
+              capture: captured,
+              geometry,
+              scientificTrials: 0,
+              providerCalls: 0
+            },
+            null,
+            2
+          )
+        )
+        return
+      }
       expect(page.url()).toMatch(/^file:/)
       const viewerFrame = page.frames().find((frame) => /^http:\/\/viewer-/.test(frame.url()))!
       expect(await viewerFrame.evaluate(() => document.documentElement.lang)).toBe(

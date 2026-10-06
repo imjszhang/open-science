@@ -194,7 +194,7 @@ export const ViewerApp = ({
                 src={access.url}
                 sandbox="allow-scripts allow-forms allow-same-origin"
                 referrerPolicy="no-referrer"
-                className="h-[max(24rem,60vh)] w-full border-0"
+                className="min-h-0 w-full flex-1 border-0"
               />
             )
           }
@@ -251,8 +251,17 @@ export const ViewerApp = ({
     )
   return (
     <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-2">
-        <span className="text-sm font-medium">{t('Research replay')}</span>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1">
+        <div className="min-w-0">
+          <span className="text-sm font-medium">{t('Research replay')}</span>
+          {recordingStatus ? (
+            <ObservationRecordingStatus
+              status={recordingStatus}
+              onOpenArchive={archiveAction}
+              openingArchive={archiveOpening}
+            />
+          ) : null}
+        </div>
         {context.canInteract ? (
           <Button
             data-testid="open-project-interface"
@@ -275,15 +284,6 @@ export const ViewerApp = ({
           </span>
         )}
       </div>
-      {recordingStatus ? (
-        <div className="shrink-0 border-b border-border-200 px-3 py-2">
-          <ObservationRecordingStatus
-            status={recordingStatus}
-            onOpenArchive={archiveAction}
-            openingArchive={archiveOpening}
-          />
-        </div>
-      ) : null}
       {archiveError ? (
         <ErrorNotice
           inline

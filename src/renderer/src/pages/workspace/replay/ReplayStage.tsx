@@ -1052,7 +1052,7 @@ const ReplayStageContent = ({
           tabIndex={0}
           className={
             fitContainer
-              ? `relative min-h-0 min-w-0 overflow-auto border-border-200 bg-bg-000 px-4 py-3 ${(showMaterialPane && !wide) || inspecting ? 'hidden' : 'block'}`
+              ? `relative min-h-0 min-w-0 overflow-auto border-border-200 bg-bg-000 ${primaryMode === 'project' ? 'px-3 py-1' : 'px-4 py-3'} ${(showMaterialPane && !wide) || inspecting ? 'hidden' : 'block'}`
               : 'relative space-y-3 overflow-auto border-r border-border-200 bg-bg-10 p-5'
           }
           // Interactive history has its own follow and prepend anchors. Native anchoring can

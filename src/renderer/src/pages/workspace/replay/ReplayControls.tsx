@@ -234,11 +234,14 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
   const playLabel = ended ? t('Watch again') : props.playing ? t('Pause replay') : t('Play replay')
   return (
     <div
-      className="shrink-0 space-y-1 border-t border-border-200 bg-bg-000 px-3 py-2"
+      className={`shrink-0 border-t border-border-200 bg-bg-000 px-3 ${props.recordNavigation ? 'flex items-center gap-1 py-1' : 'space-y-1 py-2'}`}
       data-testid="replay-controls"
     >
       <Popover open={open} onOpenChange={changeOpen}>
-        <div className="flex min-w-0 items-center gap-1" data-testid="replay-step-actions">
+        <div
+          className={`flex min-w-0 items-center gap-1${props.recordNavigation ? ' flex-1' : ''}`}
+          data-testid="replay-step-actions"
+        >
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
@@ -601,7 +604,11 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
           ) : null}
         </PopoverContent>
       </Popover>
-      <div className="flex items-center gap-1" role="group" aria-label={t('Playback controls')}>
+      <div
+        className="flex shrink-0 items-center gap-1"
+        role="group"
+        aria-label={t('Playback controls')}
+      >
         <Button
           variant="ghost"
           type="button"

@@ -695,6 +695,7 @@ const ReplayPanelContent = ({
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
+                size={live ? 'sm' : 'default'}
                 className="min-w-0 max-w-full justify-start gap-1.5 px-2 text-[13px] font-semibold"
                 data-testid="replay-information-trigger"
                 aria-label={t('Session information: {{title}}', {
@@ -1004,7 +1005,7 @@ const ReplayPanelContent = ({
       </div>
       {live ? (
         <div
-          className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-2 text-xs"
+          className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1 text-xs"
           data-testid="replay-live-status"
         >
           <div className="min-w-0" role="status">

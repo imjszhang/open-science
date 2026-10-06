@@ -48,12 +48,12 @@ export const ReplayLiveRecord = ({
     runtimeSurface?.runId === snapshot.run.runId
   return (
     <div
-      className="flex min-h-0 flex-col gap-3"
+      className={`flex min-h-0 flex-col ${tab === 'project' ? 'h-full gap-2' : 'gap-3'}`}
       data-testid="replay-live-record"
       data-observation-record={`${snapshot.cursor.epoch}:${snapshot.cursor.sequence}`}
     >
       <div
-        className="flex flex-wrap gap-1"
+        className="flex shrink-0 flex-wrap gap-1"
         role="group"
         aria-label={t('Run view')}
         data-replay-live-interaction
@@ -78,13 +78,13 @@ export const ReplayLiveRecord = ({
       <div
         inert={tab !== 'project'}
         hidden={tab !== 'project'}
-        className="min-h-96 flex-1"
+        className={`min-h-0 flex-1${livePage ? '' : ' overflow-auto'}`}
         data-replay-live-interaction
       >
-        <div hidden={!livePage} inert={!livePage}>
+        <div hidden={!livePage} inert={!livePage} className="flex h-full min-h-0 flex-col">
           {runtimeSurface && runtimeSurface.runId === snapshot.run?.runId && mode !== 'history' ? (
             <>
-              <p className="mb-2 text-xs text-status-warning-foreground">
+              <p className="mb-1 shrink-0 text-xs text-status-warning-foreground">
                 {t('This page controls the current run. Interactions can change its results.')}
               </p>
               {runtimeSurface.content}

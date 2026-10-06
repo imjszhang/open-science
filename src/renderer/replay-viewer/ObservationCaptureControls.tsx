@@ -79,7 +79,7 @@ export const ObservationCaptureControls = ({
     )
   if (!options || (!options.hostView && options.projectExports.length === 0)) return null
   return (
-    <div className="shrink-0 space-y-2 border-b border-border-200 px-3 py-2">
+    <div className="shrink-0 space-y-1 border-b border-border-200 px-3 py-1">
       <div className="flex flex-wrap items-center gap-2">
         {options.hostView ? (
           <Button
@@ -112,11 +112,6 @@ export const ObservationCaptureControls = ({
           {t('Open the project interface before capturing it.')}
         </p>
       ) : null}
-      {busy ? (
-        <p role="status" className="text-xs">
-          {t('Saving project image…')}
-        </p>
-      ) : null}
       {failed ? (
         <ErrorNotice
           inline
@@ -129,23 +124,34 @@ export const ObservationCaptureControls = ({
           }}
         />
       ) : null}
-      {result ? (
-        <div role="status" className="space-y-1 text-xs">
-          <p>
-            {result.publication === 'published'
-              ? t('Image published for recorded step {{step}}.', { step: result.stepKey })
-              : t('Image captured for recorded step {{step}}; awaiting archive publication.', {
+      <div className="h-8 overflow-auto text-xs" data-testid="capture-feedback">
+        {busy ? (
+          <p role="status">{t('Saving project image…')}</p>
+        ) : result ? (
+          <details className="break-words">
+            <summary className="cursor-pointer">
+              <span role="status">
+                {result.publication === 'published'
+                  ? t('Image published for recorded step {{step}}.', { step: result.stepKey })
+                  : t('This captured image is awaiting archive publication.')}
+              </span>
+            </summary>
+            {result.publication !== 'published' ? (
+              <p className="mt-1 break-all">
+                {t('Image captured for recorded step {{step}}; awaiting archive publication.', {
                   step: result.stepKey
                 })}
-          </p>
-          <p>
-            {t('Captured from {{start}} to {{end}}.', {
-              start: new Date(result.capture.startedAt).toISOString(),
-              end: new Date(result.capture.finishedAt).toISOString()
-            })}
-          </p>
-        </div>
-      ) : null}
+              </p>
+            ) : null}
+            <p className="mt-1">
+              {t('Captured from {{start}} to {{end}}.', {
+                start: new Date(result.capture.startedAt).toISOString(),
+                end: new Date(result.capture.finishedAt).toISOString()
+              })}
+            </p>
+          </details>
+        ) : null}
+      </div>
     </div>
   )
 }

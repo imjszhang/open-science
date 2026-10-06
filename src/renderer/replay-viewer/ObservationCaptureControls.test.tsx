@@ -52,6 +52,7 @@ it('uses only declared exports and keeps one capture key across an uncertain ret
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   view.rerender(<ObservationCaptureControls client={client} enabled hostViewOpen={false} />)
   fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+  fireEvent.click(await screen.findByText('This captured image is awaiting archive publication.'))
   await screen.findByText(
     'Image captured for recorded step durable-step; awaiting archive publication.'
   )
