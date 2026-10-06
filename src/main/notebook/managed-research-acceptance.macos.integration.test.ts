@@ -4,6 +4,18 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { z } from 'zod'
+import { ResearchExecutionProfileStore } from '../research-execution-profiles/store'
+import {
+  researchEnvironmentVariableSchema,
+  researchNetworkHostSchema
+} from '../../shared/research-execution-profile'
+import {
+  ephemeralAcceptanceCipher,
+  readAcceptanceBudgetSeal,
+  readAcceptanceCredentials,
+  reserveAcceptanceTrial
+} from './research-acceptance.test-support'
 import { ApplicationEventHub } from '../application-events'
 import { ImmutableInputAuthority } from '../immutable-input-authority'
 import { createManagedExecutionExternalPort } from '../managed-execution-external-port'
@@ -32,6 +44,7 @@ import {
 import type { SessionPackageRequest } from '../../shared/session-package'
 import type { ExecuteManagedEnvironmentRequest } from '../../shared/managed-execution'
 import { parseResearchReproductionDescription } from '../../shared/research-reproduction'
+import { parseResearchDemoDescription } from '../../shared/research-demo'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -73,6 +86,12 @@ type Acceptance = {
   localServicePort?: number
   timeoutMs: number
   outputs: ExecuteManagedEnvironmentRequest['outputs']
+  live?: {
+    budgetFilename: string
+    providersFilename: string
+    trialEnvironmentVariable: string
+    trialIds: Record<'author' | 'external' | 'ordinary' | 'fork', string>
+  }
   expect: { jsonAssertions: Array<{ path: string; pointer: string; equals: unknown }> }
 }
 
@@ -162,6 +181,7 @@ async function publishMaterials(
     description: string
     descriptionSha256: string
     files: Array<{ key: string; relativePath: string; sha256: string; sizeBytes: number }>
+    demo?: { relativePath: string; sha256: string; sizeBytes: number }
   }
   const descriptorBytes = await readFile(join(root, index.description))
   expect(sha(descriptorBytes)).toBe(index.descriptionSha256)
@@ -182,6 +202,20 @@ async function publishMaterials(
     expect(sha(bytes)).toBe(item.sha256)
     expect(material).toMatchObject({ sha256: item.sha256, sizeBytes: item.sizeBytes })
     inputs.push({ filename: material.filename, bytes })
+  }
+  // An optional demo is a separate ordinary Artifact: it pins the unchanged descriptor.
+  // Keeping it outside descriptor.materials avoids a descriptor/demo checksum cycle.
+  if (index.demo) {
+    const sourcePath = resolve(root, index.demo.relativePath)
+    expect(sourcePath.startsWith(resolve(root) + '/')).toBe(true)
+    const bytes = await readFile(sourcePath)
+    expect(bytes.length).toBe(index.demo.sizeBytes)
+    expect(sha(bytes)).toBe(index.demo.sha256)
+    const demo = parseResearchDemoDescription(bytes.toString('utf8'))
+    expect(demo.status).toBe('valid')
+    if (demo.status !== 'valid') throw new Error('Invalid reviewed demo material.')
+    expect(demo.description.descriptorSha256).toBe(index.descriptionSha256)
+    inputs.push({ filename: 'research-demo.json', bytes })
   }
   for (const input of inputs) {
     expect(basename(input.filename)).toBe(input.filename)
@@ -309,7 +343,41 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
       'alternative-conditions',
       'engineering-check'
     ]).toContain(expectedPlanScope)
-    const archive = await publishMaterials(root, output, acceptance)
+    const budgetPath = acceptance.live ? resolve(root, acceptance.live.budgetFilename) : undefined
+    if (
+      acceptance.live &&
+      (!budgetPath!.startsWith(root + '/') ||
+        process.env.OPEN_SCIENCE_MANAGED_RESEARCH_ALLOW_PAID !== '1')
+    )
+      throw new Error(
+        'Live acceptance requires a sealed budget and an explicit operator start; no inference was dispatched.'
+      )
+    // This is before any credential file read, network grant, preparation or trial dispatch.
+    const budget = budgetPath ? await readAcceptanceBudgetSeal(budgetPath) : undefined
+    const providersPath = acceptance.live
+      ? resolve(root, acceptance.live.providersFilename)
+      : undefined
+    if (providersPath && !providersPath.startsWith(root + '/'))
+      throw new Error('Provider settings must be reviewed materials.')
+    const providers = providersPath
+      ? z
+          .object({
+            environment: z.record(researchEnvironmentVariableSchema, z.string()),
+            allowedNetworkHosts: z.array(researchNetworkHostSchema).max(32),
+            changesFromAuthorEnv: z.array(z.string()).optional()
+          })
+          .passthrough()
+          .parse(JSON.parse(await readFile(providersPath, 'utf8')))
+      : undefined
+    const trialIds = acceptance.live ? Object.values(acceptance.live.trialIds) : []
+    if (
+      budget &&
+      (trialIds.length !== 4 ||
+        new Set(trialIds).size !== 4 ||
+        trialIds.some((id) => !budget.trialIds.includes(id)))
+    )
+      throw new Error('The four acceptance entries must map exactly to the sealed trial IDs.')
+    let archive = await publishMaterials(root, output, acceptance)
     const evidence: unknown[] = []
     const sourcePackageSha256 = sha(await readFile(archive))
     const writeEvidence = async (status: 'passed' | 'in-progress'): Promise<void> => {
@@ -329,12 +397,16 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         )
       )
     }
-    for (const entry of ['external', 'ordinary', 'fork'] as const) {
+    const entries = acceptance.live
+      ? (['author', 'external', 'ordinary', 'fork'] as const)
+      : (['external', 'ordinary', 'fork'] as const)
+    for (const entry of entries) {
       const cleanupStart = cleanups.length
       try {
         const h = await createSessionOperationTestHarness(cleanups, {
           canonicalStorageRoot: true,
-          nativeSandbox: true
+          nativeSandbox: true,
+          approvedNetworkHosts: providers?.allowedNetworkHosts
         })
         await h.notebook.recoverInterruptedOperations()
         const packages = packageService(h)
@@ -365,7 +437,14 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           })
         })
         cleanups.push(() => environments.close())
+        const cipher = ephemeralAcceptanceCipher()
+        cleanups.push(async () => cipher.destroy())
+        const profiles = new ResearchExecutionProfileStore(
+          join(h.fixture.storageRoot, 'acceptance-profile-config'),
+          cipher
+        )
         const service = new ManagedExecutionService({
+          profiles,
           artifacts: h.artifacts,
           dataRoot: h.fixture.storageRoot,
           notebooks: h.fixture.notebookRepository,
@@ -403,6 +482,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           withWritableSession: async (_scope, operation) => operation()
         })
         const api = await client(h, transfer(packages), service)
+        const inputPackageSha256 = sha(await readFile(archive))
         const preview = await api.packages.preflightImport({
           filePath: archive,
           target: { projectId: scope.projectId }
@@ -426,6 +506,59 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         expect(inspected.status).toBe('ready')
         const plan = inspected.description!.plans.find((item) => item.key === acceptance.planKey)!
         expect(plan.scope).toBe(expectedPlanScope)
+        let profileId: string | undefined
+        if (acceptance.live && budget && providers) {
+          const preflightScope = {
+            ...target,
+            sourceSessionId: imported.sessionId,
+            sourceIdentity: inspected.source.identity,
+            descriptorVersionId: inspected.descriptor!.versionId,
+            planKey: acceptance.planKey
+          }
+          const before = await service.preflight(preflightScope)
+          if (
+            !before.binding ||
+            before.issues.some(
+              (issue) => !['profile-required', 'credential-required'].includes(issue.code)
+            )
+          )
+            throw new Error(
+              'Live acceptance material/runtime preflight is blocked; no inference was dispatched.'
+            )
+          const envPath = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_ENV_FILE
+          if (!envPath)
+            throw new Error(
+              'Live acceptance requires an explicitly selected local credential file.'
+            )
+          const credentials = await readAcceptanceCredentials(envPath, before.slots)
+          try {
+            const profile = await service.saveExecutionProfile({
+              ...preflightScope,
+              ...before.binding,
+              displayName: 'Isolated research acceptance',
+              variables: {
+                ...providers.environment,
+                [researchEnvironmentVariableSchema.parse(acceptance.live.trialEnvironmentVariable)]:
+                  acceptance.live.trialIds[entry]
+              },
+              allowedNetworkHosts: providers.allowedNetworkHosts,
+              conditionChanges: [
+                ...(providers.changesFromAuthorEnv ?? []),
+                'Acceptance-only AES-GCM cipher; OS credential vault UI was not exercised.'
+              ],
+              credentials
+            })
+            profileId = profile.profileId
+          } finally {
+            for (const key of Object.keys(credentials)) delete credentials[key]
+          }
+          if ((await api.execution.preflight({ ...preflightScope, profileId })).status !== 'ready')
+            throw new Error(
+              'Live acceptance local profile is not ready; no inference was dispatched.'
+            )
+          // Consume a slot before preparation, preserving failed/uncertain attempts without reruns.
+          await reserveAcceptanceTrial(budgetPath!, budget, acceptance.live.trialIds[entry])
+        }
         const available = await api.execution.runtimes()
         const prepared = await api.execution.prepare({
           ...target,
@@ -441,6 +574,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         const request = {
           ...target,
           requestId: 'run-research',
+          ...(profileId ? { profileId } : {}),
           environmentId: prepared.environmentId,
           command: acceptance.command,
           timeoutMs: acceptance.timeoutMs,
@@ -454,7 +588,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           ).map((run) => run.runId)
         )
         let nativeRunId: string | undefined
-        if (entry === 'external') {
+        if (entry === 'external' || entry === 'author') {
           await api.execution.execute(request)
         } else {
           await h.owner.start({
@@ -490,11 +624,17 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
             }
           })
         }
-        const done = await api.execution.waitOperation({
-          ...target,
-          requestId: request.requestId,
-          timeoutMs: 60000
-        })
+        let done: Awaited<ReturnType<typeof api.execution.waitOperation>>
+        const waitDeadline = Date.now() + acceptance.timeoutMs + 60_000
+        do {
+          done = await api.execution.waitOperation({
+            ...target,
+            requestId: request.requestId,
+            timeoutMs: 60_000
+          })
+          if (done && ['completed', 'failed', 'cancelled', 'interrupted'].includes(done.status))
+            break
+        } while (Date.now() < waitDeadline)
         // Retain failure diagnostics before assertions, without exposing auth tokens or private input.
         await writeFile(join(output, `${entry}-operation.json`), JSON.stringify(done, null, 2), {
           flag: 'wx'
@@ -534,7 +674,8 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         expect(runs).toHaveLength(1)
         const run = runs[0]
         expect(run.status).toBe('completed')
-        if (entry === 'external') expect(done.notebookRunIds).toEqual([run.runId])
+        if (entry === 'external' || entry === 'author')
+          expect(done.notebookRunIds).toEqual([run.runId])
         else expect(nativeRunId).toBe(run.runId)
         for (const assertion of acceptance.expect.jsonAssertions) {
           let actual: unknown = JSON.parse(await readFile(join(resultRoot, assertion.path), 'utf8'))
@@ -579,12 +720,14 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         for (const artifact of current.artifacts ?? []) await readFile(artifact.path)
         evidence.push({
           entry,
+          inputPackageSha256,
           sourceIdentity: inspected.source.identity,
           operation: done,
           notebookRunId: run.runId,
           packageSha256: sha(await readFile(resultArchive)),
           outputCount: current.artifacts?.length
         })
+        if (entry === 'author') archive = resultArchive
         await writeEvidence('in-progress')
       } finally {
         // Native policy has one process owner. End this isolated application before starting the
@@ -595,5 +738,5 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
     await disposeCleanups()
     await writeEvidence('passed')
   },
-  240_000
+  1_500_000
 )

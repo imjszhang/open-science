@@ -243,7 +243,8 @@
       "src/main/credential-identity/ciphertext-inventory.test.ts",
       "src/main/credential-identity/linux.test.ts",
       "src/main/credential-identity/macos.test.ts",
-      "src/main/credential-identity/probe-logging.test.ts"
+      "src/main/credential-identity/probe-logging.test.ts",
+      "src/main/notebook/research-acceptance.test.ts"
     ]
   },
   "capabilityOverlays": [],

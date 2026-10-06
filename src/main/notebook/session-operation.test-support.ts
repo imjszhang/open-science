@@ -47,7 +47,11 @@ export type SessionOperationTestHarness = {
 
 export async function createSessionOperationTestHarness(
   cleanups: (() => Promise<unknown>)[],
-  options: { canonicalStorageRoot?: boolean; nativeSandbox?: boolean } = {}
+  options: {
+    canonicalStorageRoot?: boolean
+    nativeSandbox?: boolean
+    approvedNetworkHosts?: string[]
+  } = {}
 ): Promise<SessionOperationTestHarness> {
   const fixture = await createProvenanceTestFixture()
   if (options.canonicalStorageRoot) {
@@ -125,7 +129,11 @@ export async function createSessionOperationTestHarness(
     ? new NotebookNetworkSandboxOwner({
         resourceRoot: join(process.cwd(), 'packages/notebook-network-sandbox/vendor'),
         temporaryRoot: join(fixture.storageRoot, 'commands'),
-        getSettings: async () => DEFAULT_NOTEBOOK_NETWORK_SETTINGS,
+        getSettings: async () => ({
+          ...DEFAULT_NOTEBOOK_NETWORK_SETTINGS,
+          allowedDomains:
+            options.approvedNetworkHosts ?? DEFAULT_NOTEBOOK_NETWORK_SETTINGS.allowedDomains
+        }),
         persistAlwaysAllow: async () => DEFAULT_NOTEBOOK_NETWORK_SETTINGS,
         requestDecision: async () => 'deny'
       })
