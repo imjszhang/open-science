@@ -2,6 +2,7 @@
 // environment directories must be owner-released before handoff because their inode is not portable.
 export const MANAGED_EXECUTION_DATA_DIRS = [
   'research-environments',
+  'research-demos',
   'managed-execution-requests',
   'session-operations',
   'managed-session-requests'

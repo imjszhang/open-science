@@ -336,7 +336,6 @@ type ConversationPanelView = {
   activeSession: ChatSession | undefined
   /** Immutable source shown above a separate, unsent research question. Never a send target. */
   researchSourceSession?: ChatSession
-  researchRunAction?: React.ReactNode
   researchSourceContextError?: string
   retryResearchSourceContext?: () => void
   composerFocusKey?: string
@@ -522,7 +521,6 @@ const ConversationPanel = ({
   const {
     activeSession,
     researchSourceSession,
-    researchRunAction,
     researchSourceContextError,
     retryResearchSourceContext,
     composerFocusKey,
@@ -1516,7 +1514,6 @@ const ConversationPanel = ({
                 research.sourceImportId
               ])}
               source={research}
-              runAction={researchRunAction}
               historical={Boolean(
                 displayedSession?.packageOrigin ?? displayedSession?.importedResearch
               )}

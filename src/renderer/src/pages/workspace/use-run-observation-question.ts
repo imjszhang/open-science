@@ -58,7 +58,7 @@ export const useRunObservationQuestion = ({
       return
     useRunObservationQuestionStore.setState({ pending: undefined })
     if (pending.isCurrent?.() === false) return
-    if (!appendText(draftKey, observationQuestionText(pending.selection))) return
+    if (!appendText(draftKey, observationQuestionText(pending.selection, pending.demo))) return
     useRunObservationQuestionStore.setState({ lastAdded: pending })
     requestComposerFocus()
   }, [pending, projectId, sessionId, draftKey, editable, appendText])

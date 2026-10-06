@@ -24,6 +24,11 @@ vi.mock('./workspace-discussion-navigation', () => ({ openResearchDiscussion: mo
 vi.mock('react-i18next', () => createI18nTestStub())
 vi.mock('@/lib/replay', () => ({ loadReplayDocument: mocks.load }))
 vi.mock('@/lib/session-fork', () => ({ sessionForkAvailable: () => false, forkSession: vi.fn() }))
+vi.mock('./replay/ResearchDemoPanel', () => ({
+  ResearchDemoPanel: ({ source }: { source: { sourceImportId: string } }) => (
+    <div data-testid="offline-demo-panel" data-source-import={source.sourceImportId} />
+  )
+}))
 vi.mock('./replay/ReplayPanel', () => ({
   ReplayPanel: (props: ReplayPanelProps) => {
     mocks.panel(props)
@@ -120,6 +125,22 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('SessionReplayPreview lifecycle', () => {
+  it('offers offline demo only inside an imported source Replay and preserves the conversation', async () => {
+    useSessionStore.setState({
+      sessions: [{ ...session('source'), importedResearch: { importId: 'exact-import' } }],
+      selectedSessionId: 'discussion'
+    })
+    render(<SessionReplayPreview item={item()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Offline demo' }))
+    expect(screen.getByTestId('offline-demo-panel').getAttribute('data-source-import')).toBe(
+      'exact-import'
+    )
+    expect(useSessionStore.getState().selectedSessionId).toBe('discussion')
+    expect(mocks.discuss).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Session process' }))
+    expect(screen.queryByTestId('offline-demo-panel')).toBeNull()
+    expect(props().active).toBe(true)
+  })
   it('discovers each saved recording version and opens its receiving identity without changing the conversation', async () => {
     mocks.load.mockResolvedValue({
       ...doc(),

@@ -1,5 +1,22 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { readdir } from 'node:fs/promises'
+import { readdir, open } from 'node:fs/promises'
+import { ResearchExecutionConfigurationBroker } from '../research-execution-profiles/configuration-broker'
+import { satisfies, validRange } from 'semver'
+import {
+  researchExecutionPreflightRequestSchema,
+  researchEnvironmentVariableSchema,
+  saveResearchExecutionProfileRequestSchema,
+  type ResearchExecutionPreflight,
+  type ResearchExecutionSecretSlot,
+  type ResearchExecutionBinding,
+  type ResearchExecutionProfileView,
+  type ResearchExecutionPreflightRequest,
+  type ResearchExecutionConfigurationSnapshot
+} from '../../shared/research-execution-profile'
+import type {
+  ResearchExecutionCredentialLease,
+  ResearchExecutionProfileStore
+} from '../research-execution-profiles/store'
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -41,7 +58,11 @@ import {
   readDurableJsonFile,
   writeDurableJsonFile
 } from '../storage/durable-json-file'
-import { inspectResearchMaterials, type ResearchMaterialAuthority } from './research-materials'
+import {
+  inspectResearchMaterials,
+  type ResearchMaterialAuthority,
+  type ResearchMaterialVersion
+} from './research-materials'
 import {
   ManagedEnvironmentCancelledError,
   type ManagedEnvironmentExecutionContext,
@@ -91,6 +112,7 @@ const resultSchema = z
     exitCode: z.number().int().nullable(),
     outputs: z.array(z.object({ filename: z.string(), versionId: z.string() }).strict()).max(102),
     missingOptionalOutputs: z.array(z.string()).max(100),
+    missingCancelledOutputs: z.array(z.string()).max(100).optional(),
     observation: managedObservationResultSchema.optional()
   })
   .strict()
@@ -127,7 +149,8 @@ const collectionSchema = z
         status: z.enum(['completed', 'failed', 'cancelled']),
         exitCode: z.number().int().nullable(),
         files: z.array(frozenOutputSchema).max(100),
-        missingOptionalOutputs: z.array(z.string()).max(100)
+        missingOptionalOutputs: z.array(z.string()).max(100),
+        missingCancelledOutputs: z.array(z.string()).max(100).optional()
       })
       .strict()
       .optional(),
@@ -145,6 +168,37 @@ const journalSchema = z
     requestId: z.string(),
     projectView: runtimeViewLaunchSchema.optional(),
     recordObservation: z.boolean().optional(),
+    purpose: z.enum(['offline-demo', 'research']).optional(),
+    supplementalInputs: z
+      .array(
+        z
+          .object({
+            versionId: identity,
+            sourceIdentity: z.string(),
+            filename: z.string(),
+            sha256: checksum,
+            sizeBytes: z.number().int().nonnegative(),
+            contentAvailable: z.boolean().optional(),
+            descriptor: z.boolean().optional()
+          })
+          .strict()
+      )
+      .max(32)
+      .optional(),
+    executionProfile: z
+      .object({
+        profileId: identity,
+        displayName: z.string(),
+        variables: z.record(z.string(), z.string()),
+        allowedNetworkHosts: z.array(z.string()),
+        conditionChanges: z.array(z.string()),
+        descriptorSha256: checksum,
+        planKey: z.string()
+      })
+      .strict()
+      .optional(),
+    // Fail closed on recovery if credential-bearing outputs were not scanned before interruption.
+    credentialOutputsChecked: z.boolean().optional(),
     observation: managedObservationResultSchema.optional(),
     state: z.enum(['running', 'awaiting-publication', 'completed', 'failed']),
     collection: collectionSchema.optional(),
@@ -175,6 +229,11 @@ export type ManagedExecutionInspection = {
   }
   requestId: string
   state: Journal['state']
+  purpose?: Journal['purpose']
+  executionProfile?: Pick<
+    NonNullable<Journal['executionProfile']>,
+    'displayName' | 'conditionChanges'
+  >
   run: NotebookRunRecord | null
   artifacts: ArtifactVersionDescriptor[]
   projectView?: RuntimeViewLaunch
@@ -203,6 +262,7 @@ export type ManagedObservationMediaRegistration = {
 
 export type ManagedExecutionServiceDependencies = {
   dataRoot: string
+  profiles?: Pick<ResearchExecutionProfileStore, 'list' | 'save' | 'remove' | 'lease'>
   environments: Pick<
     ManagedResearchEnvironmentOwner,
     | 'prepare'
@@ -342,6 +402,32 @@ const publicEnvironment = (receipt: ManagedResearchEnvironment): unknown => ({
 
 /** Shared execution core. Internal tools supply their current turn; external calls admit one. */
 export class ManagedExecutionService {
+  private readonly configurationBroker = new ResearchExecutionConfigurationBroker({
+    preflight: (request, signal) => this.preflight(request, signal)
+  })
+
+  requestConfiguration(
+    value: unknown,
+    signal?: AbortSignal
+  ): Promise<ResearchExecutionConfigurationSnapshot> {
+    return this.configurationBroker.request(value, signal)
+  }
+  getConfiguration(
+    value: unknown,
+    signal?: AbortSignal
+  ): Promise<ResearchExecutionConfigurationSnapshot> {
+    return this.configurationBroker.get(value, signal)
+  }
+  pendingConfigurations(): ResearchExecutionConfigurationSnapshot[] {
+    return this.configurationBroker.listPending()
+  }
+  resolveConfiguration(
+    value: unknown,
+    signal?: AbortSignal
+  ): Promise<ResearchExecutionConfigurationSnapshot> {
+    return this.configurationBroker.resolve(value, signal)
+  }
+
   private readonly liveOutput = new Map<
     string,
     {
@@ -463,6 +549,15 @@ export class ManagedExecutionService {
       },
       requestId: journal.requestId,
       state: journal.state,
+      purpose: journal.purpose,
+      ...(journal.executionProfile
+        ? {
+            executionProfile: {
+              displayName: journal.executionProfile.displayName,
+              conditionChanges: [...journal.executionProfile.conditionChanges]
+            }
+          }
+        : {}),
       run,
       artifacts,
       ...(journal.projectView ? { projectView: journal.projectView } : {}),
@@ -586,6 +681,266 @@ export class ManagedExecutionService {
         versions: authority.versions
       }
     })
+  }
+
+  private async inspectExecutionPlan(
+    value: unknown,
+    signal?: AbortSignal
+  ): Promise<{
+    request: ResearchExecutionPreflightRequest
+    inspection: Awaited<ReturnType<typeof inspectResearchMaterials>>
+    plan:
+      | import('../../shared/research-reproduction').ResearchReproductionDescription['plans'][number]
+      | undefined
+    binding: ResearchExecutionBinding | undefined
+    slots: ResearchExecutionSecretSlot[]
+  }> {
+    const request = researchExecutionPreflightRequestSchema.parse(value)
+    const authority = await this.dependencies.materials({
+      projectId: request.projectId,
+      targetSessionId: request.sessionId,
+      sourceSessionId: request.sourceSessionId,
+      expectedSourceIdentity: request.sourceIdentity,
+      signal
+    })
+    const inspection = await inspectResearchMaterials(authority, {
+      descriptorVersionId: request.descriptorVersionId,
+      signal
+    })
+    const plan = inspection.description?.plans.find((item) => item.key === request.planKey)
+    const binding: ResearchExecutionBinding | undefined =
+      inspection.descriptor && plan
+        ? {
+            projectId: request.projectId,
+            sourceSessionId: request.sourceSessionId,
+            sourceIdentity: authority.source.identity,
+            descriptorVersionId: inspection.descriptor.versionId,
+            descriptorSha256: inspection.descriptor.sha256,
+            planKey: plan.key
+          }
+        : undefined
+    const slots: ResearchExecutionSecretSlot[] =
+      inspection.description?.secrets?.filter((slot) => slot.planKeys.includes(request.planKey)) ??
+      []
+    return { request, inspection, plan, binding, slots }
+  }
+
+  /** Read-only Agent/SDK discovery; never installs, executes, or substitutes a demo. */
+  async preflight(value: unknown, signal?: AbortSignal): Promise<ResearchExecutionPreflight> {
+    const request = researchExecutionPreflightRequestSchema.parse(value)
+    return this.dependencies.withWritableSession(request, async () => {
+      const { inspection, plan, binding, slots } = await this.inspectExecutionPlan(request, signal)
+      const result: ResearchExecutionPreflight = {
+        status: 'blocked',
+        issues: [],
+        compatibleRuntimeIds: [],
+        profiles: [],
+        slots: [],
+        remoteServicesVerified: false
+      }
+      if (inspection.status !== 'ready') result.issues.push({ code: 'description-unavailable' })
+      if (!plan || !binding) {
+        result.issues.push({ code: 'plan-unavailable' })
+        return result
+      }
+      result.binding = binding
+      result.sourceTitle = inspection.source.title
+      result.planTitle = plan.title
+      for (const key of plan.materialKeys)
+        if (inspection.materials?.find((item) => item.key === key)?.status !== 'available')
+          result.issues.push({ code: 'material-unavailable', key })
+      const runtimes = await this.runtimes()
+      result.compatibleRuntimeIds = runtimes.runtimes
+        .filter(
+          (runtime) =>
+            runtime.platform === 'darwin' &&
+            (!plan.requirements?.platforms ||
+              plan.requirements.platforms.includes(runtime.platform)) &&
+            (!plan.requirements?.node ||
+              (validRange(plan.requirements.node) !== null &&
+                satisfies(runtime.version, plan.requirements.node)))
+        )
+        .map((runtime) => runtime.runtimeId)
+      if (!result.compatibleRuntimeIds.length) result.issues.push({ code: 'runtime-unavailable' })
+      result.profiles = (await this.dependencies.profiles?.list(binding)) ?? []
+      const profile = request.profileId
+        ? result.profiles.find((item) => item.profileId === request.profileId)
+        : undefined
+      if (request.profileId && !profile) result.issues.push({ code: 'profile-unavailable' })
+      if (!profile && slots.some((slot) => slot.required))
+        result.issues.push({ code: 'profile-required' })
+      let inaccessible = false
+      if (profile) {
+        result.selectedProfileId = profile.profileId
+        try {
+          // Missing slots are not a credential-storage failure.
+          if (
+            !slots.some(
+              (slot) => slot.required && !profile.configuredCredentialKeys.includes(slot.key)
+            )
+          ) {
+            const lease = await this.dependencies.profiles!.lease(profile.profileId, binding, slots)
+            lease.release()
+          }
+        } catch {
+          inaccessible = true
+          result.issues.push({ code: 'credential-unavailable' })
+        }
+      }
+      result.slots = slots.map((slot) => {
+        if (!researchEnvironmentVariableSchema.safeParse(slot.environmentVariable).success) {
+          result.issues.push({ code: 'credential-unavailable', key: slot.key })
+          return { ...slot, status: 'unavailable' }
+        }
+        const configured = profile?.configuredCredentialKeys.includes(slot.key)
+        if (slot.required && !configured)
+          result.issues.push({ code: 'credential-required', key: slot.key })
+        return {
+          ...slot,
+          status: configured ? (inaccessible ? 'unavailable' : 'configured') : 'missing'
+        }
+      })
+      result.status = result.issues.length ? 'blocked' : 'ready'
+      return result
+    })
+  }
+
+  /** Trusted desktop only. Deliberately absent from external and Agent method catalogs. */
+  async saveExecutionProfile(
+    value: unknown,
+    signal?: AbortSignal
+  ): Promise<ResearchExecutionProfileView> {
+    if (!this.dependencies.profiles) throw new Error('Local research profiles are unavailable.')
+    const request = saveResearchExecutionProfileRequestSchema.parse(value)
+    return this.dependencies.withWritableSession(request, async () => {
+      const { binding, slots } = await this.inspectExecutionPlan(
+        {
+          projectId: request.projectId,
+          sessionId: request.sessionId,
+          sourceSessionId: request.sourceSessionId,
+          sourceIdentity: request.sourceIdentity,
+          descriptorVersionId: request.descriptorVersionId,
+          planKey: request.planKey,
+          profileId: request.profileId
+        },
+        signal
+      )
+      if (!binding) throw new Error('The research plan is unavailable.')
+      signal?.throwIfAborted()
+      return this.dependencies.profiles!.save(request, binding, slots, signal)
+    })
+  }
+
+  async removeExecutionProfile(value: unknown, signal?: AbortSignal): Promise<void> {
+    const request = researchExecutionPreflightRequestSchema.parse(value)
+    if (!request.profileId || !this.dependencies.profiles)
+      throw new Error('Research profile not found.')
+    await this.dependencies.withWritableSession(request, async () => {
+      const { binding } = await this.inspectExecutionPlan(request, signal)
+      if (!binding) throw new Error('The research plan is unavailable.')
+      signal?.throwIfAborted()
+      await this.dependencies.profiles!.remove(request.profileId!, binding, signal)
+    })
+  }
+
+  private async verifySupplementalInputs(
+    request: z.output<typeof executeManagedEnvironmentRequestSchema>,
+    ids: string[],
+    signal?: AbortSignal
+  ): Promise<ResearchMaterialVersion[]> {
+    if (!ids.length) return []
+    if (new Set(ids).size !== ids.length)
+      throw new Error('Supplemental research inputs must be unique.')
+    const environment = await this.dependencies.environments.get(request)
+    const authority = await this.dependencies.materials({
+      projectId: request.projectId,
+      targetSessionId: request.sessionId,
+      sourceSessionId: environment.source.sessionId,
+      expectedSourceIdentity: environment.source.identity,
+      signal
+    })
+    const inputs: ResearchMaterialVersion[] = []
+    for (const id of ids) {
+      const version = authority.versions.find((item) => item.versionId === id)
+      if (
+        !version ||
+        version.sourceIdentity !== environment.source.identity ||
+        version.contentAvailable === false ||
+        version.sizeBytes > 512 * 1024
+      )
+        throw new Error('The supplemental research input is unavailable in the selected source.')
+      const bytes = await authority.readVersion(id, { maxBytes: 512 * 1024, signal })
+      signal?.throwIfAborted()
+      if (
+        bytes.byteLength !== version.sizeBytes ||
+        createHash('sha256').update(bytes).digest('hex') !== version.sha256
+      )
+        throw new Error('The supplemental research input failed verification.')
+      inputs.push({ ...version })
+    }
+    return inputs
+  }
+
+  private async acquireExecutionProfile(
+    request: z.output<typeof executeManagedEnvironmentRequestSchema>
+  ): Promise<ResearchExecutionCredentialLease | undefined> {
+    if (!request.profileId) return undefined
+    if (!this.dependencies.profiles) throw new Error('Local research profiles are unavailable.')
+    const environment = await this.dependencies.environments.get(request)
+    const descriptor = environment.prepared?.inputs.find(
+      (input) => input.descriptor || input.filename === 'research-reproduction.json'
+    )
+    if (!descriptor) throw new Error('A research profile requires a prepared research description.')
+    const authority = await this.dependencies.materials({
+      projectId: request.projectId,
+      targetSessionId: request.sessionId,
+      sourceSessionId: environment.source.sessionId,
+      expectedSourceIdentity: environment.source.identity
+    })
+    const inspection = await inspectResearchMaterials(authority, {
+      descriptorVersionId: descriptor.versionId
+    })
+    if (inspection.descriptor?.sha256 !== descriptor.sha256 || !inspection.description)
+      throw new Error('The prepared research description changed.')
+    for (const plan of inspection.description.plans) {
+      const binding = {
+        projectId: request.projectId,
+        sourceSessionId: environment.source.sessionId,
+        sourceIdentity: environment.source.identity,
+        descriptorVersionId: descriptor.versionId,
+        descriptorSha256: descriptor.sha256,
+        planKey: plan.key
+      }
+      if (
+        !(await this.dependencies.profiles.list(binding)).some(
+          (profile) => profile.profileId === request.profileId
+        )
+      )
+        continue
+      if (
+        plan.materialKeys.some(
+          (key) => !environment.prepared?.inputs.some((input) => input.materialKey === key)
+        )
+      )
+        throw new Error(
+          'The prepared environment does not include this profile’s research materials.'
+        )
+      if (
+        environment.runtime.platform !== 'darwin' ||
+        (plan.requirements?.platforms &&
+          !plan.requirements.platforms.includes(environment.runtime.platform)) ||
+        (plan.requirements?.node &&
+          (validRange(plan.requirements.node) === null ||
+            !satisfies(environment.runtime.version, plan.requirements.node)))
+      )
+        throw new Error('The prepared runtime does not satisfy the research profile plan.')
+      return this.dependencies.profiles.lease(
+        request.profileId,
+        binding,
+        inspection.description.secrets?.filter((slot) => slot.planKeys.includes(plan.key)) ?? []
+      )
+    }
+    throw new Error('The execution profile does not match these prepared research materials.')
   }
 
   async prepare(value: unknown, signal?: AbortSignal): Promise<unknown> {
@@ -914,6 +1269,54 @@ export class ManagedExecutionService {
     return journal
   }
 
+  private async checkCredentialOutputs(
+    journal: Journal,
+    context: ManagedExecutionTurnContext,
+    authority: ManagedOutputAuthority,
+    secrets: readonly string[],
+    signal: AbortSignal
+  ): Promise<void> {
+    if (!journal.executionProfile) return
+    // Freeze ownership and terminal status first. Cancellation may legitimately leave declared
+    // outputs unproduced; only the exact files that will be published need credential screening.
+    if (!journal.collection?.frozen)
+      throw new Error('Research outputs must be frozen before screening.')
+    for (const selection of journal.collection.frozen.files) {
+      const file = await resolveManagedOutputAuthority(authority, context, selection.path)
+      // Streaming bounded-memory scan; include common encodings that might otherwise leak in exports.
+      const patterns = secrets
+        .flatMap((secret) => [
+          secret,
+          encodeURIComponent(secret),
+          Buffer.from(secret).toString('base64')
+        ])
+        .filter(Boolean)
+        .map((secret) => Buffer.from(secret))
+      if (!patterns.length) continue
+      const overlap = Math.max(...patterns.map((pattern) => pattern.length)) - 1
+      const handle = await open(file.path, 'r')
+      try {
+        const buffer = Buffer.alloc(64 * 1024)
+        let tail = Buffer.alloc(0)
+        while (true) {
+          signal.throwIfAborted()
+          const { bytesRead } = await handle.read(buffer)
+          if (!bytesRead) break
+          const bytes = Buffer.concat([tail, buffer.subarray(0, bytesRead)])
+          if (patterns.some((pattern) => bytes.includes(pattern)))
+            throw new Error(
+              'A research output contains a configured credential. Publication was stopped; correct the program or discard the retained output.'
+            )
+          tail = bytes.subarray(Math.max(0, bytes.length - overlap))
+        }
+      } finally {
+        await handle.close()
+      }
+    }
+    journal.credentialOutputsChecked = true
+    await this.writeJournal(journal)
+  }
+
   private async freezeCollection(
     journal: Journal,
     context: ManagedExecutionTurnContext,
@@ -944,6 +1347,7 @@ export class ManagedExecutionService {
       throw new Error('Retained output producer is not the original terminal Notebook Run.')
     const files: z.infer<typeof frozenOutputSchema>[] = []
     const missingOptionalOutputs: string[] = []
+    const missingCancelledOutputs: string[] = []
     for (const selection of collection.selections) {
       signal.throwIfAborted()
       let managed: Awaited<ReturnType<typeof resolveManagedOutputAuthority>>
@@ -952,6 +1356,12 @@ export class ManagedExecutionService {
       } catch (error) {
         if (selection.optional && (error as NodeJS.ErrnoException).code === 'ENOENT') {
           missingOptionalOutputs.push(selection.path)
+          continue
+        }
+        if (run.status === 'cancelled' && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+          // An explicit stop is a terminal outcome, not a demand to manufacture every planned
+          // result. Keep this distinct from optional outputs, and never weaken completed Runs.
+          missingCancelledOutputs.push(selection.path)
           continue
         }
         throw error
@@ -989,7 +1399,8 @@ export class ManagedExecutionService {
             : 'failed',
       exitCode: run.exitCode ?? null,
       files,
-      missingOptionalOutputs
+      missingOptionalOutputs,
+      ...(missingCancelledOutputs.length ? { missingCancelledOutputs } : {})
     }
     await this.writeJournal(journal)
   }
@@ -1054,6 +1465,10 @@ export class ManagedExecutionService {
     observationHandle?: RunObservationRecordingHandle
   ): Promise<ManagedExecutionResult> {
     const collection = journal.collection!
+    if (journal.executionProfile && !journal.credentialOutputsChecked)
+      throw new Error(
+        'Research outputs require credential screening before publication; discard this retained collection if screening was interrupted.'
+      )
     const frozen = collection.frozen!
     if (recovery && frozen.files.some((file) => !file.generationId))
       throw new Error(
@@ -1130,6 +1545,9 @@ export class ManagedExecutionService {
         exitCode: frozen.exitCode,
         outputs,
         missingOptionalOutputs: frozen.missingOptionalOutputs,
+        ...(frozen.missingCancelledOutputs?.length
+          ? { missingCancelledOutputs: frozen.missingCancelledOutputs }
+          : {}),
         ...(journal.observation ? { observation: journal.observation } : {})
       }
       // This ordinary Artifact records the current collection event. Recovery never claims a new
@@ -1148,8 +1566,11 @@ export class ManagedExecutionService {
               version: 1,
               source: environment.source,
               materials: environment.prepared?.inputs,
+              supplementalInputs: journal.supplementalInputs,
               runtime: publicRuntime(environment.runtime),
               environmentFingerprint: environment.fingerprint,
+              purpose: journal.purpose,
+              executionProfile: journal.executionProfile,
               transport: collection.transport,
               collectedWithoutExecution: recovery,
               result
@@ -1173,19 +1594,66 @@ export class ManagedExecutionService {
   }
 
   async execute(value: unknown): ReturnType<SessionOperationOwner['start']> {
+    return this.startExecution(value, 'research')
+  }
+
+  /** Main-only Replay entry. Public schemas cannot request this purpose or inject its policy. */
+  async executeDemo(
+    value: unknown,
+    options: { inputVersionIds?: string[] } = {}
+  ): ReturnType<SessionOperationOwner['start']> {
+    return this.startExecution(value, 'offline-demo', options.inputVersionIds)
+  }
+
+  private async startExecution(
+    value: unknown,
+    purpose: 'research' | 'offline-demo',
+    inputVersionIds?: string[]
+  ): ReturnType<SessionOperationOwner['start']> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
+    if (purpose === 'offline-demo' && request.profileId)
+      throw new Error('Offline demos cannot use research profiles.')
     if (request.projectView && !this.dependencies.registerProjectService)
       throw new Error('Interactive project viewing is not available in this runtime.')
+    inputVersionIds =
+      inputVersionIds === undefined ? undefined : z.array(identity).max(32).parse(inputVersionIds)
+    const previousOperation = await this.dependencies.operations.get({
+      projectId: request.projectId,
+      sessionId: request.sessionId,
+      requestId: request.requestId
+    })
+    const initialLease = previousOperation ? undefined : await this.acquireExecutionProfile(request)
+    try {
+      if (initialLease?.secretValues.some((secret) => JSON.stringify(request).includes(secret)))
+        throw new Error('Research credentials must not appear in commands or execution requests.')
+    } finally {
+      initialLease?.release()
+    }
     return this.dependencies.operations.start({
       projectId: request.projectId,
       sessionId: request.sessionId,
       requestId: request.requestId,
-      requestFingerprint: digest(JSON.stringify(request)),
+      requestFingerprint:
+        purpose === 'research' &&
+        !request.profileId &&
+        !inputVersionIds?.length &&
+        previousOperation?.requestFingerprint === digest(JSON.stringify(request))
+          ? previousOperation.requestFingerprint
+          : digest(
+              JSON.stringify({
+                request,
+                purpose,
+                ...(inputVersionIds?.length ? { inputVersionIds } : {})
+              })
+            ),
       requestText: request.description ?? 'Run the selected prepared research materials.',
       execute: async (context, signal) => {
         let result: ManagedExecutionResult
         try {
-          result = await this.executeInTurn(request, context, signal)
+          result =
+            purpose === 'offline-demo'
+              ? await this.executeDemoInTurn(request, context, signal, { inputVersionIds })
+              : await this.executeInTurn(request, context, signal)
         } catch (error) {
           if (!(error instanceof ManagedEnvironmentCancelledError)) throw error
           return { status: 'cancelled', text: error.message }
@@ -1243,6 +1711,31 @@ export class ManagedExecutionService {
     admittedContext: ManagedExecutionTurnContext,
     signal?: AbortSignal
   ): Promise<ManagedExecutionResult> {
+    return this.executeWithPurpose(value, admittedContext, signal, 'research')
+  }
+
+  async executeDemoInTurn(
+    value: unknown,
+    admittedContext: ManagedExecutionTurnContext,
+    signal?: AbortSignal,
+    options: { inputVersionIds?: string[] } = {}
+  ): Promise<ManagedExecutionResult> {
+    return this.executeWithPurpose(
+      value,
+      admittedContext,
+      signal,
+      'offline-demo',
+      options.inputVersionIds
+    )
+  }
+
+  private async executeWithPurpose(
+    value: unknown,
+    admittedContext: ManagedExecutionTurnContext,
+    signal: AbortSignal | undefined,
+    purpose: 'research' | 'offline-demo',
+    inputVersionIds?: string[]
+  ): Promise<ManagedExecutionResult> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
     if (request.projectView && !this.dependencies.registerProjectService)
       throw new Error('Interactive project viewing is not available in this runtime.')
@@ -1271,14 +1764,28 @@ export class ManagedExecutionService {
     const key = digest(
       JSON.stringify([context.projectId, context.sessionId, context.operationId, request.requestId])
     )
-    const fingerprint = digest(JSON.stringify(request))
+    inputVersionIds =
+      inputVersionIds === undefined ? undefined : z.array(identity).max(32).parse(inputVersionIds)
+    if (purpose === 'offline-demo' && request.profileId)
+      throw new Error('Offline demos cannot use research profiles.')
+    const fingerprint = digest(
+      JSON.stringify({ request, purpose, ...(inputVersionIds?.length ? { inputVersionIds } : {}) })
+    )
     const existing = this.active.get(key)
     if (existing) {
       if (existing.fingerprint !== fingerprint)
         throw new Error('Prepared execution request conflicts with its earlier contents.')
       return existing.completion
     }
-    const completion = this.executeOnce(request, context, signal, key, fingerprint)
+    const completion = this.executeOnce(
+      request,
+      context,
+      signal,
+      key,
+      fingerprint,
+      purpose,
+      inputVersionIds
+    )
     this.active.set(key, { fingerprint, completion })
     try {
       return await completion
@@ -1292,11 +1799,22 @@ export class ManagedExecutionService {
     context: ManagedExecutionTurnContext,
     signal: AbortSignal | undefined,
     key: string,
-    fingerprint: string
+    fingerprint: string,
+    purpose: 'research' | 'offline-demo',
+    inputVersionIds?: string[]
   ): Promise<ManagedExecutionResult> {
     const existing = await this.readJournal(key)
     if (existing) {
-      if (existing.fingerprint !== fingerprint)
+      if (
+        existing.fingerprint !== fingerprint &&
+        !(
+          purpose === 'research' &&
+          existing.purpose === undefined &&
+          !request.profileId &&
+          !inputVersionIds?.length &&
+          existing.fingerprint === digest(JSON.stringify(request))
+        )
+      )
         throw new Error('Prepared execution request conflicts with its earlier contents.')
       if (existing.result) {
         await this.refreshObservation(existing)
@@ -1307,10 +1825,36 @@ export class ManagedExecutionService {
       )
     }
     signal?.throwIfAborted()
+    const supplementalInputs = await this.verifySupplementalInputs(
+      request,
+      inputVersionIds ?? [],
+      signal
+    )
+    const credentialLease = await this.acquireExecutionProfile(request)
+    if (credentialLease?.secretValues.some((secret) => JSON.stringify(request).includes(secret))) {
+      credentialLease.release()
+      throw new Error('Research credentials must not appear in commands or execution requests.')
+    }
     const journal: Journal = {
       schemaVersion: 1,
       key,
       fingerprint,
+      purpose,
+      ...(supplementalInputs.length ? { supplementalInputs } : {}),
+      ...(credentialLease
+        ? {
+            executionProfile: {
+              profileId: credentialLease.profile.profileId,
+              displayName: credentialLease.profile.displayName,
+              variables: credentialLease.profile.variables,
+              allowedNetworkHosts: credentialLease.profile.allowedNetworkHosts,
+              conditionChanges: credentialLease.profile.conditionChanges,
+              descriptorSha256: credentialLease.profile.binding.descriptorSha256,
+              planKey: credentialLease.profile.binding.planKey
+            },
+            credentialOutputsChecked: false
+          }
+        : {}),
       projectId: request.projectId,
       sessionId: request.sessionId,
       operationId: context.operationId,
@@ -1325,7 +1869,12 @@ export class ManagedExecutionService {
         transport: request.localServicePort === undefined ? 'none' : 'private-unix-socket'
       }
     }
-    await this.writeJournal(journal)
+    try {
+      await this.writeJournal(journal)
+    } catch (error) {
+      credentialLease?.release()
+      throw error
+    }
     const proof = request.projectView
       ? {
           value: randomBytes(32).toString('hex'),
@@ -1337,7 +1886,10 @@ export class ManagedExecutionService {
       stdout: '',
       stderr: '',
       truncated: false,
-      secrets: proof ? [proof.value, proof.path] : []
+      secrets: [
+        ...(proof ? [proof.value, proof.path] : []),
+        ...(credentialLease?.secretValues ?? [])
+      ]
     } as {
       runId?: string
       stdout: string
@@ -1384,6 +1936,16 @@ export class ManagedExecutionService {
         return this.dependencies.environments.withExecution(
           {
             ...request,
+            confinement: {
+              mode: purpose,
+              allowedNetworkHosts: credentialLease?.profile.allowedNetworkHosts ?? []
+            },
+            ...(credentialLease
+              ? {
+                  privateEnvironment: credentialLease.privateEnvironment,
+                  secretValues: credentialLease.secretValues
+                }
+              : {}),
             executionInvocationId: 'managed-' + key,
             collectionId: key,
             retainCollection: true,
@@ -1446,6 +2008,13 @@ export class ManagedExecutionService {
           async (environment) => {
             mediaEnvironment = environment
             const inputs = await this.dependencies.resolvePreparedInputs(environment.receipt)
+            if (supplementalInputs.length && environment.receipt.prepared)
+              inputs.push(
+                ...(await this.dependencies.resolvePreparedInputs({
+                  ...environment.receipt,
+                  prepared: { ...environment.receipt.prepared, inputs: supplementalInputs }
+                }))
+              )
             const executionInvocationId = 'managed-' + key
             await this.dependencies.runtime.executeManagedShell(
               {
@@ -1483,6 +2052,13 @@ export class ManagedExecutionService {
             await context.recordRun(cleanup.runId)
             const authority = environment.createOutputAuthority(context.operationId)
             await this.freezeCollection(journal, context, authority, environment.publicationSignal)
+            await this.checkCredentialOutputs(
+              journal,
+              context,
+              authority,
+              credentialLease?.secretValues ?? [],
+              environment.publicationSignal
+            )
             if (journal.collection!.frozen!.runId !== cleanup.runId)
               throw new Error('Collected output producer differs from the verified stopped Run.')
             return this.publishCollection(
@@ -1506,6 +2082,7 @@ export class ManagedExecutionService {
       }
       throw error
     } finally {
+      credentialLease?.release()
       // Keep cleanup order independent of optional observation. Finish drains its own pending
       // reads and freezes a truthful partial on errors; it never cancels or restarts the Run.
       await closeMedia()

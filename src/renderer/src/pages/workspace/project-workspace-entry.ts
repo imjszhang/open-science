@@ -6,6 +6,7 @@ import {
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { useSessionStore } from '@/stores/session-store'
+import { isResearchDemoCarrier, refreshResearchDemoCarriers } from '@/stores/research-demo-store'
 import { openResearchWorkspace, researchSourceFromSession } from './workspace-discussion-navigation'
 
 let pendingEntry: AbortController | undefined
@@ -19,7 +20,16 @@ export const openProjectWorkspace = async (
   pendingEntry?.abort()
   const controller = new AbortController()
   pendingEntry = controller
-  const sessions = useSessionStore.getState().sessions
+  const revision = useNavigationStore.getState().explicitNavigationRevision
+  await refreshResearchDemoCarriers(projectId)
+  if (
+    controller.signal.aborted ||
+    useNavigationStore.getState().explicitNavigationRevision !== revision
+  )
+    return false
+  const sessions = useSessionStore
+    .getState()
+    .sessions.filter((session) => !isResearchDemoCarrier(session.projectId, session.id))
   const destination = resolveResearchProjectDestination(
     projectId,
     sessions,

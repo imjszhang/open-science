@@ -8,7 +8,10 @@ import type {
   ArtifactVersionDescriptor,
   ArtifactVersionFile
 } from '../../shared/artifact-provenance'
-import type { ExecuteManagedEnvironmentRequest } from '../../shared/managed-execution'
+import {
+  executeManagedEnvironmentRequestSchema,
+  type ExecuteManagedEnvironmentRequest
+} from '../../shared/managed-execution'
 import type { NotebookRunDocument, NotebookRunRecord } from '../../shared/notebook'
 import {
   ManagedExecutionService,
@@ -1018,6 +1021,55 @@ it('collects partial outputs after process cancellation and reports a cancelled 
   expect(JSON.parse(h.savedOutputs[1].content).result.status).toBe('cancelled')
 })
 
+it('finishes early cancellation with explicitly unproduced required outputs and releases its collection', async () => {
+  const h = await setup()
+  h.request.outputs!.push({ path: 'optional.json', filename: 'optional.json', optional: true })
+  vi.mocked(h.runtime.executeManagedShell).mockImplementationOnce(async (request, capability) => {
+    await h.executeFixture(request, capability)
+    const run = h.runs[0]
+    await rm(run.workingFiles[0].path)
+    run.workingFiles = []
+    run.status = 'cancelled'
+    run.exitCode = null
+    return { stdout: '', stderr: '', exitCode: null, cancelled: true }
+  })
+  const result = await h.service.executeInTurn(h.request, h.context)
+  expect(result).toMatchObject({
+    status: 'cancelled',
+    missingOptionalOutputs: ['optional.json'],
+    missingCancelledOutputs: ['result.json']
+  })
+  expect(h.savedOutputs).toHaveLength(1)
+  expect(JSON.parse(h.savedOutputs[0].content).result.missingCancelledOutputs).toEqual([
+    'result.json'
+  ])
+  h.publishSavedVersions()
+  expect(
+    await h.service.releaseEnvironment({ ...scope, environmentId: h.request.environmentId })
+  ).toMatchObject({ state: 'released' })
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledTimes(1)
+})
+
+it.each(['completed', 'failed'] as const)(
+  'still retains evidence when a %s Run omits required outputs',
+  async (status) => {
+    const h = await setup()
+    vi.mocked(h.runtime.executeManagedShell).mockImplementationOnce(async (request, capability) => {
+      await h.executeFixture(request, capability)
+      const run = h.runs[0]
+      await rm(run.workingFiles[0].path)
+      run.workingFiles = []
+      run.status = status
+      return { stdout: '', stderr: '', exitCode: status === 'completed' ? 0 : 1 }
+    })
+    await expect(h.service.executeInTurn(h.request, h.context)).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+    expect(h.savedOutputs).toEqual([])
+    expect((await h.environments.get(h.request)).pendingCollection).toBeDefined()
+  }
+)
+
 it('keeps resources and publishes nothing when process cleanup is unverified', async () => {
   const h = await setup()
   vi.mocked(h.runtime.confirmManagedShellCleanup).mockImplementation(async (scope) => ({
@@ -1247,6 +1299,7 @@ it('observes the exact live invocation and real output before execution returns 
     const live = await h.service.inspectExecution({ ...scope, operationId: 'operation' })
     expect(live).toMatchObject({
       state: 'running',
+      purpose: 'research',
       identity: { ...scope, operationId: 'operation', runId: 'notebook-run' },
       run: { status: 'running', text: { stdout: 'step one\n', stderr: 'progress warning\n' } },
       artifacts: []
@@ -2040,3 +2093,78 @@ it.skipIf(process.platform !== 'darwin')(
     }
   }
 )
+
+it('keeps Replay purpose Main-owned and rejects switching the same request into research', async () => {
+  const h = await setup()
+  let policy: ReturnType<typeof resolveManagedShellExecutionCapability> | undefined
+  vi.mocked(h.runtime.executeManagedShell).mockImplementation(
+    async (request, capability, ...rest) => {
+      policy = resolveManagedShellExecutionCapability(capability, {
+        ...scope,
+        executionInvocationId: request.executionInvocationId!
+      })
+      return h.executeFixture(request, capability, ...rest)
+    }
+  )
+  await expect(
+    h.service.executeInTurn({ ...h.request, confinement: { mode: 'offline-demo' } }, h.context)
+  ).rejects.toThrow()
+  const result = await h.service.executeDemoInTurn(h.request, h.context)
+  expect(result.status).toBe('completed')
+  expect((await h.service.inspectExecution({ ...scope, operationId: 'operation' }))?.purpose).toBe(
+    'offline-demo'
+  )
+  expect(policy?.confinement).toEqual({ mode: 'offline-demo', allowedNetworkHosts: [] })
+  await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow('conflict')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledTimes(1)
+  expect(
+    h.savedOutputs.find((output) => output.filename.startsWith('execution-'))?.content
+  ).toContain('"purpose": "offline-demo"')
+})
+
+it('verifies supplemental demo Versions against the source and records their dependency without restoring caller paths', async () => {
+  const h = await setup()
+  await expect(
+    h.service.executeDemoInTurn(h.request, h.context, undefined, {
+      inputVersionIds: ['outside-source']
+    })
+  ).rejects.toThrow('unavailable')
+  expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
+  await h.service.executeDemoInTurn(h.request, h.context, undefined, {
+    inputVersionIds: ['version-1']
+  })
+  const receipt = JSON.parse(
+    h.savedOutputs.find((output) => output.filename.startsWith('execution-'))!.content
+  )
+  expect(receipt.supplementalInputs).toEqual([
+    expect.objectContaining({ versionId: 'version-1', sha256: sha('export const input = 42') })
+  ])
+  expect(h.dependencies.resolvePreparedInputs).toHaveBeenCalledTimes(2)
+})
+
+it('recognizes old research request receipts after upgrade without rerunning or relabeling them as demos', async () => {
+  const h = await setup()
+  const result = await h.service.executeInTurn(h.request, h.context)
+  const key = sha(
+    JSON.stringify([scope.projectId, scope.sessionId, h.context.operationId, h.request.requestId])
+  )
+  const path = join(h.root, 'managed-execution-requests', key + '.json')
+  const legacy = JSON.parse(await readFile(path, 'utf8'))
+  delete legacy.purpose
+  legacy.fingerprint = sha(JSON.stringify(executeManagedEnvironmentRequestSchema.parse(h.request)))
+  await writeFile(path, JSON.stringify(legacy))
+  const restarted = new ManagedExecutionService(h.dependencies)
+  expect(await restarted.executeInTurn(h.request, h.context)).toEqual(result)
+  expect(
+    (await restarted.inspectExecution({ ...scope, operationId: 'operation' }))?.purpose
+  ).toBeUndefined()
+  await expect(restarted.executeDemoInTurn(h.request, h.context)).rejects.toThrow('conflicts')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledTimes(1)
+  vi.mocked(h.dependencies.operations.get).mockResolvedValueOnce({
+    requestFingerprint: legacy.fingerprint
+  } as never)
+  await restarted.execute(h.request)
+  expect(h.dependencies.operations.start).toHaveBeenLastCalledWith(
+    expect.objectContaining({ requestFingerprint: legacy.fingerprint })
+  )
+})

@@ -18,6 +18,8 @@ import * as notebook from './renderer-contracts/notebook'
 import * as sessionReplay from './renderer-contracts/session-replay'
 import * as runObservation from './renderer-contracts/run-observation'
 import * as researchRuns from './renderer-contracts/research-runs'
+import * as researchDemos from './renderer-contracts/research-demos'
+import * as researchExecutionProfiles from './renderer-contracts/research-execution-profiles'
 import * as notifications from './renderer-contracts/notifications'
 import * as previews from './renderer-contracts/previews'
 import * as permissions from './renderer-contracts/permissions'
@@ -60,6 +62,8 @@ export const RENDERER_API_CONTRACT = composeRendererApiContract(
   sessionReplay.contracts,
   runObservation.contracts,
   researchRuns.contracts,
+  researchDemos.contracts,
+  researchExecutionProfiles.contracts,
   previews.previewDeleteContracts,
   files.projectFilesGetOverviewContracts,
   projects.projectsCreateContracts,

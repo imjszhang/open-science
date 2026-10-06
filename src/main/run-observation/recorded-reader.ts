@@ -15,6 +15,9 @@ import type { ImmutableInputAuthority } from '../immutable-input-authority'
 import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
 import type { ManagedFileIndexRepository } from '../project-files/repository'
 import { resolveRunObservationMedia, verifyRunObservationMediaBytes } from './archive'
+import { readCollectionExecutionContext, unknownExecutionContext } from './execution-context'
+import type { RunObservationExecutionContext } from '../../shared/run-observation'
+import type { ArtifactVersionDescriptor } from '../../shared/artifact-provenance'
 
 export type RecordedObservationReaderDependencies = {
   immutableInputAuthority: Pick<ImmutableInputAuthority, 'resolveVersion' | 'openContent'>
@@ -23,7 +26,8 @@ export type RecordedObservationReaderDependencies = {
   artifactProvenanceRepository?: Pick<
     ArtifactProvenanceRepository,
     'resolvePublishedSessionVersionsByContent'
-  >
+  > &
+    Partial<Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'>>
   authorizeScope(target: RecordedObservationTarget): Promise<void>
   /** Main-only retained import receipt or exact native publication attestation. The fingerprint
    * describes the bytes this reader verified, and is never accepted from a public request. */
@@ -57,6 +61,9 @@ export class RecordedObservationReadError extends Error {
 }
 const MAX_MEDIA_BYTES = 16 * 1024 * 1024
 const MAX_CANDIDATES = 10000
+const MAX_CONTEXT_RECEIPT_BYTES = 256 * 1024
+const MAX_CONTEXT_RECEIPTS = 64
+const MAX_CONTEXT_SCAN_BYTES = 2 * 1024 * 1024
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
 const checksum = (body: Uint8Array): string => createHash('sha256').update(body).digest('hex')
 const sameInput = (left: NotebookRunInputFile, right: NotebookRunInputFile): boolean =>
@@ -182,6 +189,102 @@ export function createRecordedObservationReader(
         content: bytes
       }
     )
+    // Native Artifact Run membership survives import remapping even when the JSON still carries
+    // the author's IDs. Both the native relationship and exact recorded source Run must match.
+    // A similarly named JSON file, or self-declared purpose alone, cannot identify a receipt.
+    let executionContext = unknownExecutionContext()
+    const descriptorReader = dependencies.artifactProvenanceRepository
+    if (descriptorReader?.resolveVersionDescriptors) {
+      const resolveDescriptors = (versionIds: string[]): Promise<ArtifactVersionDescriptor[]> =>
+        descriptorReader.resolveVersionDescriptors!({
+          projectId: target.projectId,
+          appSessionId: target.sessionId,
+          versionIds
+        })
+      const exact = (descriptor: ArtifactVersionDescriptor): boolean =>
+        descriptor.projectId === target.projectId &&
+        descriptor.sessionId === target.sessionId &&
+        descriptor.state === 'finalized' &&
+        descriptor.isPublished === true &&
+        descriptor.originKind === 'agent_generated'
+      const anchors = (await resolveDescriptors([target.versionId])).filter(
+        (descriptor) =>
+          exact(descriptor) &&
+          descriptor.artifactId === target.artifactId &&
+          descriptor.versionId === target.versionId &&
+          descriptor.checksum === checksum(bytes) &&
+          descriptor.size === bytes.byteLength &&
+          descriptor.runId &&
+          SAFE_ID.test(descriptor.runId)
+      )
+      if (anchors.length === 1) {
+        const possible = candidates.filter(
+          (candidate) =>
+            candidate.source === 'artifact' &&
+            candidate.projectId === target.projectId &&
+            candidate.sessionId === target.sessionId &&
+            candidate.sourceVersionId !== target.versionId &&
+            candidate.originSession?.state !== 'deleted' &&
+            candidate.originSession?.state !== 'deleting' &&
+            candidate.mimeType === 'application/json' &&
+            Number.isSafeInteger(candidate.size) &&
+            candidate.size > 0 &&
+            candidate.size <= MAX_CONTEXT_RECEIPT_BYTES
+        )
+        const related: ArtifactVersionDescriptor[] = []
+        for (let start = 0; start < possible.length; start += 100) {
+          await guard(target, signal)
+          const batch = possible.slice(start, start + 100)
+          related.push(
+            ...(await resolveDescriptors(batch.map((item) => item.sourceVersionId))).filter(
+              (descriptor) =>
+                exact(descriptor) &&
+                descriptor.runId === anchors[0].runId &&
+                batch.some(
+                  (item) =>
+                    item.sourceFileId === descriptor.artifactId &&
+                    item.sourceVersionId === descriptor.versionId &&
+                    item.checksum === descriptor.checksum &&
+                    item.size === descriptor.size
+                )
+            )
+          )
+        }
+        // Refuse incomplete/ambiguous scans rather than selecting whichever receipt was seen first.
+        if (
+          related.length <= MAX_CONTEXT_RECEIPTS &&
+          related.reduce((sum, item) => sum + item.size, 0) <= MAX_CONTEXT_SCAN_BYTES
+        ) {
+          const contexts: RunObservationExecutionContext[] = []
+          for (const descriptor of related) {
+            try {
+              const content = await readVersion(
+                { ...target, artifactId: descriptor.artifactId, versionId: descriptor.versionId },
+                MAX_CONTEXT_RECEIPT_BYTES,
+                signal
+              )
+              if (
+                checksum(content) !== descriptor.checksum ||
+                content.byteLength !== descriptor.size
+              )
+                continue
+              const context = readCollectionExecutionContext(content, archive)
+              if (context) contexts.push(context)
+            } catch (error) {
+              if (error instanceof RecordedObservationReadError && error.code === 'unauthorized')
+                throw error
+              await guard(target, signal)
+              // Optional receipt damage must not hide an intact Replay. An incomplete scan also
+              // must not choose a competing readable receipt, so retain unknown for this read.
+              contexts.length = 0
+              break
+            }
+          }
+          const unique = new Map(contexts.map((context) => [JSON.stringify(context), context]))
+          if (unique.size === 1) executionContext = [...unique.values()][0]
+        }
+      }
+    }
     const historical = dependencies.artifactProvenanceRepository
     if (historical) {
       const contents = [
@@ -299,7 +402,7 @@ export function createRecordedObservationReader(
     }
     await resolve(target)
     await guard(target, signal)
-    return { receiving: { ...target }, archive, media }
+    return { receiving: { ...target }, archive, media, executionContext }
   }
   const safe = async <T>(operation: () => Promise<T>): Promise<T> => {
     try {

@@ -313,18 +313,18 @@ it.skipIf(!enabled)(
           workingFiles: []
         }
       }
-      const observation = new RunObservationOwner({
+      const observation: RunObservationOwner = new RunObservationOwner({
         authorize: (target, viewer) => viewers.assertViewer(target, viewer),
         read: async () => source
       })
-      const viewers = new ObservationViewers({
+      const viewers: ObservationViewers = new ObservationViewers({
         observer: observation,
         authorizeScope: async () => undefined,
         onRevoked: (viewerId) => httpHost.closeViewer(viewerId)
       })
       cleanups.push(() => viewers.close())
       const viewerJs = `fetch('/api/snapshot').then(r=>r.json()).then(s=>document.getElementById('viewer-state').textContent=s.phase);document.getElementById('open-project').onclick=async()=>{const r=await fetch('/api/project-view',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});const a=await r.json();document.getElementById('project').src=a.url;};`
-      const httpHost = new ReplayViewerHttpHost({
+      const httpHost: ReplayViewerHttpHost = new ReplayViewerHttpHost({
         viewers,
         projectViews,
         readAsset: async (path) =>

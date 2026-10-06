@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir, realpath, rename } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
+import { gte } from 'semver'
 import serviceAdapterSource from './node-local-service-preload.mjs?raw'
 import {
   compareResearchReproductionArchiveEntries,
@@ -166,6 +167,10 @@ export type ManagedEnvironmentExecution = EnvironmentReference & {
   /** Main keeps the output fence until Artifact publication has been durably acknowledged. */
   retainCollection?: boolean
   environment?: Readonly<Record<string, string>>
+  /** Trusted Main policy; unavailable in public execution schemas. */
+  confinement?: import('./managed-shell-execution').ManagedShellExecutionPolicy['confinement']
+  privateEnvironment?: Readonly<Record<string, string>>
+  secretValues?: readonly string[]
   localServicePort?: number
   /** Trusted observers only; neither callback nor proof comes from the public request payload. */
   onOutput?: import('./managed-shell-execution').ManagedShellExecutionPolicy['onOutput']
@@ -227,8 +232,14 @@ const canonical = (value: unknown): string => {
   }
   return JSON.stringify(value)
 }
-const environmentId = (scope: ManagedResearchScope & { requestId: string }): string =>
-  hash(canonical([scope.projectId, scope.sessionId, scope.requestId]))
+export const getManagedResearchEnvironmentId = (
+  scope: ManagedResearchScope & { requestId: string }
+): string => {
+  scopeSchema.parse({ projectId: scope.projectId, sessionId: scope.sessionId })
+  identity.parse(scope.requestId)
+  return hash(canonical([scope.projectId, scope.sessionId, scope.requestId]))
+}
+const environmentId = getManagedResearchEnvironmentId
 const missing = (error: unknown): boolean =>
   (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
 const MAX_RECEIPT_BYTES = 32 * 1024 ** 2
@@ -397,6 +408,22 @@ export class ManagedResearchEnvironmentOwner {
       throw new Error('Managed environment does not belong to this Session.')
     }
     return receipt
+  }
+
+  /** Main-only intent recovery: absence is distinct from an invalid receipt; never prepares or executes. */
+  async lookupPrepared(
+    scope: ManagedResearchScope & { requestId: string }
+  ): Promise<ManagedResearchEnvironment | undefined> {
+    const id = getManagedResearchEnvironmentId(scope)
+    const receipt = await this.read(id)
+    if (!receipt) return undefined
+    if (
+      receipt.projectId !== scope.projectId ||
+      receipt.sessionId !== scope.sessionId ||
+      receipt.requestId !== scope.requestId
+    )
+      throw new Error('Managed environment receipt does not match its preparation intent.')
+    return structuredClone(receipt)
   }
 
   async get(scope: EnvironmentReference): Promise<ManagedResearchEnvironment> {
@@ -715,6 +742,11 @@ export class ManagedResearchEnvironmentOwner {
         OPEN_SCIENCE_INPUT_DIR: inputRoot,
         OPEN_SCIENCE_OUTPUT_DIR: outputRoot,
         OPEN_SCIENCE_NODE: receipt.runtime.executable,
+        // Node's built-in fetch does not otherwise honor the controlled HTTP(S) proxy.
+        // Older runtimes must use an explicit application proxy adapter; never allow direct TCP.
+        ...(request.confinement && gte(receipt.runtime.version, '24.5.0')
+          ? { NODE_USE_ENV_PROXY: '1' }
+          : {}),
         ...(serviceAdapter
           ? {
               NODE_OPTIONS: `--import=${pathToFileURL(serviceAdapter).href}`,
@@ -738,6 +770,9 @@ export class ManagedResearchEnvironmentOwner {
         cwd: workRoot,
         outputRoot,
         environment,
+        ...(request.confinement ? { confinement: request.confinement } : {}),
+        ...(request.privateEnvironment ? { privateEnvironment: request.privateEnvironment } : {}),
+        ...(request.secretValues ? { secretValues: request.secretValues } : {}),
         filesystem: {
           readOnlyRoots: [
             inputRoot,

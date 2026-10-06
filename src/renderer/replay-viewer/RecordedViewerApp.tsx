@@ -65,6 +65,7 @@ export const RecordedViewerApp = ({
       <div className="min-h-0 flex-1">
         <RecordedRunObservationPreview
           archive={payload.archive}
+          executionContext={payload.executionContext}
           receiving={payload.receiving}
           media={context.canReadArtifacts ? payload.media : NO_MEDIA}
           title={t('Archived observation')}

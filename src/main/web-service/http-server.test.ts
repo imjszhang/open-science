@@ -5164,6 +5164,9 @@ describe('managed execution HTTP API', () => {
       service: {
         runtimes: vi.fn(),
         createSession: vi.fn(),
+        preflight: vi.fn(),
+        requestConfiguration: vi.fn(),
+        getConfiguration: vi.fn(),
         inspectMaterials: vi.fn(),
         prepare: (value) => prepare(prepareManagedEnvironmentRequestSchema.parse(value)),
         execute: vi.fn(),
@@ -5443,6 +5446,9 @@ describe('managed execution HTTP API', () => {
       service: {
         runtimes: vi.fn(),
         createSession: vi.fn(),
+        preflight: vi.fn(),
+        requestConfiguration: vi.fn(),
+        getConfiguration: vi.fn(),
         inspectMaterials: vi.fn(),
         prepare: vi.fn(),
         execute,

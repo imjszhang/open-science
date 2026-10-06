@@ -11,6 +11,7 @@ import {
   type RecordedObservationResourceRenderer
 } from '@/lib/replay/recorded-observation'
 import type { RunObservationArchive } from '../../../../shared/run-observation-archive'
+import type { RunObservationExecutionContext } from '../../../../shared/run-observation'
 import type { ReplayResourceReader } from './replay/replay-resources'
 import { RecordedProjectImages, type RecordedProjectImage } from './replay/RecordedProjectImages'
 
@@ -19,6 +20,7 @@ export type RecordedRunObservationPreviewProps = {
   receiving: RecordedObservationReceivingScope
   media: readonly ResolvedObservationMedia[]
   title: string
+  executionContext?: RunObservationExecutionContext
   isActive?: boolean
   readResource: ReplayResourceReader
   renderResource?: RecordedObservationResourceRenderer
@@ -163,6 +165,7 @@ export const RecordedRunObservationPreview = (
       <div className="min-h-0 flex-1">
         <LiveReplayView
           title={props.title}
+          executionContext={props.executionContext}
           sourceIdentity={projection.sourceIdentity}
           snapshot={projection.snapshots.at(-1)!}
           history={projection.snapshots}

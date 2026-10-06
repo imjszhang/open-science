@@ -80,7 +80,6 @@ import {
   starterHistorySessionSelector
 } from './composer/composer-history'
 import { ConversationPanel } from './ConversationPanel'
-import { useResearchRunLauncher } from './use-research-run-launcher'
 import { useWorkspaceSessionDiscussion } from './workspace-session-discussion'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { ordinaryDraftKey, researchDraftKey } from './research-draft-identity'
@@ -868,12 +867,6 @@ const WorkspacePage = ({
       typeof window.api.acp?.getPlanProjection === 'function'
         ? planProjectionRecoveryPorts
         : undefined
-  })
-  const researchRunAction = useResearchRunLauncher({
-    source: selectedResearchMembership ?? activeDraftResearch,
-    activeSession,
-    currentDraftKey,
-    conversation
   })
   // "Request review" is disabled when:
   //   - there is no active session or no completed agent turn yet, OR
@@ -1887,7 +1880,6 @@ const WorkspacePage = ({
                 view={{
                   activeSession,
                   researchSourceSession,
-                  researchRunAction,
                   researchSourceContextError: sourceContextError,
                   retryResearchSourceContext: retrySourceContext,
                   composerFocusKey: currentDraftKey,

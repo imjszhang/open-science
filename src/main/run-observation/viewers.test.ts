@@ -69,12 +69,12 @@ function harness(
   const revoked = vi.fn<NonNullable<ObservationViewersDependencies['onRevoked']>>(
     async () => undefined
   )
-  const observer = new RunObservationOwner({
+  const observer: RunObservationOwner = new RunObservationOwner({
     authorize: (target, viewer) => viewers.assertViewer(target, viewer),
     read,
     now: () => now
   })
-  const viewers = new ObservationViewers({
+  const viewers: ObservationViewers = new ObservationViewers({
     observer,
     recorded,
     authorizeScope: scope,
@@ -352,7 +352,14 @@ describe('ObservationViewers', () => {
 
 describe('recorded viewer authority', () => {
   it('reads a receiving Artifact without borrowing a live Run and freezes browser-selected source evidence', async () => {
-    const { payload } = recordedFixture()
+    const payload = {
+      ...recordedFixture().payload,
+      executionContext: {
+        purpose: 'research' as const,
+        profileName: 'Small baseline',
+        conditionChanges: ['reduced step count']
+      }
+    }
     const recorded = {
       authorizeScope: vi.fn(async () => undefined),
       read: vi.fn(async () => structuredClone(payload))
@@ -369,6 +376,11 @@ describe('recorded viewer authority', () => {
     const selected = await h.viewers.selectRecording(access.viewerId, 'observation-0', auth)
     expect(selected.record.sourceEvidence.identity.runId).toBe('author-run')
     expect(selected.receiving.versionId).toBe('archive-version')
+    expect(selected.executionContext).toEqual(payload.executionContext)
+    ;(selected.executionContext!.conditionChanges as string[])[0] = 'consumer mutation'
+    expect(
+      (await h.viewers.recordingSelection(access.viewerId, { caller: h.caller }))?.executionContext
+    ).toEqual(payload.executionContext)
     selected.record.run!.logs.stdout.text = 'consumer mutation'
     expect(
       (await h.viewers.recordingSelection(access.viewerId, { caller: h.caller }))?.record.run?.logs

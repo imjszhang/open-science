@@ -1087,7 +1087,13 @@
       "src/main/notebook/dependency-analysis.scipy-sparse-composition.test.ts",
       "src/main/notebook/dependency-analysis.scipy-sparse.test.ts",
       "src/main/research-runs/inspection.test.ts",
-      "src/main/research-runs/ipc.test.ts"
+      "src/main/research-runs/ipc.test.ts",
+      "src/main/notebook/managed-confinement.macos.integration.test.ts",
+      "src/main/research-demos/owner.test.ts",
+      "src/main/research-demos/ipc.test.ts",
+      "src/main/research-execution-profiles/ipc.test.ts",
+      "src/main/research-demos/inspection.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],

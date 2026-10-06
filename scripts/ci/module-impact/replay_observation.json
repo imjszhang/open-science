@@ -50,7 +50,12 @@
     "src/renderer/src/pages/workspace/replay/recording-discovery.ts",
     "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
     "src/renderer/src/pages/workspace/use-research-run-observer.ts",
-    "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx"
+    "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
+    "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+    "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.tsx",
+    "src/renderer/src/stores/research-demo-store.test.ts",
+    "src/renderer/src/stores/research-demo-store.ts",
+    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx"
   ],
   "interfacePaths": [
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
@@ -84,7 +89,10 @@
     "src/renderer/src/pages/workspace/replay/RunRecordingsPanel.tsx",
     "src/renderer/src/pages/workspace/replay/use-recording-discovery.ts",
     "src/renderer/src/pages/workspace/replay/recording-discovery.ts",
-    "src/renderer/src/pages/workspace/use-research-run-observer.ts"
+    "src/renderer/src/pages/workspace/use-research-run-observer.ts",
+    "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.tsx",
+    "src/renderer/src/stores/research-demo-store.ts",
+    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -106,7 +114,9 @@
       "src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx",
       "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx",
       "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
-      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx"
+      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+      "src/renderer/src/stores/research-demo-store.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -160,7 +170,12 @@
       "src/renderer/web/renderer-argument-shape-characterization.test.ts",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
-      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspaceSidebarContainer.test.tsx",
+      "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
+      "src/renderer/src/pages/home/HomePage.persistence.test.tsx",
+      "src/renderer/src/pages/home/HomePage.render.test.tsx",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions"],

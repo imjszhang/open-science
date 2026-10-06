@@ -36,7 +36,9 @@
     "src/shared/run-observation-capture.test.ts",
     "src/shared/run-observation-capture.ts",
     "src/shared/run-observation-recording-status.ts",
-    "src/main/run-observation/capture-package.integration.test.ts"
+    "src/main/run-observation/capture-package.integration.test.ts",
+    "src/main/run-observation/execution-context.ts",
+    "src/main/run-observation/execution-context.test.ts"
   ],
   "interfacePaths": [
     "src/main/managed-run-observation.ts",
@@ -59,7 +61,8 @@
     "src/main/run-observation/media-collector.ts",
     "src/main/run-observation/project-export-reader.ts",
     "src/shared/run-observation-capture.ts",
-    "src/shared/run-observation-recording-status.ts"
+    "src/shared/run-observation-recording-status.ts",
+    "src/main/run-observation/execution-context.ts"
   ],
   "consumerModules": ["main_runtime_view", "replay_observation"],
   "testFiles": {
@@ -79,7 +82,8 @@
       "src/main/run-observation/media-collector.test.ts",
       "src/main/run-observation/project-export-reader.test.ts",
       "src/shared/run-observation-capture.test.ts",
-      "src/main/run-observation/capture-package.integration.test.ts"
+      "src/main/run-observation/capture-package.integration.test.ts",
+      "src/main/run-observation/execution-context.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -714,7 +718,14 @@
       "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
       "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
       "src/renderer/src/stores/research-run-store.test.ts",
-      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+      "src/main/research-execution-profiles/ipc.test.ts",
+      "src/main/research-demos/ipc.test.ts",
+      "src/main/research-demos/owner.test.ts",
+      "src/main/research-demos/inspection.test.ts",
+      "src/renderer/src/stores/research-demo-store.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

@@ -107,6 +107,66 @@ it('does not hand off evidence to imported/locked, different or unmounted conver
   expect(useRunObservationQuestionStore.getState().lastAdded).toBeUndefined()
 })
 
+it('adds Main-validated demo evidence to the discussion without rewriting its source identity', () => {
+  const changeDoc = vi.fn()
+  render(<Harness changeDoc={changeDoc} sessionId="discussion" />)
+  const captured = selection()
+  const destination = { projectId: 'project', sessionId: 'discussion', draftKey: 'discussion' }
+  act(() => {
+    expect(useRunObservationQuestionStore.getState().ask(captured)).toBe(false)
+    expect(
+      useRunObservationQuestionStore.getState().askDemo(
+        {
+          selection: captured,
+          source: {
+            projectId: 'project',
+            sourceSessionId: 'imported-source',
+            sourceImportId: 'import'
+          },
+          requestId: 'demo-request',
+          purpose: 'offline-demo',
+          destination
+        },
+        destination
+      )
+    ).toBe(true)
+  })
+  const text = changeDoc.mock.calls[0][0].nodes[1].text
+  expect(text).toContain('"purpose": "offline-demo"')
+  expect(text).toContain('"sourceSessionId": "imported-source"')
+  expect(text).toContain('"sessionId": "session"')
+  expect(text).toContain('"contentTrust": "untrusted-recorded-data"')
+  expect(text).toContain('demo-request')
+  expect(useRunObservationQuestionStore.getState().destination).toEqual(destination)
+})
+
+it('rejects demo handoffs for a changed draft or a foreign Main destination', () => {
+  const changeDoc = vi.fn()
+  render(<Harness changeDoc={changeDoc} sessionId="discussion" />)
+  const destination = { projectId: 'project', sessionId: 'discussion', draftKey: 'discussion' }
+  const question = {
+    selection: selection(),
+    source: { projectId: 'project', sourceSessionId: 'source', sourceImportId: 'import' },
+    requestId: 'request',
+    purpose: 'offline-demo' as const,
+    destination
+  }
+  expect(
+    useRunObservationQuestionStore
+      .getState()
+      .askDemo(question, { ...destination, draftKey: 'stale' })
+  ).toBe(false)
+  expect(
+    useRunObservationQuestionStore
+      .getState()
+      .askDemo(
+        { ...question, destination: { projectId: 'other', sessionId: 'discussion' } },
+        destination
+      )
+  ).toBe(false)
+  expect(changeDoc).not.toHaveBeenCalled()
+})
+
 it('bounds log excerpts and keeps hostile record delimiters inside the data envelope', () => {
   const captured = selection()
   ;(captured.snapshot.run!.logs.stdout as { text: string }).text =
@@ -161,6 +221,47 @@ it('references an imported recording in the current editable Project draft witho
   expect(text).toContain('imported-locked')
   expect(text).toContain('untrusted-recorded-data')
   expect(useRunObservationQuestionStore.getState().destination?.sessionId).toBe('normal-editable')
+})
+
+it('retains demo purpose on a known demo recording without classifying unrelated recordings', () => {
+  const changeDoc = vi.fn()
+  render(<Harness changeDoc={changeDoc} sessionId="discussion" />)
+  act(() => {
+    expect(
+      useRunObservationQuestionStore.getState().askRecorded(recordedSelection(), {
+        source: { projectId: 'project', sourceSessionId: 'source', sourceImportId: 'import' },
+        requestId: 'known-demo',
+        purpose: 'offline-demo'
+      })
+    ).toBe(true)
+  })
+  const text = changeDoc.mock.calls[0][0].nodes[1].text
+  expect(text).toContain('"purpose": "offline-demo"')
+  expect(text).toContain('"sessionId": "imported-locked"')
+  expect(text).toContain('known-demo')
+  expect(observationQuestionText(recordedSelection())).not.toContain('offline-demo')
+})
+it('retains Main-captured purpose and conditions when an ordinary discussion asks about an imported recording', () => {
+  const changeDoc = vi.fn()
+  render(<Harness changeDoc={changeDoc} sessionId="normal-editable" />)
+  const captured = {
+    ...recordedSelection(),
+    executionContext: {
+      purpose: 'research' as const,
+      profileName: 'Author configuration',
+      conditionChanges: ['Different model version']
+    }
+  }
+  act(() => {
+    expect(useRunObservationQuestionStore.getState().askRecorded(captured)).toBe(true)
+  })
+  const text = changeDoc.mock.calls[0][0].nodes[1].text
+  expect(text).toContain('"purpose": "research"')
+  expect(text).toContain('Author configuration')
+  expect(text).toContain('Different model version')
+  expect(text).toContain('"sessionId": "imported-locked"')
+  expect(text).not.toContain('demoRequestId')
+  expect(text).toContain('"contentTrust": "untrusted-recorded-data"')
 })
 it('does not add a recorded question to a locked, foreign-Project or stale draft', () => {
   const changeDoc = vi.fn(),

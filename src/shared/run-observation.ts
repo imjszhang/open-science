@@ -75,6 +75,19 @@ export type RunObservationArtifact = Readonly<{
   checksum?: string
   sizeBytes?: number
 }>
+/** Recorded intent and declared condition differences, never scientific success or live authority. */
+export const runObservationExecutionContextSchema = z
+  .object({
+    purpose: z.enum(['offline-demo', 'research', 'unknown']),
+    profileName: z.string().max(160).optional(),
+    conditionChanges: z.array(z.string().max(2048)).max(32)
+  })
+  .strict()
+export type RunObservationExecutionContext = Readonly<
+  Omit<z.infer<typeof runObservationExecutionContextSchema>, 'conditionChanges'> & {
+    conditionChanges: readonly string[]
+  }
+>
 /** Deliberately excludes source code, launch environment, local paths and live service URLs. */
 export type RunObservationSnapshot = Readonly<{
   identity: RunObservationIdentity
@@ -85,6 +98,7 @@ export type RunObservationSnapshot = Readonly<{
   run: RunObservationRun | null
   artifacts: readonly RunObservationArtifact[]
   artifactsTruncated: boolean
+  executionContext?: RunObservationExecutionContext
 }>
 export type RunObservationChange = Readonly<{
   cursor: RunObservationCursor
@@ -95,6 +109,7 @@ export type RunObservationChange = Readonly<{
   run?: RunObservationRun | null
   artifacts?: readonly RunObservationArtifact[]
   artifactsTruncated?: boolean
+  executionContext?: RunObservationExecutionContext
 }>
 export type RunObservationChanges =
   | Readonly<{
@@ -185,7 +200,8 @@ export const runObservationSnapshotSchema = z
       .strict()
       .nullable(),
     artifacts: z.array(runObservationArtifactSchema).max(1000),
-    artifactsTruncated: z.boolean()
+    artifactsTruncated: z.boolean(),
+    executionContext: runObservationExecutionContextSchema.optional()
   })
   .strict()
   .refine(

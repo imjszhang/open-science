@@ -15,6 +15,7 @@ import { SessionPersistenceReconciliationOwner } from '../session-persistence/re
 import { RuntimeSessionOwner } from '../session-persistence/runtime-session-owner'
 import { initDataRoot } from '../storage-root'
 import { createNotebookArtifactSourceScopeProvider } from './artifact-source-scope'
+import { ResearchExecutionProfileStore } from '../research-execution-profiles/store'
 import { ManagedExecutionService } from './managed-execution-service'
 import { ManagedResearchEnvironmentOwner } from './managed-research-environment'
 import { createManagedResearchNodeRuntimeRegistry } from './managed-research-node-runtime'
@@ -80,7 +81,7 @@ type Harness = {
   globalGrants: ReturnType<typeof vi.fn>
 }
 
-async function setup(materialScript = script): Promise<Harness> {
+async function setup(materialScript = script, researchProfile = false): Promise<Harness> {
   const fixture = await createProvenanceTestFixture()
   const root = await realpath(fixture.storageRoot)
   // Reproduce mixed logical/canonical storage roots even when TMPDIR has no /var alias.
@@ -204,10 +205,52 @@ async function setup(materialScript = script): Promise<Harness> {
       verified: (await notebook.confirmManagedShellCleanup(request, { retry: true })).reaped
     })
   })
+  const researchDescription = JSON.stringify({
+    format: 'open-science-reproduction-description',
+    descriptionVersion: 1,
+    title: 'Credential fixture',
+    materials: [
+      {
+        key: 'driver',
+        role: 'script',
+        availability: 'included',
+        filename: 'main.mjs',
+        restorePath: 'main.mjs',
+        sha256: sha(materialScript),
+        sizeBytes: Buffer.byteLength(materialScript)
+      }
+    ],
+    plans: [
+      {
+        key: 'original',
+        title: 'Original research',
+        scope: 'end-to-end',
+        materialKeys: ['driver'],
+        claim: 'Exercise a configured runtime',
+        limitations: ['Fixture does not prove a research claim'],
+        entrypoints: [{ materialKey: 'driver' }],
+        requirements: { node: '>=22', platforms: ['darwin'] }
+      }
+    ],
+    secrets: [
+      {
+        key: 'provider',
+        environmentVariable: 'PROVIDER_API_KEY',
+        description: 'API credential',
+        required: true,
+        planKeys: ['original']
+      }
+    ]
+  })
+  const profileStore = new ResearchExecutionProfileStore(root, {
+    encrypt: (value) => 'test-encrypted:' + Buffer.from(value).toString('base64'),
+    decrypt: (value) => Buffer.from(value.slice(15), 'base64').toString()
+  })
   const views = new ManagedRuntimeViews()
   const service = new ManagedExecutionService({
     artifacts,
     dataRoot: root,
+    profiles: profileStore,
     notebooks,
     environments,
     operations,
@@ -228,9 +271,22 @@ async function setup(materialScript = script): Promise<Harness> {
           filename: 'main.mjs',
           sha256: sha(materialScript),
           sizeBytes: Buffer.byteLength(materialScript)
-        }
+        },
+        ...(researchProfile
+          ? [
+              {
+                versionId: 'research-descriptor',
+                sourceIdentity: sha(materialScript),
+                filename: 'research-reproduction.json',
+                sha256: sha(researchDescription),
+                sizeBytes: Buffer.byteLength(researchDescription),
+                descriptor: true
+              }
+            ]
+          : [])
       ],
-      readVersion: async () => Buffer.from(materialScript)
+      readVersion: async (id) =>
+        Buffer.from(id === 'research-descriptor' ? researchDescription : materialScript)
     }),
     resolvePreparedInputs: async () => [],
     createSession: async () => {
@@ -244,7 +300,9 @@ async function setup(materialScript = script): Promise<Harness> {
     sourceSessionId: 'synthetic-source',
     sourceIdentity: sha(materialScript),
     runtimeId: discovered.runtimes[0].runtimeId,
-    materials: { files: [{ versionId: 'generic-node-script', restorePath: 'main.mjs' }] }
+    materials: researchProfile
+      ? { descriptorVersionId: 'research-descriptor', materialKeys: ['driver'] }
+      : { files: [{ versionId: 'generic-node-script', restorePath: 'main.mjs' }] }
   })) as { environmentId: string }
   return {
     root,
@@ -565,6 +623,143 @@ server.listen(4173,'127.0.0.1',()=>console.log('project ready'));
     } catch (error) {
       throw new Error(`Native interactive acceptance failed during ${stage}: ${String(error)}`, {
         cause: error
+      })
+    } finally {
+      h.views.close()
+      await h.operations.close()
+      await h.environments.close()
+      const stopped = await h.notebook.shutdownAll()
+      await h.notebook.dispose()
+      await h.sandbox.dispose()
+      if (stopped.reaped) await h.fixture.dispose()
+      expect(stopped.reaped).toBe(true)
+    }
+  },
+  40000
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'leases a local profile to the real Node process and redacts its output without publishing credentials',
+  async () => {
+    const secret = 'test-key-real-native-process-47321809'
+    const driver = `import fs from 'node:fs'; import path from 'node:path';
+    const key = process.env.PROVIDER_API_KEY;
+    if (!key) throw new Error('Credential missing');
+    process.stdout.write(key.slice(0, 9));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    process.stdout.write(key.slice(9) + '\\n');
+    fs.writeFileSync(path.join(process.env.OPEN_SCIENCE_OUTPUT_DIR, 'result.json'), JSON.stringify({ credentialProvided: !!key, model: process.env.MODEL }));`
+    const h = await setup(driver, true)
+    try {
+      const selection = {
+        ...scope,
+        sourceSessionId: 'synthetic-source',
+        sourceIdentity: sha(driver),
+        descriptorVersionId: 'research-descriptor',
+        planKey: 'original'
+      }
+      const missing = await h.service.preflight(selection)
+      expect(missing.status).toBe('blocked')
+      expect(missing.issues).toContainEqual({ code: 'credential-required', key: 'provider' })
+      const profile = await h.service.saveExecutionProfile({
+        ...selection,
+        descriptorSha256: missing.binding!.descriptorSha256,
+        displayName: 'Local test service',
+        variables: { MODEL: 'test-model' },
+        credentials: { provider: secret },
+        allowedNetworkHosts: []
+      })
+      expect(
+        await h.service.preflight({ ...selection, profileId: profile.profileId })
+      ).toMatchObject({ status: 'ready', remoteServicesVerified: false })
+      const operation = { ...scope, requestId: 'profile-run' }
+      await h.service.execute({
+        ...h.environment,
+        requestId: operation.requestId,
+        profileId: profile.profileId,
+        command: 'node "$OPEN_SCIENCE_INPUT_DIR/main.mjs"',
+        outputs: [{ path: 'result.json', filename: 'result.json' }],
+        timeoutMs: 15000
+      })
+      const done = await h.operations.wait(operation)
+      expect(done, JSON.stringify(done)).toMatchObject({ status: 'completed' })
+      const runs = (
+        await h.notebooks.readSessionDocuments(scope.projectId, scope.sessionId)
+      ).flatMap((document) => document.runs)
+      expect(runs).toHaveLength(1)
+      expect(JSON.stringify(runs)).not.toContain(secret)
+      expect(runs[0].text.stdout).toContain('[redacted]')
+      for (const id of done!.artifactVersionIds) {
+        const version = await h.fixture.client.artifactVersion.findUniqueOrThrow({ where: { id } })
+        const contents = await readFile(join(h.root, version.contentStorageKey), 'utf8')
+        expect(contents).not.toContain(secret)
+      }
+      const resultVersion = await h.fixture.client.artifactVersion.findUniqueOrThrow({
+        where: { id: done!.artifactVersionIds[0] }
+      })
+      expect(
+        JSON.parse(await readFile(join(h.root, resultVersion.contentStorageKey), 'utf8'))
+      ).toEqual({ credentialProvided: true, model: 'test-model' })
+      await expect(h.service.releaseEnvironment(h.environment)).resolves.toMatchObject({
+        state: 'released'
+      })
+      expect(h.kernelExecute).not.toHaveBeenCalled()
+    } finally {
+      h.views.close()
+      await h.operations.close()
+      await h.environments.close()
+      const stopped = await h.notebook.shutdownAll()
+      await h.notebook.dispose()
+      await h.sandbox.dispose()
+      if (stopped.reaped) await h.fixture.dispose()
+      expect(stopped.reaped).toBe(true)
+    }
+  },
+  40000
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'stops publication when a real workload writes a leased credential to its selected output',
+  async () => {
+    const secret = 'fixture-unpublishable-key-673629'
+    const driver = `import fs from 'node:fs'; import path from 'node:path'; fs.writeFileSync(path.join(process.env.OPEN_SCIENCE_OUTPUT_DIR, 'result.json'), JSON.stringify({ key: process.env.PROVIDER_API_KEY }));`
+    const h = await setup(driver, true)
+    try {
+      const selection = {
+        ...scope,
+        sourceSessionId: 'synthetic-source',
+        sourceIdentity: sha(driver),
+        descriptorVersionId: 'research-descriptor',
+        planKey: 'original'
+      }
+      const preflight = await h.service.preflight(selection)
+      const profile = await h.service.saveExecutionProfile({
+        ...selection,
+        descriptorSha256: preflight.binding!.descriptorSha256,
+        displayName: 'Output screening test',
+        credentials: { provider: secret }
+      })
+      const operation = { ...scope, requestId: 'profile-output-screening' }
+      await h.service.execute({
+        ...h.environment,
+        requestId: operation.requestId,
+        profileId: profile.profileId,
+        command: 'node "$OPEN_SCIENCE_INPUT_DIR/main.mjs"',
+        outputs: [{ path: 'result.json', filename: 'result.json' }],
+        timeoutMs: 15000
+      })
+      const done = await h.operations.wait(operation)
+      expect(done).toMatchObject({ status: 'failed', artifactVersionIds: [] })
+      expect(done!.error).toContain('contains a configured credential')
+      expect(JSON.stringify(done)).not.toContain(secret)
+      const environment = await h.environments.get(h.environment)
+      expect(environment.pendingCollection).toBeDefined()
+      await h.service.discardOutputs({
+        ...h.environment,
+        collectionId: environment.pendingCollection!.collectionId
+      })
+      await expect(h.service.releaseEnvironment(h.environment)).resolves.toMatchObject({
+        state: 'released'
       })
     } finally {
       h.views.close()

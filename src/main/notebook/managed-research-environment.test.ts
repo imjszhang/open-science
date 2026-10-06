@@ -1391,3 +1391,39 @@ it('clears a cancelled durable intent without asking Notebook to stop an executi
   expect((await fixture.owner.get(prepared)).activeExecution).toBeUndefined()
   expect((await fixture.owner.get(prepared)).pendingCollection).toBeUndefined()
 })
+
+it('looks up a preparation intent without re-preparing and distinguishes absence from corruption', async () => {
+  const fixture = await setup()
+  await expect(
+    fixture.owner.lookupPrepared({ ...scope, requestId: 'prepare-1' })
+  ).resolves.toBeUndefined()
+  expect(fixture.authority.readVersion).not.toHaveBeenCalled()
+  const prepared = await fixture.prepare()
+  const restarted = new ManagedResearchEnvironmentOwner(fixture.dependencies)
+  expect(await restarted.lookupPrepared({ ...scope, requestId: 'prepare-1' })).toEqual(prepared)
+  expect(fixture.authority.readVersion).toHaveBeenCalledTimes(1)
+  expect(fixture.dependencies.stopExecution).not.toHaveBeenCalled()
+  const privateOwner = restarted as unknown as { recordPath(id: string): string }
+  await writeFile(privateOwner.recordPath(prepared.environmentId), '{"invalid":true}')
+  await expect(restarted.lookupPrepared({ ...scope, requestId: 'prepare-1' })).rejects.toThrow()
+})
+
+it('provides built-in proxy support only to a compatible constrained Node runtime', async () => {
+  const fixture = await setup()
+  const prepared = await fixture.prepare()
+  await fixture.owner.withExecution(
+    {
+      ...scope,
+      environmentId: prepared.environmentId,
+      executionInvocationId: 'proxy-environment',
+      confinement: { mode: 'research', allowedNetworkHosts: ['api.example.org'] }
+    },
+    async (context) => {
+      const policy = resolveManagedShellExecutionCapability(context.capability, {
+        ...scope,
+        executionInvocationId: 'proxy-environment'
+      })
+      expect(policy.environment.NODE_USE_ENV_PROXY).toBe('1')
+    }
+  )
+})

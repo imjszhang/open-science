@@ -80,11 +80,11 @@ function harness(
       workingFiles: []
     }
   }
-  const observer = new RunObservationOwner({
+  const observer: RunObservationOwner = new RunObservationOwner({
     authorize: (target, view) => viewers.assertViewer(target, view),
     read: async () => source
   })
-  const viewers = new ObservationViewers({
+  const viewers: ObservationViewers = new ObservationViewers({
     observer,
     ...(options.recorded
       ? {
@@ -130,7 +130,7 @@ function harness(
             ? { body: Buffer.from('console.log("viewer")'), mimeType: 'application/javascript' }
             : undefined)
   )
-  const host = new ReplayViewerHttpHost({
+  const host: ReplayViewerHttpHost = new ReplayViewerHttpHost({
     desktopLocale: options.desktopLocale,
     ...(options.capture
       ? {

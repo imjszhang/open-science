@@ -1,9 +1,11 @@
 import type { RecordedRunObservationSelection } from '../../../../../shared/run-observation-recorded'
 import type { RunObservationSelection } from '../../../../../shared/run-observation'
+import type { ResearchDemoQuestion } from '../../../../../shared/research-demo'
 
 /** Ordinary message data survives export without a new native package field or live credential. */
 export const observationQuestionText = (
-  selection: RunObservationSelection | RecordedRunObservationSelection
+  selection: RunObservationSelection | RecordedRunObservationSelection,
+  demo?: Pick<ResearchDemoQuestion, 'source' | 'requestId' | 'purpose'>
 ): string => {
   const recorded = !('snapshot' in selection)
   const run = 'snapshot' in selection ? selection.snapshot.run : selection.record.run
@@ -25,6 +27,9 @@ export const observationQuestionText = (
       : 'open-science-selected-run-evidence',
     version: 1,
     contentTrust: 'untrusted-recorded-data',
+    ...(demo
+      ? { purpose: demo.purpose, researchSource: demo.source, demoRequestId: demo.requestId }
+      : {}),
     ...selection,
     ...('snapshot' in selection
       ? {

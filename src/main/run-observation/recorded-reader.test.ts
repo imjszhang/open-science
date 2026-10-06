@@ -207,6 +207,7 @@ describe('receiving-session recorded observation reader', () => {
     const result = await h.reader.read(h.target)
     expect(result.receiving).toEqual(h.target)
     expect(result.archive).toEqual(h.archive)
+    expect(result.executionContext).toEqual({ purpose: 'unknown', conditionChanges: [] })
     expect(result.archive.records[0].sourceEvidence.identity.runId).toBe('author-run')
     expect(result.archive.records[0].run).not.toHaveProperty('runId')
     expect(result.media).toEqual([
@@ -651,7 +652,60 @@ describe('receiving-session recorded observation reader', () => {
         versionIds: [published.output!.versionId]
       })
       const target = { ...scope, artifactId: artifact.artifactId, versionId: artifact.versionId }
+      const executionContext = {
+        purpose: 'research' as const,
+        profileName: 'Small external baseline',
+        conditionChanges: ['Two steps instead of the original full benchmark']
+      }
+      const collectionReceipt = {
+        kind: 'managed-research-execution',
+        version: 1,
+        purpose: executionContext.purpose,
+        executionProfile: {
+          displayName: executionContext.profileName,
+          conditionChanges: executionContext.conditionChanges,
+          variables: { PRIVATE_IGNORED: 'not-part-of-viewer' }
+        },
+        result: {
+          runId: runTarget.runId,
+          executionInvocationId: runTarget.executionInvocationId,
+          observation: { recordingId: published.result.recordingId, versionId: target.versionId }
+        }
+      }
+      // Its name deliberately carries no execution/receipt marker. Native membership and verified
+      // content select the receipt; an arbitrary artifact name grants no authority.
+      const receipt = await writePublished({
+        filename: 'opaque-notes.json',
+        contentType: 'application/json',
+        source: { content: JSON.stringify(collectionReceipt) }
+      })
+      expect((await h.reader.read(target)).executionContext).toEqual(executionContext)
+      // A descriptor is not byte authority: a corrupted receipt cannot label the observation.
+      await chmod(receipt.path, 0o600)
+      await writeFile(receipt.path, 'corrupt receipt')
+      expect((await h.reader.read(target)).executionContext?.purpose).toBe('unknown')
+      await writeFile(receipt.path, JSON.stringify(collectionReceipt))
+      await h.fixture.client.artifactVersion.update({
+        where: { id: receipt.versionId },
+        data: { artifactRunId: 'unrelated-native-artifact-run' }
+      })
+      expect((await h.reader.read(target)).executionContext?.purpose).toBe('unknown')
+      await h.fixture.client.artifactVersion.update({
+        where: { id: receipt.versionId },
+        data: { artifactRunId: 'native-artifact-run' }
+      })
+      const conflicting = await writePublished({
+        filename: 'another-name.json',
+        contentType: 'application/json',
+        source: { content: JSON.stringify({ ...collectionReceipt, purpose: 'offline-demo' }) }
+      })
+      expect((await h.reader.read(target)).executionContext?.purpose).toBe('unknown')
+      await h.fixture.client.artifactVersion.update({
+        where: { id: conflicting.versionId },
+        data: { managedVisibleAt: null }
+      })
       const withoutAttestation = await h.reader.read(target)
+      expect(withoutAttestation.executionContext).toEqual(executionContext)
       const identity = {
         recordingId: published.result.recordingId!,
         checksum: artifact.checksum!,
@@ -684,6 +738,8 @@ describe('receiving-session recorded observation reader', () => {
           restarted.readNativeSourceVersionMapping(target, identity)
       })
       const native = await reader.read(target)
+      expect(native.executionContext).toEqual(executionContext)
+      expect(JSON.stringify(native)).not.toContain('not-part-of-viewer')
       expect(native.media.map((media) => media.versionId)).toEqual([
         nativeMedia.versionId,
         duplicate.versionId
@@ -802,6 +858,7 @@ describe('receiving-session recorded observation reader', () => {
       })
       const received = await importedReader.read(importedTarget)
       expect(received.archive).toEqual(native.archive)
+      expect(received.executionContext).toEqual(executionContext)
       expect(received.media.map((media) => media.versionId)).toEqual([
         origin.identities[nativeMedia.versionId],
         origin.identities[duplicate.versionId]
@@ -859,6 +916,7 @@ describe('receiving-session recorded observation reader', () => {
         })
         const secondPayload = await secondReader.read(secondTarget)
         expect(secondPayload.archive).toEqual(native.archive)
+        expect(secondPayload.executionContext).toEqual(executionContext)
         expect(secondPayload.media.map((media) => media.versionId)).toEqual([
           secondOrigin.identities[copyOrigin.identities[nativeMedia.versionId]],
           secondOrigin.identities[copyOrigin.identities[duplicate.versionId]]

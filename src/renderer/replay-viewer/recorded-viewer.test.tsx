@@ -135,6 +135,27 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('recorded browser viewer', () => {
+  it('shows server-validated demo context without adding purpose to archive v1 or treating it as a live run', async () => {
+    const recording: RecordedObservationPayload = {
+      ...payload(),
+      executionContext: {
+        purpose: 'offline-demo',
+        conditionChanges: ['Offline recorded responses']
+      }
+    }
+    const client = new ReplayViewerClient()
+    const archiveBefore = JSON.stringify(recording.archive)
+    vi.spyOn(client, 'context').mockResolvedValue(context(recording))
+    vi.spyOn(client, 'recording').mockResolvedValue(recording)
+    vi.spyOn(client, 'recordedSelection').mockResolvedValue(null)
+    render(<ViewerApp client={client} />)
+    expect(await screen.findByText('Offline demo')).toBeTruthy()
+    fireEvent.click(screen.getByText('Execution conditions'))
+    expect(screen.getByText('Offline recorded responses')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
+    expect(JSON.stringify(recording.archive)).toBe(archiveBefore)
+  })
+
   it('shows archive-specific loading and failure without implying that a Run is connecting', async () => {
     const recording = payload(),
       client = new ReplayViewerClient()
@@ -290,6 +311,7 @@ describe('recorded browser viewer', () => {
       cancel = vi.spyOn(client, 'cancel')
     render(<ViewerApp client={client} />)
     await screen.findByText('original archived output')
+    expect(screen.getByText('Execution purpose not recorded')).toBeTruthy()
     expect(screen.queryByTestId('open-project-interface')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Back to live' })).toBeNull()

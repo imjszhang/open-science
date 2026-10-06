@@ -96,13 +96,13 @@ it('keeps the original record open and focuses its inline question without navig
   window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
 })
 
-it('places run controls beside replay and discussion without replacing either action', () => {
+it('keeps replay and discussion as the research actions without a parallel run launcher', () => {
   render(
-    <ResearchWorkspaceHeader source={source} historical runAction={<button>Run research</button>}>
+    <ResearchWorkspaceHeader source={source} historical>
       <span>Original title</span>
     </ResearchWorkspaceHeader>
   )
-  expect(screen.getByRole('button', { name: 'Run research' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /run/i })).toBeNull()
   expect(screen.getByRole('button', { name: 'View replay' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Ask about this research' })).toBeTruthy()
 })

@@ -216,6 +216,26 @@ const latest = await client.execution.waitOperation({
 console.log(latest)
 ```
 
+For a real reproduction, select the original research plan and call
+`execution.preflight({...scope, sourceSessionId, sourceIdentity, descriptorVersionId, planKey})`.
+This read-only check reports missing materials, compatible runtimes and credential slots; it never
+substitutes an offline Replay demonstration. `ready` means local prerequisites, not validated remote
+credentials or a reproduced scientific conclusion.
+
+If credentials or service configuration are needed, call
+`execution.requestConfiguration({...selection, requestId: 'configure-original-1'})`. Open Science's
+trusted desktop displays the exact research/plan form; an external client can poll
+`execution.getConfiguration({...scope, configurationId})`. A `configured` snapshot supplies an opaque
+`profileId` to pass to `execution.execute`. Dismissal, expiry, and successful configuration never
+execute a run. There is no API to submit raw credentials: do not put secrets in chat, commands or
+`.env` artifacts. Local profiles bind source identity, description checksum and plan; declared
+service hosts are a ceiling and still require the existing network permission flow. Prepared
+executions without a profile receive no external service host permission. Profile configuration
+records non-secret variables and declared condition changes in the new execution receipt. Known
+credential values are removed from stdout/stderr; output publication stops if a selected file
+contains a configured value or its URL/base64 encoding. This protects accidental disclosure; it is
+not a guarantee against arbitrary transformations performed by malicious workload code.
+
 The initial native-service target is macOS with an independently installed Node 22 or newer.
 Discovery uses the application's launch PATH and common host locations, including `~/.local/bin`.
 An empty runtime list means the application cannot currently find a compatible runtime; make the

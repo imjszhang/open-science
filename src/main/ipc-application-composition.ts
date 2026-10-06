@@ -17,6 +17,8 @@ import { composeManagedFiles } from './composition/managed-files'
 import { composeManagedExecution } from './composition/managed-execution'
 import { registerRunObservationIpc } from './run-observation/ipc'
 import { registerResearchRunInspectionIpc } from './research-runs/ipc'
+import { registerResearchDemoIpc } from './research-demos/ipc'
+import { registerResearchExecutionProfileIpc } from './research-execution-profiles/ipc'
 import { composeNotebookBridge } from './composition/notebook-bridge'
 import { composeNotebookRuntime } from './composition/notebook-runtime'
 import { composeNotebookSurfaces } from './composition/notebook-surfaces'
@@ -313,6 +315,12 @@ export const createApplicationModules = async (
   notebookRuntime.notebookLifecycle = managedExecution.notebookLifecycle
   declareElectronAdapter('research-runs', () =>
     registerResearchRunInspectionIpc(managedExecution.researchRuns)
+  )
+  declareElectronAdapter('research-demos', () =>
+    registerResearchDemoIpc(managedExecution.researchDemos)
+  )
+  declareElectronAdapter('research-execution-profiles', () =>
+    registerResearchExecutionProfileIpc(managedExecution.service)
   )
   declareElectronAdapter('run-observation', () => {
     if (managedExecution.external.observation)

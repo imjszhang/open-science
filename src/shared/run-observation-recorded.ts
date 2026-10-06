@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import {
+  runObservationExecutionContextSchema,
+  type RunObservationExecutionContext
+} from './run-observation'
+import {
   validateRunObservationArchive,
   type RunObservationArchive
 } from './run-observation-archive'
@@ -25,6 +29,7 @@ export type RecordedObservationPayload = Readonly<{
   receiving: RecordedObservationTarget
   archive: RunObservationArchive
   media: readonly ResolvedObservationMedia[]
+  executionContext?: RunObservationExecutionContext
 }>
 export type RecordedRunObservationSelection = Readonly<{
   kind: 'recorded-run-observation'
@@ -36,6 +41,8 @@ export type RecordedRunObservationSelection = Readonly<{
   stepKey: string
   record: RunObservationArchive['records'][number]
   mediaKeys: readonly string[]
+  /** Main-captured collection context at this selection's evidence cutoff. */
+  executionContext?: RunObservationExecutionContext
 }>
 
 export const recordedObservationPayloadSchema = z
@@ -49,6 +56,7 @@ export const recordedObservationPayloadSchema = z
         return z.NEVER
       }
     }),
-    media: z.array(resolvedObservationMediaSchema).max(2000)
+    media: z.array(resolvedObservationMediaSchema).max(2000),
+    executionContext: runObservationExecutionContextSchema.optional()
   })
   .strict()

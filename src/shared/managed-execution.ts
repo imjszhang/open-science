@@ -94,6 +94,8 @@ export const executeManagedEnvironmentRequestSchema = managedEnvironmentReferenc
     projectView: runtimeViewLaunchSchema.optional(),
     // Independent of a project Web UI; absent/false preserves existing execution behavior.
     recordObservation: z.boolean().optional(),
+    // Opaque reference; only the trusted desktop can configure credentials and service hosts.
+    profileId: identity.optional(),
     outputs: z.array(managedOutputSelectionSchema).max(100).default([]),
     description: z.string().min(1).max(16_384).optional()
   })
@@ -159,6 +161,9 @@ export type CreateManagedSessionRequest = z.input<typeof createManagedSessionReq
 export type ManagedExecutionMethod =
   | 'runtimes'
   | 'inspectMaterials'
+  | 'preflight'
+  | 'requestConfiguration'
+  | 'getConfiguration'
   | 'prepare'
   | 'execute'
   | 'getEnvironment'

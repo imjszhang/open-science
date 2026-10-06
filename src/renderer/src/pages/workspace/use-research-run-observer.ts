@@ -5,7 +5,7 @@ import { sessionExportLocked, usePackageOperationStore } from '@/stores/package-
 import { useResearchRunStore, type ResearchRunRequest } from '@/stores/research-run-store'
 import type { NotebookRunRecord, NotebookSessionReference } from '../../../../shared/notebook'
 import type { ResearchMembership } from '../../../../shared/session-persistence'
-import { resolveTurnOutcome } from '../../../../shared/session-persistence/turn-outcome'
+import { resolveTurnOutcome } from '../../../../shared/session-persistence'
 import type { RunObservationTarget } from '../../../../shared/run-observation'
 import { researchIdentity, sameResearch } from './research-draft-identity'
 import { showRunObservation } from './replay/open-run-observation'

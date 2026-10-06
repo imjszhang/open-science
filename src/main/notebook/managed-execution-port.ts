@@ -1,5 +1,11 @@
 import { z } from 'zod'
 import {
+  researchExecutionPreflightRequestSchema,
+  requestResearchExecutionConfigurationSchema,
+  getResearchExecutionConfigurationSchema,
+  type ResearchExecutionPreflightRequest
+} from '../../shared/research-execution-profile'
+import {
   executeManagedEnvironmentRequestSchema,
   collectManagedOutputsRequestSchema,
   managedCollectionReferenceSchema,
@@ -39,6 +45,9 @@ export const managedExecutionCallSchema = z
     method: z.enum([
       'runtimes',
       'inspectMaterials',
+      'preflight',
+      'requestConfiguration',
+      'getConfiguration',
       'prepare',
       'execute',
       'getEnvironment',
@@ -85,6 +94,9 @@ export type ManagedExecutionPort = {
 }
 type Service = {
   runtimes(): unknown | Promise<unknown>
+  requestConfiguration?(request: unknown, signal?: AbortSignal): Promise<unknown>
+  getConfiguration?(request: unknown, signal?: AbortSignal): Promise<unknown>
+  preflight?(request: ResearchExecutionPreflightRequest, signal?: AbortSignal): Promise<unknown>
   inspectMaterials(request: InspectManagedMaterialsRequest, signal?: AbortSignal): Promise<unknown>
   prepare(request: PrepareManagedEnvironmentRequest, signal?: AbortSignal): Promise<unknown>
   getEnvironment(request: ManagedEnvironmentReference): Promise<unknown>
@@ -128,6 +140,27 @@ export function createManagedExecutionTurnPort(dependencies: {
         case 'inspectMaterials':
           return dependencies.service.inspectMaterials(
             inspectManagedMaterialsRequestSchema.parse(request),
+            turn.signal
+          )
+        case 'requestConfiguration':
+          if (!dependencies.service.requestConfiguration)
+            throw new Error('Research configuration is unavailable.')
+          return dependencies.service.requestConfiguration(
+            requestResearchExecutionConfigurationSchema.parse(request),
+            turn.signal
+          )
+        case 'getConfiguration':
+          if (!dependencies.service.getConfiguration)
+            throw new Error('Research configuration is unavailable.')
+          return dependencies.service.getConfiguration(
+            getResearchExecutionConfigurationSchema.parse(request),
+            turn.signal
+          )
+        case 'preflight':
+          if (!dependencies.service.preflight)
+            throw new Error('Research execution preflight is unavailable.')
+          return dependencies.service.preflight(
+            researchExecutionPreflightRequestSchema.parse(request),
             turn.signal
           )
         case 'prepare':

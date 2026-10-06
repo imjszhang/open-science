@@ -1,3 +1,4 @@
+import { createManagedOutputRedactor, redactManagedOutput } from './managed-output-redaction'
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { ShellCellSession } from './shell-cell-session'
 import { dirname } from 'node:path'
@@ -408,7 +409,7 @@ const prepareShellLaunchOptions = async (
   try {
     if (managed) {
       // No host environment, shared npm/cache storage, or implicit workspace grants enter this run.
-      shellEnv = { ...managed.environment }
+      shellEnv = { ...managed.environment, ...managed.privateEnvironment }
       workloadCacheEnv = {}
       if (managed.localService) {
         if (hostPlatform !== 'darwin' || !options.runId) {
@@ -500,6 +501,7 @@ const prepareShellLaunchOptions = async (
           commandText: options.command,
           ...(options.executionReference ? { executionReference: options.executionReference } : {}),
           ...(localService ? { localService } : {}),
+          ...(managed?.confinement ? { confinement: managed.confinement } : {}),
           sessionId: options.sessionId,
           projectId: options.projectId,
           runtime: 'bash',
@@ -627,9 +629,14 @@ const prepareShellLaunchOptions = async (
     baseEnv,
     sandboxed,
     ...(managed?.onOutput ? { onOutput: managed.onOutput } : {}),
-    ...(managed?.localService?.proof
+    ...(managed
       ? {
-          privateServiceValues: [managed.localService.proof.value, managed.localService.proof.path]
+          privateServiceValues: [
+            ...(managed.secretValues ?? []),
+            ...(managed.localService?.proof
+              ? [managed.localService.proof.value, managed.localService.proof.path]
+              : [])
+          ]
         }
       : {}),
     endSandboxExecution: options.deferExecution ? undefined : sandboxed?.beginExecution?.()
@@ -934,12 +941,31 @@ const runShellCommand = (
       let exited = false
       let failed = false
 
+      const stdoutRedactor = createManagedOutputRedactor(prepared.privateServiceValues)
+      const stderrRedactor = createManagedOutputRedactor(prepared.privateServiceValues)
+      const observe = (stream: 'stdout' | 'stderr', text: string): void => {
+        if (!text) return
+        try {
+          if (options.runId) prepared.onOutput?.({ runId: options.runId, stream, text })
+        } catch {
+          // An observer never owns execution or cleanup.
+        }
+      }
       const finish = async (
         result: NotebookShellResult,
         cleanupReason: NotebookSandboxCleanupReason,
         processOutcome: NotebookSandboxProcessOutcome
       ): Promise<void> => {
         if (settled) return
+        const stdoutTail = stdoutRedactor.finish()
+        const stderrTail = stderrRedactor.finish()
+        observe('stdout', stdoutTail)
+        observe('stderr', stderrTail)
+        result = {
+          ...result,
+          stdout: result.stdout + stdoutTail,
+          stderr: result.stderr + stderrTail
+        }
         settled = true
         clearTimeout(timeoutTimer)
         options.signal?.removeEventListener('abort', abort)
@@ -1016,9 +1042,7 @@ const runShellCommand = (
           complete = false
         }
         const redactServiceValues = (text: string): string => {
-          for (const secret of prepared.privateServiceValues ?? [])
-            text = text.split(secret).join('[redacted]')
-          return text
+          return redactManagedOutput(text, prepared.privateServiceValues)
         }
         const normalizedResult = {
           ...result,
@@ -1116,12 +1140,8 @@ const runShellCommand = (
       }
       child.stdout!.on('data', (chunk: string) => {
         if (options.onProcess) return
-        try {
-          if (options.runId)
-            prepared.onOutput?.({ runId: options.runId, stream: 'stdout', text: chunk })
-        } catch {
-          // Observing output must not change execution or process-tree cleanup.
-        }
+        chunk = stdoutRedactor.push(chunk)
+        observe('stdout', chunk)
         stdout = appendOutput(
           stdout,
           chunk,
@@ -1133,12 +1153,8 @@ const runShellCommand = (
       })
       child.stderr!.on('data', (chunk: string) => {
         if (options.onProcess) return
-        try {
-          if (options.runId)
-            prepared.onOutput?.({ runId: options.runId, stream: 'stderr', text: chunk })
-        } catch {
-          // Observing output must not change execution or process-tree cleanup.
-        }
+        chunk = stderrRedactor.push(chunk)
+        observe('stderr', chunk)
         stderr = appendOutput(
           stderr,
           chunk,
@@ -1211,15 +1227,43 @@ const runShellCommand = (
   }
 
   return run().catch((error: unknown) => {
+    let result: NotebookShellResult
     if (error instanceof ShellPreparationError) {
       if (error.retryCleanup) options.onCleanupRetry?.(error.retryCleanup)
-      return error.result
+      result = error.result
+    } else {
+      result = {
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        exitCode: null
+      }
     }
-    return {
-      stdout: '',
-      stderr: error instanceof Error ? error.message : String(error),
-      exitCode: null
+    // Preparation can fail before PreparedShellLaunch exists. Never let its error projection
+    // bypass the same redaction boundary used by live and completed process output.
+    if (options.managedExecution) {
+      let secrets: readonly string[] = []
+      try {
+        const policy = resolveManagedShellExecutionCapability(
+          options.managedExecution,
+          options,
+          true
+        )
+        secrets = [
+          ...(policy.secretValues ?? []),
+          ...(policy.localService?.proof
+            ? [policy.localService.proof.value, policy.localService.proof.path]
+            : [])
+        ]
+      } catch {
+        // An invalid capability carries no accessible private bindings.
+      }
+      result = {
+        ...result,
+        stdout: redactManagedOutput(result.stdout, secrets),
+        stderr: redactManagedOutput(result.stderr, secrets)
+      }
     }
+    return result
   })
 }
 

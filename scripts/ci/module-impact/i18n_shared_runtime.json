@@ -740,7 +740,14 @@
       "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
       "src/main/research-runs/inspection.test.ts",
       "src/main/research-runs/ipc.test.ts",
-      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+      "src/main/notebook/managed-confinement.macos.integration.test.ts",
+      "src/main/research-demos/owner.test.ts",
+      "src/main/research-demos/ipc.test.ts",
+      "src/main/research-execution-profiles/ipc.test.ts",
+      "src/main/research-demos/inspection.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

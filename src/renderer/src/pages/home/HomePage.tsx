@@ -44,6 +44,7 @@ import { useNotificationInboxStore } from '@/stores/notification-inbox-store'
 import { useSessionJobStore } from '@/stores/session-job-store'
 import type { ChatSession } from '@/stores/session-store'
 import { useSessionStore } from '@/stores/session-store'
+import { useResearchDemoCarriers } from '@/stores/research-demo-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useArchiveUndoStore } from '@/stores/archive-undo-store'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -263,15 +264,20 @@ const HomePage = ({
   }
 
   // Non-pending sessions only; pending ones have no durable project yet.
+  const demoCarriers = useResearchDemoCarriers(
+    [...activeProjectIds],
+    sessions.map((session) => session.id).join(',')
+  )
   const persistedSessions = useMemo(
     () =>
       sessions.filter(
         (session) =>
           !session.isPending &&
           session.archivedAt === undefined &&
-          activeProjectIds.has(session.projectId)
+          activeProjectIds.has(session.projectId) &&
+          !demoCarriers[session.projectId]?.some((carrier) => carrier.sessionId === session.id)
       ),
-    [activeProjectIds, sessions]
+    [activeProjectIds, sessions, demoCarriers]
   )
 
   const unreadCompletedBySession = useMemo(() => {

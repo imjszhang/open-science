@@ -1328,6 +1328,9 @@ async function hostLlm(request, options = undefined) {
 const managedExecutionMethods = [
   'runtimes',
   'inspectMaterials',
+  'preflight',
+  'requestConfiguration',
+  'getConfiguration',
   'prepare',
   'execute',
   'getEnvironment',

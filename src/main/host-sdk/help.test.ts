@@ -528,11 +528,13 @@ it('documents every managed request boundary without accepting Session or turn a
     backgroundSafety: 'unsafe'
   })
   if (help.kind !== 'operation') throw new Error('expected operation')
-  expect(help.callForms).toHaveLength(8)
+  expect(help.callForms).toHaveLength(11)
   const request = fields(help.request)
   for (const key of [
     'sourceSessionId',
     'sourceIdentity',
+    'configurationId',
+    'profileId',
     'runtimeId',
     'materials',
     'environmentId',

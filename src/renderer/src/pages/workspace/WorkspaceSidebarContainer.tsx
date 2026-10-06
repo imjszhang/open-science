@@ -9,6 +9,7 @@ import {
 import { useProjectStore } from '@/stores/project-store'
 import { useSessionStore } from '@/stores/session-store'
 import { useSettingsStore } from '@/stores/settings-store'
+import { useResearchDemoCarriers } from '@/stores/research-demo-store'
 
 import { NO_VISIBLE_SESSIONS, visibleProjectSessions } from './visible-project-sessions'
 import { WorkspaceSidebar } from './WorkspaceSidebar'
@@ -35,6 +36,19 @@ const WorkspaceSidebarContainer = ({
     useShallow((state) =>
       isProjectArchived ? NO_VISIBLE_SESSIONS : visibleProjectSessions(state.sessions, projectId)
     )
+  )
+  const demoCarriers = useResearchDemoCarriers(
+    [projectId],
+    sessions.map((session) => session.id).join(',')
+  )
+  const visibleSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) =>
+          session.id === sidebarProps.activeSessionId ||
+          !demoCarriers[projectId]?.some((carrier) => carrier.sessionId === session.id)
+      ),
+    [sessions, projectId, demoCarriers, sidebarProps.activeSessionId]
   )
   const pendingCredentialRequests = useSettingsStore((state) => state.pendingCredentialRequests)
   const credentialPendingSessionIds = useMemo(
@@ -94,7 +108,7 @@ const WorkspaceSidebarContainer = ({
       {...sidebarProps}
       importProjectId={projectId}
       onMobileClose={onMobileClose}
-      sessions={sessions}
+      sessions={visibleSessions}
       credentialPendingSessionIds={credentialPendingSessionIds}
       otherProjects={otherProjects}
       onOpenProject={handleOpenProject}

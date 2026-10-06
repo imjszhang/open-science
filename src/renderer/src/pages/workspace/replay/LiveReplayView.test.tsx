@@ -69,6 +69,64 @@ afterEach(() => {
 })
 
 describe('shared live Replay viewer', () => {
+  it('keeps legacy purpose unknown even when a completed run or title suggests reproduction', () => {
+    render(
+      <LiveReplayView
+        {...props({ ...snapshot(1), phase: 'completed' })}
+        title="Successful scientific reproduction"
+      />
+    )
+    expect(screen.getByText('Execution purpose not recorded')).toBeTruthy()
+    expect(screen.queryByText('Research execution')).toBeNull()
+  })
+
+  it('shows verified demo purpose and declared conditions without interpreting them as success', () => {
+    render(
+      <LiveReplayView
+        {...props({
+          ...snapshot(1),
+          executionContext: {
+            purpose: 'offline-demo',
+            conditionChanges: ['Recorded provider answers']
+          }
+        })}
+      />
+    )
+    expect(screen.getByText('Offline demo')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Offline project demonstration. This does not reproduce the original experiment.'
+      )
+    ).toBeTruthy()
+    fireEvent.click(screen.getByText('Execution conditions'))
+    expect(screen.getByText('Recorded provider answers')).toBeTruthy()
+  })
+
+  it('distinguishes research intent from successful reproduction and names the recorded configuration', () => {
+    render(
+      <LiveReplayView
+        {...props({
+          ...snapshot(1),
+          phase: 'completed',
+          executionContext: {
+            purpose: 'research',
+            profileName: 'Recipient account',
+            conditionChanges: ['Different model version']
+          }
+        })}
+      />
+    )
+    expect(screen.getByText('Research execution')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'A research execution is not, by itself, evidence of successful reproduction.'
+      )
+    ).toBeTruthy()
+    fireEvent.click(screen.getByText('Execution conditions'))
+    expect(screen.getByText('Recorded configuration: Recipient account')).toBeTruthy()
+    expect(screen.getByText('Different model version')).toBeTruthy()
+  })
+
   it('follows real revisions without replacing its viewport and never exposes a simulated clock', async () => {
     const first = props()
     const view = render(<LiveReplayView {...first} />)

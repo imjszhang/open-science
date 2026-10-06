@@ -297,7 +297,9 @@
       "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
       "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
       "src/renderer/src/pages/workspace/NotebookPreview.follow-scroll.test.tsx",
-      "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx"
+      "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

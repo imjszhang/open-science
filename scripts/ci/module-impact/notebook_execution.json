@@ -223,7 +223,10 @@
     "src/main/notebook/managed-shell-execution.test.ts",
     "src/main/notebook/managed-shell-execution.ts",
     "src/main/notebook/managed-shell-runtime.test.ts",
-    "src/main/notebook/managed-shell.macos.integration.test.ts"
+    "src/main/notebook/managed-shell.macos.integration.test.ts",
+    "src/main/notebook/managed-confinement.macos.integration.test.ts",
+    "src/main/notebook/managed-output-redaction.test.ts",
+    "src/main/notebook/managed-output-redaction.ts"
   ],
   "interfacePaths": [
     "src/main/notebook/configured-shell-runtime.ts",
@@ -327,7 +330,8 @@
     "src/main/notebook/dependency-analysis.rasterio.test.ts",
     "src/main/notebook/dependency-analysis.rdkit.test.ts",
     "src/main/notebook/dependency-analysis.scipy-sparse-composition.test.ts",
-    "src/main/notebook/dependency-analysis.scipy-sparse.test.ts"
+    "src/main/notebook/dependency-analysis.scipy-sparse.test.ts",
+    "src/main/notebook/managed-output-redaction.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -417,7 +421,9 @@
       "src/main/notebook/managed-research-node-runtime.test.ts",
       "src/main/notebook/managed-shell-execution.test.ts",
       "src/main/notebook/managed-shell-runtime.test.ts",
-      "src/main/notebook/managed-shell.macos.integration.test.ts"
+      "src/main/notebook/managed-shell.macos.integration.test.ts",
+      "src/main/notebook/managed-confinement.macos.integration.test.ts",
+      "src/main/notebook/managed-output-redaction.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",
@@ -1055,7 +1061,12 @@
       "src/main/notebook/dependency-analysis.scipy-sparse-composition.test.ts",
       "src/main/notebook/dependency-analysis.scipy-sparse.test.ts",
       "src/main/research-runs/inspection.test.ts",
-      "src/main/research-runs/ipc.test.ts"
+      "src/main/research-runs/ipc.test.ts",
+      "src/main/research-execution-profiles/ipc.test.ts",
+      "src/main/research-demos/ipc.test.ts",
+      "src/main/research-demos/owner.test.ts",
+      "src/main/research-demos/inspection.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],

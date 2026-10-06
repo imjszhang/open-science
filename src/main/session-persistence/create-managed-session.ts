@@ -27,14 +27,62 @@ const receiptSchema = createManagedSessionRequestSchema
 const hash = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
+export type ManagedSessionCreationLookup = {
+  projectId: string
+  sessionId: string
+  state: 'available' | 'missing'
+}
+const lookupSchema = createManagedSessionRequestSchema.pick({ projectId: true, requestId: true })
+
 /** Retry-safe creation of an ordinary Session, including an uncertain publication response. */
 export function createManagedSessionWorkflow(
   dependencies: LocalSessionCreationDependencies & { dataRoot: string }
 ): {
   create(request: CreateManagedSessionRequest): Promise<{ projectId: string; sessionId: string }>
+  /** Main-only reconciliation: never allocates or resurrects a Session. */
+  lookup(
+    request: Pick<CreateManagedSessionRequest, 'projectId' | 'requestId'>
+  ): Promise<ManagedSessionCreationLookup | undefined>
 } {
   const pending = new Map<string, Promise<unknown>>()
+  const readReceipt = async (
+    projectId: string,
+    requestId: string
+  ): Promise<z.infer<typeof receiptSchema> | undefined> => {
+    const requestKey = hash([projectId, requestId])
+    const read = await readDurableJsonFile(
+      join(dependencies.dataRoot, 'managed-session-requests', requestKey + '.json'),
+      (text) => {
+        const receipt = receiptSchema.parse(JSON.parse(text))
+        if (
+          receipt.requestKey !== requestKey ||
+          hash([receipt.projectId, receipt.requestId]) !== requestKey
+        )
+          throw new DurableJsonRecoveryBarrierError('Invalid managed Session creation receipt.')
+        return receipt
+      },
+      {},
+      { maxBytes: 16384 }
+    )
+    return read.status === 'found' ? read.value : undefined
+  }
   return {
+    async lookup(value) {
+      const request = lookupSchema.parse(value)
+      const receipt = await readReceipt(request.projectId, request.requestId)
+      if (!receipt) return undefined
+      const session = await dependencies.sessions.readSessionSnapshot(
+        request.projectId,
+        receipt.sessionId
+      )
+      if (session && session.projectId !== request.projectId)
+        throw new Error('Session creation receipt scope mismatch.')
+      return {
+        projectId: request.projectId,
+        sessionId: receipt.sessionId,
+        state: session ? 'available' : 'missing'
+      }
+    },
     async create(value) {
       const request = createManagedSessionRequestSchema.parse(value)
       const requestKey = hash([request.projectId, request.requestId])
@@ -44,28 +92,13 @@ export function createManagedSessionWorkflow(
         .then(async () => {
           const fingerprint = hash(request)
           const path = join(dependencies.dataRoot, 'managed-session-requests', requestKey + '.json')
-          const read = await readDurableJsonFile(
-            path,
-            (text) => {
-              const receipt = receiptSchema.parse(JSON.parse(text))
-              if (
-                receipt.requestKey !== requestKey ||
-                hash([receipt.projectId, receipt.requestId]) !== requestKey
-              )
-                throw new DurableJsonRecoveryBarrierError(
-                  'Invalid managed Session creation receipt.'
-                )
-              return receipt
-            },
-            {},
-            { maxBytes: 16384 }
-          )
-          if (read.status === 'found') {
-            if (read.value.fingerprint !== fingerprint)
+          const receipt = await readReceipt(request.projectId, request.requestId)
+          if (receipt) {
+            if (receipt.fingerprint !== fingerprint)
               throw new Error('Session creation requestId conflicts with its earlier contents.')
             const session = await dependencies.sessions.readSessionSnapshot(
               request.projectId,
-              read.value.sessionId
+              receipt.sessionId
             )
             if (!session)
               throw new Error(
@@ -76,7 +109,7 @@ export function createManagedSessionWorkflow(
             return { projectId: request.projectId, sessionId: session.id }
           }
           const sessionId = randomUUID()
-          const receipt = receiptSchema.parse({
+          const createdReceipt = receiptSchema.parse({
             ...request,
             schemaVersion: 1,
             requestKey,
@@ -84,12 +117,12 @@ export function createManagedSessionWorkflow(
             sessionId,
             state: 'creating'
           })
-          await writeDurableJsonFile(path, JSON.stringify(receipt))
+          await writeDurableJsonFile(path, JSON.stringify(createdReceipt))
           const session = await createLocalSessionWorkflow({
             ...dependencies,
             createId: () => sessionId
           }).create({ projectId: request.projectId, title: request.title })
-          await writeDurableJsonFile(path, JSON.stringify({ ...receipt, state: 'ready' }))
+          await writeDurableJsonFile(path, JSON.stringify({ ...createdReceipt, state: 'ready' }))
           return { projectId: session.projectId, sessionId: session.id }
         })
       pending.set(requestKey, completion)

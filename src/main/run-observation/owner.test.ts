@@ -76,6 +76,36 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe('RunObservationOwner', () => {
+  it('projects declared execution intent and condition differences through deltas with private redaction', async () => {
+    const h = harness()
+    const before = await h.owner.snapshot(target, viewer)
+    expect(before.executionContext).toEqual({ purpose: 'unknown', conditionChanges: [] })
+    h.setSource({
+      ...h.source,
+      secrets: ['private-value'],
+      executionContext: {
+        purpose: 'research',
+        profileName: 'baseline private-value',
+        conditionChanges: ['provider changed', 'data at /Users/private/source', 'private-value']
+      }
+    })
+    const next = applyRunObservationChanges(
+      before,
+      await h.owner.changes({ ...target, cursor: before.cursor }, viewer)
+    )
+    expect(next.executionContext).toEqual({
+      purpose: 'research',
+      profileName: 'baseline [redacted]',
+      conditionChanges: ['provider changed', 'data at [local path]', '[redacted]']
+    })
+    h.setSource({ ...h.source, executionContext: undefined })
+    const legacy = applyRunObservationChanges(
+      next,
+      await h.owner.changes({ ...target, cursor: next.cursor }, viewer)
+    )
+    expect(legacy.executionContext?.purpose).toBe('unknown')
+  })
+
   it('rejects unscoped or broadened targets before reading and never projects private Run fields', async () => {
     const { owner, read } = harness()
     await expect(

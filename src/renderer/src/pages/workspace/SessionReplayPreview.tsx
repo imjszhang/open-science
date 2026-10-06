@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
 import { useSessionStore } from '@/stores/session-store'
@@ -20,6 +20,7 @@ import { ResearchMaterialsPanel } from './ResearchMaterialsPanel'
 import { Button } from '@/components/ui/button'
 import { RunRecordingsPanel } from './replay/RunRecordingsPanel'
 import { useRecordingDiscovery } from './replay/use-recording-discovery'
+import { ResearchDemoPanel } from './replay/ResearchDemoPanel'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -48,9 +49,9 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const [saveError, setSaveError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const [evidenceStep, setEvidenceStep] = useState<ReplayStep>()
-  const [materialsMode, setMaterialsMode] = useState<'replay' | 'runs' | 'records' | 'files'>(
-    item.replayRevealMode ?? 'replay'
-  )
+  const [materialsMode, setMaterialsMode] = useState<
+    'replay' | 'runs' | 'records' | 'files' | 'demo'
+  >(item.replayRevealMode ?? 'replay')
   const materialsChosen = useRef(item.replayRevealRequest !== undefined)
   // Discovery may finish after the viewer starts playing, seeking, reading or opening evidence.
   // Any deliberate interaction owns the current view; timer checkpoints and programmatic
@@ -99,6 +100,16 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     state.sessions.some(
       (session) => session.projectId === projectId && session.id === sourceSessionId
     )
+  )
+  const sourceImportId = useSessionStore((state) => {
+    const session = state.sessions.find(
+      (candidate) => candidate.projectId === projectId && candidate.id === sourceSessionId
+    )
+    return session?.packageOrigin?.importId ?? session?.importedResearch?.importId
+  })
+  const demoSource = useMemo(
+    () => (sourceImportId ? { projectId, sourceSessionId, sourceImportId } : undefined),
+    [projectId, sourceSessionId, sourceImportId]
   )
   const [sourceObserved, setSourceObserved] = useState(sourcePresent)
   if (sourcePresent && !sourceObserved) setSourceObserved(true)
@@ -323,6 +334,21 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
                     : t('Source files')}
             </Button>
           ))}
+          {demoSource ? (
+            <Button
+              variant={materialsMode === 'demo' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2 text-xs"
+              aria-pressed={materialsMode === 'demo'}
+              onClick={() => {
+                materialsChosen.current = true
+                setEvidenceStep(undefined)
+                setMaterialsMode('demo')
+              }}
+            >
+              {t('Offline demo')}
+            </Button>
+          ) : null}
         </div>
       </div>
       {notebookUnavailable ? (
@@ -366,6 +392,9 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
         />
       </div>
       {materialsMode === 'runs' ? <RunRecordingsPanel discovery={discovery} /> : null}
+      {materialsMode === 'demo' && demoSource ? (
+        <ResearchDemoPanel source={demoSource} isActive={isActive} />
+      ) : null}
       {materialsMode === 'records' || materialsMode === 'files' ? (
         <div className={evidenceStep ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
           <ResearchMaterialsPanel

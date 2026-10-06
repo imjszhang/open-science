@@ -7,11 +7,15 @@ import {
   normalizeObservationHistory
 } from '@/lib/replay/live-source'
 import type { ReplayResource } from '../../../../../shared/replay'
-import type { RunObservationSnapshot } from '../../../../../shared/run-observation'
+import type {
+  RunObservationExecutionContext,
+  RunObservationSnapshot
+} from '../../../../../shared/run-observation'
 import type { ReplayNotebookRunReader } from '@/lib/replay'
 import type { ReplayResourceReader } from './replay-resources'
 import type { ReplayRuntimeSurface } from './ReplayLiveRecord'
 import { ReplayPanel } from './ReplayPanel'
+import { ExecutionPurposeNotice } from './ExecutionPurposeNotice'
 
 export type LiveReplayViewProps = {
   title: string
@@ -20,6 +24,8 @@ export type LiveReplayViewProps = {
   snapshot: RunObservationSnapshot
   history?: readonly RunObservationSnapshot[]
   recorded?: boolean
+  /** Host-validated recording context; archive v1 remains unchanged. */
+  executionContext?: RunObservationExecutionContext
   historyTruncated?: boolean
   connection: 'connected' | 'reconnecting' | 'disconnected'
   readResource: ReplayResourceReader
@@ -97,6 +103,7 @@ const LiveReplayViewContent = (props: LiveReplayViewProps): React.JSX.Element =>
     )
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="live-replay-view">
+      <ExecutionPurposeNotice context={props.executionContext ?? props.snapshot.executionContext} />
       {error ? (
         <ErrorNotice
           inline

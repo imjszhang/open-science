@@ -72,7 +72,8 @@
     "packages/notebook-network-sandbox/vendor/windows-runtime/sources.json",
     "packages/notebook-network-sandbox/vendor/windows-runtime/npm/prepare.mjs",
     "packages/notebook-network-sandbox/runtime/src/platform/local-service.ts",
-    "packages/notebook-network-sandbox/src/local-service.test.ts"
+    "packages/notebook-network-sandbox/src/local-service.test.ts",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts"
   ],
   "interfacePaths": [
     "packages/notebook-network-sandbox/src/index.ts",
@@ -84,7 +85,8 @@
     "packages/notebook-network-sandbox/src/config.ts",
     "packages/notebook-network-sandbox/vendor/wsl2/manifest.json",
     "packages/notebook-network-sandbox/src/config-root.ts",
-    "packages/notebook-network-sandbox/runtime/src/platform/local-service.ts"
+    "packages/notebook-network-sandbox/runtime/src/platform/local-service.ts",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts"
   ],
   "consumerModules": ["notebook_execution"],
   "testFiles": {
@@ -664,7 +666,13 @@
       "src/main/run-observation/auxiliary-output.test.ts",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/main/research-runs/inspection.test.ts",
-      "src/main/research-runs/ipc.test.ts"
+      "src/main/research-runs/ipc.test.ts",
+      "src/main/research-demos/owner.test.ts",
+      "src/main/research-demos/ipc.test.ts",
+      "src/main/research-execution-profiles/ipc.test.ts",
+      "src/main/research-demos/inspection.test.ts",
+      "src/main/notebook/managed-confinement.macos.integration.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

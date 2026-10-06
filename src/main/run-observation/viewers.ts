@@ -491,6 +491,12 @@ export class ObservationViewers {
         recordingId: payload.archive.recordingId,
         stepKey,
         record: step,
+        executionContext: structuredClone(
+          payload.executionContext ?? {
+            purpose: 'unknown',
+            conditionChanges: []
+          }
+        ),
         mediaKeys: payload.archive.media
           .filter((media) => media.stepKeys.includes(stepKey))
           .map((media) => media.mediaKey)

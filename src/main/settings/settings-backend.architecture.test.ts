@@ -1108,7 +1108,8 @@ describe('Settings backend ownership architecture', () => {
       'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
       'src/main/composition/session-packages.test.ts',
       'src/main/composition/handoff.test.ts',
-      'src/main/composition/artifact-surfaces.test.ts'
+      'src/main/composition/artifact-surfaces.test.ts',
+      'src/main/research-demos/owner.macos.integration.test.ts'
     ])
     expect(manifest.modules.settings_backend_resolution.testFiles.consumer).toEqual([
       'src/main/storage/wsl-npm-migration.integration.test.ts',
@@ -1586,7 +1587,14 @@ describe('Settings backend ownership architecture', () => {
       'src/main/notebook/managed-execution-output.test.ts',
       'src/main/run-observation/auxiliary-output.test.ts',
       'src/main/run-observation/media-collector.test.ts',
-      'src/main/replay-viewer/desktop-embed.integration.test.ts'
+      'src/main/replay-viewer/desktop-embed.integration.test.ts',
+      'src/main/research-runs/inspection.test.ts',
+      'src/main/research-runs/ipc.test.ts',
+      'src/main/research-demos/owner.test.ts',
+      'src/main/research-demos/ipc.test.ts',
+      'src/main/research-execution-profiles/ipc.test.ts',
+      'src/main/research-demos/inspection.test.ts',
+      'src/main/research-demos/owner.macos.integration.test.ts'
     ])
     expect(
       [

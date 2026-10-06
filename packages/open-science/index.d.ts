@@ -525,6 +525,8 @@ export type CollectManagedOutputsRequest = ManagedCollectionReference & { reques
 export type ExecuteManagedEnvironmentRequest = ManagedEnvironmentReference & {
   requestId: string
   command: string
+  /** Opaque local profile; configure credentials only in the trusted Open Science desktop. */
+  profileId?: string
   /** Process deadline, distinct from a request or wait deadline. Maximum 600000 ms. */
   timeoutMs?: number
   localServicePort?: number
@@ -632,8 +634,86 @@ export type SessionOperationSnapshot = ManagedOperationReference & {
   error?: string
   recoveryPending?: boolean
 }
+export type ResearchExecutionBinding = {
+  projectId: string
+  sourceSessionId: string
+  sourceIdentity: string
+  descriptorVersionId: string
+  descriptorSha256: string
+  planKey: string
+}
+export type ResearchExecutionPreflightRequest = Omit<
+  ResearchExecutionBinding,
+  'descriptorSha256'
+> & {
+  sessionId: string
+  profileId?: string
+}
+export type ResearchExecutionProfileView = {
+  profileId: string
+  binding: ResearchExecutionBinding
+  displayName: string
+  variables: Record<string, string>
+  allowedNetworkHosts: string[]
+  conditionChanges: string[]
+  configuredCredentialKeys: string[]
+  updatedAt: number
+}
+export type ResearchExecutionPreflight = {
+  status: 'ready' | 'blocked'
+  sourceTitle?: string
+  planTitle?: string
+  binding?: ResearchExecutionBinding
+  issues: Array<{
+    code:
+      | 'description-unavailable'
+      | 'plan-unavailable'
+      | 'material-unavailable'
+      | 'runtime-unavailable'
+      | 'profile-required'
+      | 'profile-unavailable'
+      | 'credential-required'
+      | 'credential-unavailable'
+    key?: string
+  }>
+  compatibleRuntimeIds: string[]
+  profiles: ResearchExecutionProfileView[]
+  selectedProfileId?: string
+  slots: Array<{
+    key: string
+    description: string
+    environmentVariable: string
+    required: boolean
+    status: 'configured' | 'missing' | 'unavailable'
+  }>
+  remoteServicesVerified: false
+}
 /** Local authenticated operations. No model task is started by these methods. */
+export type ResearchExecutionConfigurationSnapshot = {
+  configurationId: string
+  requestId: string
+  scope: ResearchExecutionPreflightRequest
+  status: 'pending' | 'configured' | 'dismissed' | 'expired'
+  preflight: ResearchExecutionPreflight
+  createdAt: number
+  expiresAt: number
+  profileId?: string
+}
 export type ManagedExecutionClient = {
+  /** Ask the local user to configure services in the trusted desktop. Never executes a research run. */
+  requestConfiguration(
+    request: ResearchExecutionPreflightRequest & { requestId: string },
+    options?: RequestOptions
+  ): Promise<ResearchExecutionConfigurationSnapshot>
+  getConfiguration(
+    request: ManagedSessionScope & { configurationId: string },
+    options?: RequestOptions
+  ): Promise<ResearchExecutionConfigurationSnapshot>
+  /** Inspect original research prerequisites without running, installing, or falling back to a demo. */
+  preflight(
+    request: ResearchExecutionPreflightRequest,
+    options?: RequestOptions
+  ): Promise<ResearchExecutionPreflight>
   runtimes(
     request?: Record<string, never>,
     options?: RequestOptions
@@ -786,6 +866,12 @@ export type RunObservationArtifact = Readonly<{
   checksum?: string
   sizeBytes?: number
 }>
+/** Declared execution intent; neither a successful process nor this label proves reproduction. */
+export type RunObservationExecutionContext = Readonly<{
+  purpose: 'offline-demo' | 'research' | 'unknown'
+  profileName?: string
+  conditionChanges: readonly string[]
+}>
 export type RunObservationSnapshot = Readonly<{
   identity: RunObservationIdentity
   cursor: RunObservationCursor
@@ -795,6 +881,7 @@ export type RunObservationSnapshot = Readonly<{
   run: RunObservationRun | null
   artifacts: readonly RunObservationArtifact[]
   artifactsTruncated: boolean
+  executionContext?: RunObservationExecutionContext
 }>
 export type RunObservationChange = Readonly<{
   cursor: RunObservationCursor
@@ -805,6 +892,7 @@ export type RunObservationChange = Readonly<{
   run?: RunObservationRun | null
   artifacts?: readonly RunObservationArtifact[]
   artifactsTruncated?: boolean
+  executionContext?: RunObservationExecutionContext
 }>
 export type RunObservationChanges =
   | Readonly<{
@@ -978,6 +1066,8 @@ export type RecordedObservationPayload = Readonly<{
   receiving: RecordedObservationTarget
   archive: RunObservationArchive
   media: readonly ResolvedObservationMedia[]
+  /** Verified collection context beside the unchanged archive v1; absent legacy values mean unknown. */
+  executionContext?: RunObservationExecutionContext
 }>
 export type RecordedRunObservationSelection = Readonly<{
   kind: 'recorded-run-observation'
@@ -989,6 +1079,8 @@ export type RecordedRunObservationSelection = Readonly<{
   stepKey: string
   record: RunObservationArchive['records'][number]
   mediaKeys: readonly string[]
+  /** Main-captured collection context at this selection's evidence cutoff. */
+  executionContext?: RunObservationExecutionContext
 }>
 export type RecordedObservationView = Readonly<{
   mode: 'recorded'

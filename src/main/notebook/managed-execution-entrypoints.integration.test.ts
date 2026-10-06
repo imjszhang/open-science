@@ -137,7 +137,10 @@ async function verifyEntry(entry: Entry, mode: Mode): Promise<void> {
     expect(target.sessionId).toBe(scope.sessionId)
     expect(await h.read(target)).toBeDefined()
   }
-  const recordingObserver = new RunObservationOwner({ authorize, read: reader })
+  const recordingObserver: RunObservationOwner = new RunObservationOwner({
+    authorize,
+    read: reader
+  })
   const recorderDependencies = {
     dataRoot: h.fixture.storageRoot,
     authorize,
@@ -174,11 +177,11 @@ async function verifyEntry(entry: Entry, mode: Mode): Promise<void> {
   cleanups.push(() => recorder.close())
   let recordingHandle: RunObservationRecordingHandle | undefined
   const createViewers = (): ObservationViewers => {
-    const observer = new RunObservationOwner({
+    const observer: RunObservationOwner = new RunObservationOwner({
       read: reader,
       authorize: (target, viewer) => viewers.assertViewer(target, viewer)
     })
-    const viewers = new ObservationViewers({
+    const viewers: ObservationViewers = new ObservationViewers({
       observer,
       authorizeScope: authorize,
       onRevoked: (viewerId) => views.closeViewer(viewerId)

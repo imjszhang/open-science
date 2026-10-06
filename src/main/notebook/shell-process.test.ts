@@ -2376,3 +2376,68 @@ describe('notebook shell process behavior', () => {
     })
   })
 })
+
+it.skipIf(process.platform === 'win32')(
+  'injects private research bindings only at spawn and redacts live split output',
+  async () => {
+    const chunks: string[] = []
+    const secret = 'fixture-private-value'
+    const capability = createManagedShellExecutionCapability({
+      projectId: 'project',
+      sessionId: 'session',
+      executionInvocationId: 'private-output',
+      cwd: portableRuntimeRoot,
+      environment: { HOME: portableRuntimeRoot, PATH: '/usr/bin:/bin' },
+      privateEnvironment: { RESEARCH_API_KEY: secret },
+      secretValues: [secret],
+      confinement: { mode: 'research', allowedNetworkHosts: [] },
+      filesystem: { readOnlyRoots: [], readWriteRoots: [portableRuntimeRoot] },
+      onOutput: ({ text }) => chunks.push(text)
+    })
+    const wrap = vi.fn(async (invocation) => ({
+      executable: invocation.executable,
+      args: invocation.args,
+      env: invocation.env,
+      annotateStderr: (text: string) => text,
+      cleanup: async () => ({
+        processesTerminated: true,
+        networkClosed: true,
+        temporaryResourcesRemoved: true
+      })
+    }))
+    const result = await runShellCommand({
+      projectId: 'project',
+      sessionId: 'session',
+      runId: 'private-run',
+      executionInvocationId: 'private-output',
+      managedExecution: capability,
+      command: `printf '%s' "\${RESEARCH_API_KEY%value}"; sleep 0.05; printf 'value\\n'; printf '%s\\n' "$RESEARCH_API_KEY" >&2`,
+      cwd: portableRuntimeRoot,
+      handoffDir: portableRuntimeRoot,
+      runtimeRoot: portableRuntimeRoot,
+      processSandbox: { wrap },
+      timeoutMs: 5000
+    })
+    expect(wrap.mock.calls[0]![0]).toMatchObject({
+      env: { RESEARCH_API_KEY: secret },
+      confinement: { mode: 'research', allowedNetworkHosts: [] }
+    })
+    expect(result).toMatchObject({ stdout: '[redacted]\n', stderr: '[redacted]\n', exitCode: 0 })
+    expect(chunks.join('')).not.toContain(secret)
+    expect(chunks.join('')).not.toContain('fixture-private-')
+    wrap.mockRejectedValueOnce(new Error(`Preparation failed for ${secret}`))
+    const failed = await runShellCommand({
+      projectId: 'project',
+      sessionId: 'session',
+      executionInvocationId: 'private-output',
+      managedExecution: capability,
+      command: 'true',
+      cwd: portableRuntimeRoot,
+      handoffDir: portableRuntimeRoot,
+      runtimeRoot: portableRuntimeRoot,
+      processSandbox: { wrap },
+      timeoutMs: 5000
+    })
+    expect(failed.stderr).toBe('Preparation failed for [redacted]')
+  }
+)

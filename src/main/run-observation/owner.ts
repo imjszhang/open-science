@@ -7,6 +7,7 @@ import {
   runObservationSnapshotSchema,
   runObservationTargetSchema,
   type RunObservationArtifact,
+  type RunObservationExecutionContext,
   type RunObservationChange,
   type RunObservationChanges,
   type RunObservationChangesRequest,
@@ -27,6 +28,7 @@ export type RunObservationSource = Readonly<{
   run: NotebookRunRecord | null
   /** Only finalized, published Versions authorized for this viewer. No Artifact producer bypass. */
   artifacts: readonly RunObservationArtifact[]
+  executionContext?: RunObservationExecutionContext
   /** Extra process-owned roots/credentials to redact; these values never enter the public DTO. */
   privatePaths?: readonly string[]
   secrets?: readonly string[]
@@ -332,7 +334,16 @@ export class RunObservationOwner {
           }
         : null,
       artifacts,
-      artifactsTruncated: source.artifacts.length > this.artifactLimit
+      artifactsTruncated: source.artifacts.length > this.artifactLimit,
+      executionContext: {
+        purpose: source.executionContext?.purpose ?? 'unknown',
+        ...(source.executionContext?.profileName !== undefined
+          ? { profileName: redact(source.executionContext.profileName).slice(0, 160) }
+          : {}),
+        conditionChanges: (source.executionContext?.conditionChanges ?? [])
+          .slice(0, 32)
+          .map((text) => redact(text).slice(0, 2048))
+      }
     }
     const fingerprint = createHash('sha256').update(JSON.stringify(projection)).digest('hex')
     const now = Math.max((this.dependencies.now ?? Date.now)(), previous?.observedAt ?? 0)
@@ -434,7 +445,15 @@ export class RunObservationOwner {
           observedAt: after.observedAt,
           ...Object.fromEntries(
             (
-              ['identity', 'phase', 'stepId', 'run', 'artifacts', 'artifactsTruncated'] as const
+              [
+                'identity',
+                'phase',
+                'stepId',
+                'run',
+                'artifacts',
+                'artifactsTruncated',
+                'executionContext'
+              ] as const
             ).flatMap((field) => (same(before[field], after[field]) ? [] : [[field, after[field]]]))
           )
         })

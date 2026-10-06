@@ -1,3 +1,4 @@
+import { normalizeExecutionConfinement } from '@aipoch/notebook-network-sandbox'
 import { createHash } from 'node:crypto'
 import { isAbsolute, normalize, relative, sep } from 'node:path'
 
@@ -39,6 +40,10 @@ export type ManagedShellExecutionPolicy = ManagedShellExecutionScope &
     /** Main-owned publication directory; observed by this Run, never inferred from write grants. */
     outputRoot?: string
     environment: Readonly<Record<string, string>>
+    confinement?: NotebookSandboxInvocation['confinement']
+    /** Ephemeral lease values. Never fingerprinted, journaled or exposed to observers. */
+    privateEnvironment?: Readonly<Record<string, string>>
+    secretValues?: readonly string[]
     filesystem: NotebookSandboxInvocation['filesystem']
     fingerprint: string
     signal?: AbortSignal
@@ -142,6 +147,34 @@ export const createManagedShellExecutionCapability = (
     throw new Error('Invalid managed Shell service proof.')
   if (input.onOutput !== undefined && typeof input.onOutput !== 'function')
     throw new Error('Invalid managed Shell output observer.')
+  const confinement = input.confinement
+    ? normalizeExecutionConfinement(input.confinement)
+    : undefined
+  const privateEnvironment: Record<string, string> = {}
+  for (const [key, value] of Object.entries(input.privateEnvironment ?? {})) {
+    if (
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
+      typeof value !== 'string' ||
+      value.includes('\0') ||
+      key in environment ||
+      key.startsWith('OPEN_SCIENCE_') ||
+      /^(?:PATH|HOME|TMPDIR|TMP|TEMP|NODE_OPTIONS|NODE_PATH|LD_.*|DYLD_.*|BASH_ENV|ENV|SHELLOPTS|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i.test(
+        key
+      )
+    )
+      throw new Error('Invalid private managed Shell environment binding.')
+    privateEnvironment[key] = value
+  }
+  const secretValues = Object.freeze(
+    [...new Set([...Object.values(privateEnvironment), ...(input.secretValues ?? [])])].filter(
+      (value) => typeof value === 'string' && value.length > 0
+    )
+  )
+  if (
+    confinement?.mode === 'offline-demo' &&
+    (Object.keys(privateEnvironment).length || secretValues.length)
+  )
+    throw new Error('Offline demonstrations cannot receive private credentials.')
   const filesystem = Object.freeze({
     readOnlyRoots,
     readWriteRoots,
@@ -159,6 +192,7 @@ export const createManagedShellExecutionCapability = (
     cwd,
     ...(outputRoot ? { outputRoot } : {}),
     environment: Object.freeze(environment),
+    ...(confinement ? { confinement } : {}),
     filesystem
   }
   const fingerprint = createHash('sha256')
@@ -177,6 +211,10 @@ export const createManagedShellExecutionCapability = (
     Object.freeze({
       ...snapshot,
       fingerprint,
+      ...(Object.keys(privateEnvironment).length
+        ? { privateEnvironment: Object.freeze(privateEnvironment) }
+        : {}),
+      ...(secretValues.length ? { secretValues } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.onOutput ? { onOutput: input.onOutput } : {}),
       ...(input.localService

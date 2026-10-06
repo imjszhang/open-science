@@ -108,3 +108,28 @@ it('does not silently retry an interrupted allocation and rejects caller-supplie
   await expect(f.workflow.create({ ...request, cwd: '/private/data' } as never)).rejects.toThrow()
   expect(f.dependencies.workspaces.acquire).toHaveBeenCalledTimes(1)
 })
+
+it('Main lookup distinguishes absent intent, committed Session and deleted Session without allocation', async () => {
+  const f = await fixture()
+  const scope = { projectId: request.projectId, requestId: request.requestId }
+  expect(await f.workflow.lookup(scope)).toBeUndefined()
+  expect(f.dependencies.workspaces.acquire).not.toHaveBeenCalled()
+  f.dependencies.sessions.saveSession.mockImplementationOnce(async (session) => {
+    f.stored.set(session.id, session)
+    throw new Error('publication reply lost')
+  })
+  await expect(f.workflow.create(request)).rejects.toThrow('reply lost')
+  const sessionId = [...f.stored.keys()][0]
+  expect(await f.workflow.lookup(scope)).toEqual({
+    projectId: request.projectId,
+    sessionId,
+    state: 'available'
+  })
+  f.stored.delete(sessionId)
+  expect(await f.workflow.lookup(scope)).toEqual({
+    projectId: request.projectId,
+    sessionId,
+    state: 'missing'
+  })
+  expect(f.dependencies.workspaces.acquire).toHaveBeenCalledTimes(1)
+})

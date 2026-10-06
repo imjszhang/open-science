@@ -19,6 +19,7 @@ import {
   rememberResearchProjectDestination
 } from '@/lib/research-project-entry'
 import { openProjectWorkspace } from './project-workspace-entry'
+import { useResearchDemoStore } from '@/stores/research-demo-store'
 
 const openResearch = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 vi.mock('./workspace-discussion-navigation', () => ({
@@ -73,9 +74,28 @@ beforeEach(() => {
     userNavigationRevision: 0
   })
   useResearchWorkspaceStore.setState({ draftResearchByProject: {}, lastDiscussionByResearch: {} })
+  useResearchDemoStore.setState({ carriersByProject: {} })
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: { researchDemos: { carriers: vi.fn().mockResolvedValue([]) } }
+  })
 })
 
 describe('intentional project entry', () => {
+  it('does not let a Main-owned demo carrier replace the most recent ordinary discussion', async () => {
+    useSessionStore.setState({
+      sessions: [source, ordinary, session('demo-carrier', { updatedAt: 99 })]
+    })
+    vi.mocked(window.api.researchDemos.carriers).mockResolvedValue([
+      {
+        sessionId: 'demo-carrier',
+        source: { projectId: 'project', sourceSessionId: 'source', sourceImportId: 'import' }
+      }
+    ])
+    await openProjectWorkspace('project')
+    expect(useSessionStore.getState().selectedSessionId).toBe('ordinary')
+    expect(useSessionStore.getState().sessions.map((item) => item.id)).toContain('demo-carrier')
+  })
   it('opens recent ordinary execution as an ordinary Session in a mixed project', async () => {
     await openProjectWorkspace('project')
     expect(useSessionStore.getState().selectedSessionId).toBe('ordinary')

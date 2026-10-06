@@ -124,3 +124,66 @@ describe('main-owned managed Shell capability', () => {
     )
   })
 })
+
+describe('managed confinement and private bindings', () => {
+  it('fingerprints only public authority and snapshots private lease data in memory', () => {
+    const make = (secret: string): ManagedShellExecutionCapability =>
+      createManagedShellExecutionCapability({
+        ...input(),
+        confinement: { mode: 'research', allowedNetworkHosts: ['api.example.org'] },
+        privateEnvironment: { RESEARCH_API_KEY: secret },
+        secretValues: [secret]
+      })
+    const first = resolveManagedShellExecutionCapability(make('first-private-value'), scope)
+    const second = resolveManagedShellExecutionCapability(make('second-private-value'), scope)
+    expect(first.fingerprint).toBe(second.fingerprint)
+    expect(first.environment).not.toHaveProperty('RESEARCH_API_KEY')
+    expect(first.privateEnvironment?.RESEARCH_API_KEY).toBe('first-private-value')
+    expect(
+      resolveManagedShellExecutionCapability(
+        createManagedShellExecutionCapability({
+          ...input(),
+          confinement: { mode: 'research', allowedNetworkHosts: ['other.example.org'] }
+        }),
+        scope
+      ).fingerprint
+    ).not.toBe(first.fingerprint)
+    expect(JSON.stringify(make('first-private-value'))).toBe('{}')
+  })
+
+  it('rejects offline credentials, wildcard hosts, unknown modes and reserved environment overrides', () => {
+    expect(() =>
+      createManagedShellExecutionCapability({
+        ...input(),
+        confinement: { mode: 'offline-demo' },
+        privateEnvironment: { API_KEY: 'secret' }
+      })
+    ).toThrow('cannot receive')
+    expect(() =>
+      createManagedShellExecutionCapability({
+        ...input(),
+        confinement: { mode: 'research', allowedNetworkHosts: ['*.example.org'] }
+      })
+    ).toThrow('exact hostnames')
+    expect(() =>
+      createManagedShellExecutionCapability({
+        ...input(),
+        confinement: { mode: 'offline-demo', allowedNetworkHosts: ['api.example.org'] }
+      })
+    ).toThrow('cannot allow')
+    for (const key of [
+      'PATH',
+      'HOME',
+      'NODE_OPTIONS',
+      'HTTPS_PROXY',
+      'OPEN_SCIENCE_SERVICE_PROOF'
+    ]) {
+      expect(() =>
+        createManagedShellExecutionCapability({
+          ...input(),
+          privateEnvironment: { [key]: 'value' }
+        })
+      ).toThrow('private managed')
+    }
+  })
+})

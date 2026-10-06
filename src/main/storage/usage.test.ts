@@ -185,8 +185,9 @@ describe('computeStorageUsage', () => {
     for (const directory of MANAGED_EXECUTION_DATA_DIRS)
       await writeSized(join(dataRoot, directory, 'owned.json'), 20)
     const usage = await computeStorageUsage(dataRoot)
-    expect(usage.categories.find(({ key }) => key === 'notebooks')?.bytes).toBe(90)
-    expect(usage.totalBytes).toBe(90)
+    const expectedBytes = 10 + MANAGED_EXECUTION_DATA_DIRS.length * 20
+    expect(usage.categories.find(({ key }) => key === 'notebooks')?.bytes).toBe(expectedBytes)
+    expect(usage.totalBytes).toBe(expectedBytes)
   })
 
   it('labels default-python/-r as python/r and the shared pkgs cache as conda', async () => {

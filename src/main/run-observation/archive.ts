@@ -79,7 +79,9 @@ export function projectRunObservationArchiveRecord({
   stepId,
   run,
   artifacts,
-  ...snapshot
+  observedAt,
+  phase,
+  artifactsTruncated
 }: RunObservationSnapshot): RunObservationArchive['records'][number] {
   const projectedRun = run
     ? {
@@ -93,7 +95,11 @@ export function projectRunObservationArchiveRecord({
     : null
   return {
     stepKey: `observation-${cursor.sequence}`,
-    ...snapshot,
+    // Archive v1 is deliberately fixed. App-only execution context is recovered from the
+    // collection receipt, and must never be spread into the portable record schema.
+    observedAt,
+    phase,
+    artifactsTruncated,
     sourceEvidence: { identity, cursor, stepId },
     run: projectedRun,
     artifactEvidence: artifacts.map(({ artifactId, versionId, producerRunId, ...artifact }) => ({

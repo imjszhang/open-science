@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import type { ResearchDemoQuestion } from '../../../../../shared/research-demo'
 import { useSessionStore } from '@/stores/session-store'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
@@ -21,38 +22,47 @@ export type ObservationQuestionRecovery = {
 const stageRecoveredQuestion = (
   selection: ObservationQuestionSelection,
   destination: ObservationQuestionDestination,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  demo?: Pick<ResearchDemoQuestion, 'source' | 'requestId' | 'purpose'>
 ): void => {
   const revision = useNavigationStore.getState().explicitNavigationRevision
-  useRunObservationQuestionStore.getState().recover(selection, destination, () => {
-    const navigation = useNavigationStore.getState()
-    const sessionId = useSessionStore.getState().selectedSessionId
-    const selected = useSessionStore.getState().sessions.find((row) => row.id === sessionId)
-    const inlineSource = researchSourceFromSession(selected)
-    const research =
-      inlineSource ??
-      (!sessionId
-        ? useResearchWorkspaceStore.getState().draftResearchByProject[destination.projectId]
-        : undefined)
-    const draftKey = research
-      ? researchDraftKey(research)
-      : (sessionId ?? ordinaryDraftKey(destination.projectId))
-    return (
-      !signal?.aborted &&
-      navigation.explicitNavigationRevision === revision &&
-      navigation.view === 'workspace' &&
-      navigation.activeProjectId === destination.projectId &&
-      (inlineSource ? !destination.sessionId : sessionId === destination.sessionId) &&
-      draftKey === destination.draftKey
-    )
-  })
+  useRunObservationQuestionStore.getState().recover(
+    selection,
+    destination,
+    () => {
+      const navigation = useNavigationStore.getState()
+      const sessionId = useSessionStore.getState().selectedSessionId
+      const selected = useSessionStore.getState().sessions.find((row) => row.id === sessionId)
+      const inlineSource = researchSourceFromSession(selected)
+      const research =
+        inlineSource ??
+        (!sessionId
+          ? useResearchWorkspaceStore.getState().draftResearchByProject[destination.projectId]
+          : undefined)
+      const draftKey = research
+        ? researchDraftKey(research)
+        : (sessionId ?? ordinaryDraftKey(destination.projectId))
+      return (
+        !signal?.aborted &&
+        navigation.explicitNavigationRevision === revision &&
+        navigation.view === 'workspace' &&
+        navigation.activeProjectId === destination.projectId &&
+        (inlineSource ? !destination.sessionId : sessionId === destination.sessionId) &&
+        draftKey === destination.draftKey
+      )
+    },
+    demo
+  )
 }
 
 /** A deliberate recovery action reuses the existing research/Session navigation and its guards. */
-export const useObservationQuestionRecovery = (target?: {
-  projectId: string
-  sessionId: string
-}): ObservationQuestionRecovery | undefined => {
+export const useObservationQuestionRecovery = (
+  target?: {
+    projectId: string
+    sessionId: string
+  },
+  demo?: Pick<ResearchDemoQuestion, 'source' | 'requestId' | 'purpose'>
+): ObservationQuestionRecovery | undefined => {
   const { t } = useTranslation()
   const session = useSessionStore((state) =>
     state.sessions.find(
@@ -73,7 +83,8 @@ export const useObservationQuestionRecovery = (target?: {
             !(await openResearchWorkspace(source, {
               preservePreview: true,
               signal,
-              afterNavigate: (destination) => stageRecoveredQuestion(selection, destination, signal)
+              afterNavigate: (destination) =>
+                stageRecoveredQuestion(selection, destination, signal, demo)
             }))
           )
             throw new Error('Research discussion is unavailable.')
@@ -86,7 +97,12 @@ export const useObservationQuestionRecovery = (target?: {
           useNavigationStore
             .getState()
             .openSession(target.projectId, target.sessionId, 'user', () =>
-              stageRecoveredQuestion(selection, { ...target, draftKey: target.sessionId }, signal)
+              stageRecoveredQuestion(
+                selection,
+                { ...target, draftKey: target.sessionId },
+                signal,
+                demo
+              )
             )
         }
       }

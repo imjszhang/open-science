@@ -1077,9 +1077,15 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   id: 'host.managedExecution',
   path: 'host.managedExecution',
   aliases: ['managedExecution'],
-  summary: 'Managed research materials.',
+  summary: 'Managed research.',
   callForms: [
     { signature: 'host.managedExecution.runtimes()', accepts: 'no_arguments' },
+    { signature: 'host.managedExecution.preflight(options)', accepts: 'options' },
+    {
+      signature: 'host.managedExecution.requestConfiguration(options)',
+      accepts: 'options'
+    },
+    { signature: 'host.managedExecution.getConfiguration({configurationId})', accepts: 'options' },
     {
       signature: 'host.managedExecution.inspectMaterials(options)',
       accepts: 'options'
@@ -1112,89 +1118,95 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   request: {
     fields: [
       {
+        name: 'configurationId',
+        type: 'string',
+        description: 'getConfiguration: requestConfiguration result ID.'
+      },
+      {
         name: 'sourceSessionId',
         type: 'string',
-        required: false,
-        description: 'inspectMaterials/prepare: source Session.'
+        description: 'Source Session.'
+      },
+      {
+        name: 'descriptorVersionId',
+        type: 'string',
+        description: 'preflight: description Version.'
+      },
+      {
+        name: 'planKey',
+        type: 'string',
+        description: 'preflight/requestConfiguration: original plan.'
+      },
+      {
+        name: 'profileId',
+        type: 'string',
+        description: 'Local profile; no raw secrets.'
       },
       {
         name: 'environmentId',
         type: 'string',
-        required: false,
-        description: 'Prepared environment.'
+        description: 'Environment.'
       },
       {
         name: 'collectionId',
         type: 'string',
-        required: false,
-        description: 'getEnvironment.pendingCollection.collectionId.'
+        description: 'Pending collection ID.'
       },
       {
         name: 'requestId',
         type: 'string',
-        required: false,
-        description: 'prepare/execute/collectOutputs: stable retry ID.'
+        description: 'Stable retry ID.'
       },
       {
         name: 'sourceIdentity',
         type: 'string',
-        required: false,
-        description: 'prepare: inspected identity.'
+        description: 'Inspected identity.'
       },
       {
         name: 'runtimeId',
         type: 'string',
-        required: false,
-        description: 'prepare: runtimes identifier.'
+        description: 'Runtime ID.'
       },
       {
         name: 'materials',
         type: 'object',
-        required: false,
         description:
-          'prepare: {files:[{versionId,restorePath}]} or {descriptorVersionId,materialKeys,materialVersions?}; paths relative; versions by key.'
+          '{files:[{versionId,restorePath}]} or {descriptorVersionId,materialKeys,materialVersions?}.'
       },
       {
         name: 'versionIds',
         type: 'string[]',
-        required: false,
-        description: 'inspect: versionIds or descriptorVersionId.'
+        description: 'Inspected Versions.'
       },
       {
         name: 'outputs',
         type: 'object[]',
-        required: false,
-        description: 'execute: [{path,filename,contentType?,optional?}]; relative paths.'
+        description: '[{path,filename,contentType?,optional?}]; relative paths.'
       },
       {
         name: 'timeoutMs',
         type: 'integer',
-        required: false,
-        description: 'execute: 1–600000 ms; default 60000.'
+        description: '1–600000 ms; default 60000.'
       },
       {
         name: 'localServicePort',
         type: 'integer',
-        required: false,
-        description: 'execute: managed port, 1–65535.'
+        description: '1–65535.'
       },
       {
         name: 'recordObservation',
         type: 'boolean',
-        required: false,
-        description: 'execute: save process records; default false.'
+        description: 'Record; default false.'
       },
       {
         name: 'projectView',
         type: 'object',
-        required: false,
-        description: 'execute: {title,entryPath?}; relative Web entry, localServicePort >=1024.'
+        description: '{title,entryPath?}; relative path, port >=1024.'
       },
       {
         name: 'command',
         type: 'string',
-        required: false,
-        description: 'execute: reviewed command.'
+        description: 'Reviewed command.'
       }
     ]
   },
@@ -1206,13 +1218,13 @@ const MANAGED_EXECUTION_DESCRIPTOR: HostSdkHelpOperationDescriptor = {
   },
   constraints: [
     'Main turn; does not create another Session/model.',
-    'Inspect; use returned IDs; explain missing inputs/changed conditions.',
-    'macOS; existing Node >=22. Inputs: OPEN_SCIENCE_INPUT_DIR; outputs: OPEN_SCIENCE_OUTPUT_DIR.',
+    'Preflight; explain gaps/changes. No demo fallback.',
+    'macOS Node >=22; OPEN_SCIENCE_INPUT_DIR / OPEN_SCIENCE_OUTPUT_DIR.',
     'Node found is not plan readiness. No installs/host-terminal fallback.',
     'Stop turn to cancel. collectOutputs never reruns the command; finish/recover the original turn for publication.',
     'releaseEnvironment preserves pending outputs until all exact Versions and the receipt publish; explicit discardOutputs abandons them.',
     'Same-turn reads: host.artifactPath via producer authority; ordinary catalog stays published-only.',
-    'Never supply provenance, recoveryAuthority or writeAttempt.'
+    'No caller-issued authority.'
   ],
   examples: [],
   backgroundSafety: 'unsafe',

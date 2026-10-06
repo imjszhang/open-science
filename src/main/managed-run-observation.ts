@@ -27,6 +27,11 @@ export const createManagedRunObservationReader =
       phase: phase(source),
       run: source.run,
       secrets: source.secrets,
+      executionContext: {
+        purpose: source.purpose ?? 'unknown',
+        ...(source.executionProfile ? { profileName: source.executionProfile.displayName } : {}),
+        conditionChanges: source.executionProfile?.conditionChanges ?? []
+      },
       artifacts: source.artifacts
         .filter(
           (artifact) => !artifact.producerRunId || artifact.producerRunId === source.run?.runId

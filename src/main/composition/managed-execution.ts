@@ -29,7 +29,9 @@ import { SessionOperationOwner } from '../notebook/session-operation-owner'
 import { createManagedSessionWorkflow } from '../session-persistence/create-managed-session'
 import { RuntimeSessionOwner } from '../session-persistence/runtime-session-owner'
 import { augmentedPathEnv } from '../settings/shell-path'
-import { resolveDataRoot } from '../storage-root'
+import { resolveDataRoot, resolveConfigRoot } from '../storage-root'
+import { ResearchDemoOwner } from '../research-demos/owner'
+import { ResearchExecutionProfileStore } from '../research-execution-profiles/store'
 import { withDataRootWrite } from '../storage/migration-state'
 import { assertResearchSessionWritable } from '../storage/session-package-state'
 import { ManagedRuntimeViews } from '../managed-runtime-views'
@@ -57,6 +59,7 @@ import type { composeSessionPackages } from './session-packages'
 export type ManagedExecutionComposition = {
   service: ManagedExecutionService
   researchRuns: ResearchRunInspectionPort
+  researchDemos: ResearchDemoOwner
   external: ManagedExecutionExternalPort
   internal: ManagedExecutionPort
   environments: ManagedResearchEnvironmentOwner
@@ -121,8 +124,7 @@ export async function composeManagedExecution({
         'Prepared execution is paused during application handoff.'
       )
   }
-  const track = async <T>(operation: () => Promise<T>): Promise<T> => {
-    assertOpen()
+  const trackAdmitted = async <T>(operation: () => Promise<T>): Promise<T> => {
     const work = Promise.resolve().then(operation)
     activeWrites.add(work)
     try {
@@ -130,6 +132,10 @@ export async function composeManagedExecution({
     } finally {
       activeWrites.delete(work)
     }
+  }
+  const track = async <T>(operation: () => Promise<T>): Promise<T> => {
+    assertOpen()
+    return trackAdmitted(operation)
   }
   const sessions = sessionAuthority.sessionPersistenceCoordinator
   const archive = projectLifecycle.archiveCoordinator
@@ -221,6 +227,7 @@ export async function composeManagedExecution({
   const projectViews = new ManagedRuntimeViews()
   const observationMedia = new ObservationMediaCollector()
   const service: ManagedExecutionService = new ManagedExecutionService({
+    profiles: new ResearchExecutionProfileStore(resolveConfigRoot()),
     artifacts: managedFiles.artifactProvenanceRepository,
     dataRoot,
     notebooks: managedFiles.notebookRepository,
@@ -361,7 +368,7 @@ export async function composeManagedExecution({
     if (closed || !(await sessions.readSessionSnapshot(target.projectId, target.sessionId)))
       throw new Error('The recorded Session is unavailable.')
   }
-  const recordingObserver = new RunObservationOwner({
+  const recordingObserver: RunObservationOwner = new RunObservationOwner({
     authorize: authorizeRecording,
     read: createManagedRunObservationReader(service)
   })
@@ -395,7 +402,7 @@ export async function composeManagedExecution({
       )
     }
   })
-  const observation = new RunObservationOwner({
+  const observation: RunObservationOwner = new RunObservationOwner({
     authorize: (target, viewer) => observationViewers.assertViewer(target, viewer),
     read: createManagedRunObservationReader(service)
   })
@@ -447,7 +454,7 @@ export async function composeManagedExecution({
       )
     }
   })
-  const observationViewers = new ObservationViewers({
+  const observationViewers: ObservationViewers = new ObservationViewers({
     observer: observation,
     authorizeScope: authorizeObservationScope,
     recorded: {
@@ -473,7 +480,7 @@ export async function composeManagedExecution({
       runId: inspected.run.runId
     }
   }
-  const viewerHost = new ReplayViewerHttpHost({
+  const viewerHost: ReplayViewerHttpHost = new ReplayViewerHttpHost({
     desktopLocale,
     listCaptures: async (target, signal) => {
       signal.throwIfAborted()
@@ -637,6 +644,35 @@ export async function composeManagedExecution({
     track
   })
   const external = createManagedExecutionExternalPort({ service, assertOpen, withDataRootWrite })
+  const researchDemos = new ResearchDemoOwner({
+    dataRoot,
+    materials: {
+      catalog: sessionAuthority.projectFilesRepository,
+      inputAuthority: managedFiles.immutableInputAuthority,
+      readSession: (projectId, sessionId) => sessions.readSessionSnapshot(projectId, sessionId),
+      readOrigin: (request) => sessionPackages.sessionPackageService.readOrigin(request)
+    },
+    service,
+    track: (operation) => trackAdmitted(() => withDataRootWrite(operation)),
+    createCarrierSession: (request) =>
+      creator.create(request as Parameters<typeof creator.create>[0]),
+    findCarrierSession: (request) => creator.lookup(request),
+    onCarrierCreated: async (projectId, sessionId) => {
+      const session = await sessions.readSessionSnapshot(projectId, sessionId)
+      if (session)
+        applicationEvents.publish('session:created', {
+          session,
+          originClientId: 'main:replay-demo'
+        })
+    },
+    readSelection: (viewerId, caller) => observationViewers.selection(viewerId, { caller }),
+    findPreparedEnvironment: (scope) => environments.lookupPrepared(scope),
+    sessionExists: async (projectId, sessionId) => {
+      const session = await sessions.readSessionSnapshot(projectId, sessionId)
+      return Boolean(session && !session.packageOrigin && session.archivedAt === undefined)
+    },
+    assertOpen
+  })
   external.observation = createRunObservationExternalPort({
     viewers: observationViewers,
     assertOpen,
@@ -668,7 +704,11 @@ export async function composeManagedExecution({
     held = true
     resumePending = false
     draining ??= (async () => {
-      const results = await Promise.allSettled([operations.quiesce(), environments.quiesce()])
+      const results = await Promise.allSettled([
+        researchDemos.stopScope(),
+        operations.quiesce(),
+        environments.quiesce()
+      ])
       await Promise.allSettled([...activeWrites])
       // A material inspection admitted before the hold can finish preparing after the first
       // environment snapshot. Drain that final work before handing the data root away.
@@ -689,6 +729,7 @@ export async function composeManagedExecution({
   const close = async (): Promise<void> => {
     closed = true
     await quiesce()
+    await researchDemos.close()
     await operations.close()
     await environments.close()
     await observationMedia.close()
@@ -736,6 +777,7 @@ export async function composeManagedExecution({
   return {
     service,
     researchRuns,
+    researchDemos,
     external,
     internal,
     environments,
@@ -776,17 +818,19 @@ export async function composeManagedExecution({
       await environments.recover()
       await operations.recover()
       await reconcilePublishedOutputs()
+      await researchDemos.recover()
     },
     stopSession: (projectId, sessionId) => {
       let completion = stoppingSessions.get(sessionId)
       if (!completion) {
         completion = Promise.resolve()
-          .then(() =>
-            stopScope(
+          .then(async () => {
+            await researchDemos.stopScope({ projectId, sessionId })
+            return stopScope(
               (scope) => scope.projectId === projectId && scope.sessionId === sessionId,
               () => environments.releaseSession({ projectId, sessionId })
             )
-          )
+          })
           .finally(() => {
             stoppingSessions.delete(sessionId)
           })
@@ -798,12 +842,13 @@ export async function composeManagedExecution({
       let completion = stoppingProjects.get(projectId)
       if (!completion) {
         completion = Promise.resolve()
-          .then(() =>
-            stopScope(
+          .then(async () => {
+            await researchDemos.stopScope({ projectId })
+            return stopScope(
               (scope) => scope.projectId === projectId,
               () => environments.releaseProject(projectId)
             )
-          )
+          })
           .finally(() => {
             stoppingProjects.delete(projectId)
           })

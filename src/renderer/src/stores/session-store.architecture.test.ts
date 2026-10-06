@@ -1419,7 +1419,18 @@ describe('Session Store architecture', () => {
           'src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx',
           'src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx',
           'src/renderer/src/pages/workspace/RunObservationPreview.test.tsx',
-          'src/main/replay-viewer/desktop-embed.integration.test.ts'
+          'src/main/replay-viewer/desktop-embed.integration.test.ts',
+          'src/renderer/src/lib/research-project-entry.test.ts',
+          'src/renderer/src/pages/workspace/project-workspace-entry.test.ts',
+          'src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx',
+          'src/renderer/src/pages/workspace/research-preview-navigation.test.ts',
+          'src/renderer/src/pages/workspace/replay/recording-discovery.test.ts',
+          'src/renderer/src/pages/workspace/use-run-observation-question.test.tsx',
+          'src/renderer/src/pages/workspace/use-research-run-observer.test.tsx',
+          'src/renderer/src/stores/research-run-store.test.ts',
+          'src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx',
+          'src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx',
+          'src/main/research-demos/owner.macos.integration.test.ts'
         ]
       },
       capabilityOverlays: ['renderer_state'],
