@@ -52,7 +52,11 @@ import {
   observationRecordId,
   type ReplayObservationMode
 } from '@/lib/replay/live-source'
-import { ReplayLiveRecord, type ReplayRuntimeSurface } from './ReplayLiveRecord'
+import {
+  ReplayLiveRecord,
+  type ReplayProjectActivation,
+  type ReplayRuntimeSurface
+} from './ReplayLiveRecord'
 import { useObservationPhaseLabel } from './replay-observation-labels'
 import { ReplaySourceDetails } from './ReplaySourceDetails'
 import {
@@ -76,6 +80,7 @@ export type ReplayLiveSource = {
   history?: readonly RunObservationSnapshot[]
   connection: 'connected' | 'reconnecting' | 'disconnected'
   runtimeSurface?: ReplayRuntimeSurface
+  projectActivation?: ReplayProjectActivation
   renderActions?: (enabled: boolean) => React.ReactNode
   renderRecordedSurface?: (snapshot: RunObservationSnapshot) => React.ReactNode | undefined
   onAskSelection: (snapshot: RunObservationSnapshot) => void
@@ -1100,6 +1105,15 @@ const ReplayPanelContent = ({
                 recordedSurface={live.renderRecordedSurface?.(currentObservation)}
                 historyTruncated={live.historyTruncated}
                 onProjectActiveChange={setLiveProjectTabActive}
+                projectActivation={
+                  observationMode === 'follow' &&
+                  live.connection === 'connected' &&
+                  !live.recorded &&
+                  live.snapshot.phase === 'running' &&
+                  live.snapshot.run?.status === 'running'
+                    ? live.projectActivation
+                    : undefined
+                }
                 runtimeSurface={
                   live.connection === 'connected' &&
                   !live.recorded &&

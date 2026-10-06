@@ -231,6 +231,26 @@ describe('shared live Replay viewer', () => {
     expect(screen.queryByTitle('Wrong project')).toBeNull()
   })
 
+  it.each(['reconnecting', 'disconnected', 'recorded', 'history'] as const)(
+    'never activates a current project lease from a %s surface',
+    (mode) => {
+      const onOpen = vi.fn()
+      const first = props(snapshot(2))
+      render(
+        <LiveReplayView
+          {...first}
+          history={[snapshot(1), snapshot(2)]}
+          recorded={mode === 'recorded'}
+          connection={mode === 'reconnecting' || mode === 'disconnected' ? mode : 'connected'}
+          projectActivation={{ opening: false, onOpen }}
+        />
+      )
+      if (mode === 'history') fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(onOpen).not.toHaveBeenCalled()
+    }
+  )
+
   it('history selection reads only the selected actual snapshot, including after that revision leaves the incoming buffer', async () => {
     const one = snapshot(1),
       two = snapshot(2)

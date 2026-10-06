@@ -172,6 +172,38 @@ describe('scoped browser viewer transport', () => {
     expect(next.snapshots.map((s) => s.cursor.sequence)).toEqual([1, 2, 3])
     expect(appendViewerChanges(next, update)).toEqual(next)
   })
+  it('accepts a verified purpose delta and preserves it through live observation projection', async () => {
+    const one = record(1),
+      two = record(2)
+    const executionContext = {
+      purpose: 'research' as const,
+      profileName: 'Recipient configuration',
+      conditionChanges: ['Smaller sample']
+    }
+    const delta = {
+      kind: 'delta',
+      from: one.cursor,
+      cursor: two.cursor,
+      changes: [{ cursor: two.cursor, observedAt: two.observedAt, executionContext }]
+    }
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(delta))
+    const client = new ReplayViewerClient(fetcher)
+    const update = await client.changes(one)
+    const history = appendViewerChanges(
+      { coverage: 'process-local', truncated: false, snapshots: [one] },
+      update
+    )
+    expect(history.snapshots.at(-1)?.executionContext).toEqual(executionContext)
+    fetcher.mockResolvedValueOnce(
+      json({
+        ...delta,
+        changes: [
+          { ...delta.changes[0], executionContext: { ...executionContext, secret: 'forbidden' } }
+        ]
+      })
+    )
+    await expect(client.changes(one)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('rejects cursor gaps, and epoch replacement discloses a new limited observation window', () => {
     const one = record(),
       three = record(3)

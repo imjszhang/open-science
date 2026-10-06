@@ -262,7 +262,7 @@ export const ViewerApp = ({
             />
           ) : null}
         </div>
-        {context.canInteract ? (
+        {context.canInteract && access ? (
           <Button
             data-testid="open-project-interface"
             size="sm"
@@ -272,17 +272,13 @@ export const ViewerApp = ({
               void openProject()
             }}
           >
-            {opening
-              ? t('Opening project interface…')
-              : access
-                ? t('Reopen project interface')
-                : t('Open project interface')}
+            {opening ? t('Opening project interface…') : t('Reopen project interface')}
           </Button>
-        ) : (
+        ) : !context.canInteract ? (
           <span className="text-xs text-muted-foreground">
             {t('Project interaction is not enabled for this viewer.')}
           </span>
-        )}
+        ) : null}
       </div>
       {archiveError ? (
         <ErrorNotice
@@ -337,6 +333,9 @@ export const ViewerApp = ({
               : undefined
           }
           runtimeSurface={runtimeSurface}
+          projectActivation={
+            context.canInteract ? { opening, onOpen: () => void openProject() } : undefined
+          }
           renderRecordedSurface={(record) => {
             // The Run owner releases its live image cache at cleanup. Absence from that cache
             // after completion is not evidence that no image was recorded in the archive.

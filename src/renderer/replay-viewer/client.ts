@@ -3,6 +3,7 @@ import { LOCALES, type Locale } from '../../shared/locale'
 import {
   applyRunObservationChanges,
   runObservationCursorSchema,
+  runObservationExecutionContextSchema,
   runObservationIdentitySchema,
   runObservationSnapshotSchema,
   runObservationTargetSchema,
@@ -103,7 +104,8 @@ const changesSchema = z.union([
               stepId: runObservationSnapshotSchema.shape.stepId.optional(),
               run: runObservationSnapshotSchema.shape.run.optional(),
               artifacts: runObservationSnapshotSchema.shape.artifacts.optional(),
-              artifactsTruncated: z.boolean().optional()
+              artifactsTruncated: z.boolean().optional(),
+              executionContext: runObservationExecutionContextSchema.optional()
             })
             .strict()
         )
@@ -140,6 +142,7 @@ const recordedSelectionSchema = z
     receiving: recordedObservationTargetSchema,
     stepKey: id,
     record: z.unknown(),
+    executionContext: runObservationExecutionContextSchema.optional(),
     mediaKeys: z.array(id).max(2000)
   })
   .strict()
@@ -176,7 +179,11 @@ const verifiedRecordedSelection = (
     selected.recordingId !== payload.archive.recordingId ||
     !equivalent(selected.receiving, payload.receiving) ||
     !equivalent(selected.record, expected) ||
-    !equivalent(selected.mediaKeys, mediaKeys)
+    !equivalent(selected.mediaKeys, mediaKeys) ||
+    !equivalent(
+      selected.executionContext ?? { purpose: 'unknown', conditionChanges: [] },
+      payload.executionContext ?? { purpose: 'unknown', conditionChanges: [] }
+    )
   )
     throw new ReplayViewerRequestError('invalid-response')
   return { ...selected, record: structuredClone(expected) }

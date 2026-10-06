@@ -12,11 +12,17 @@ export type ReplayRuntimeSurface = {
   content: ReactNode
 }
 
+export type ReplayProjectActivation = {
+  opening: boolean
+  onOpen: () => void
+}
+
 /** Read-only presentation. All runtime page capabilities are supplied by the host adapter. */
 export const ReplayLiveRecord = ({
   snapshot,
   mode,
   runtimeSurface,
+  projectActivation,
   recordedSurface,
   historyTruncated,
   onProjectActiveChange
@@ -24,6 +30,7 @@ export const ReplayLiveRecord = ({
   snapshot: RunObservationSnapshot
   mode: ReplayObservationMode
   runtimeSurface?: ReplayRuntimeSurface
+  projectActivation?: ReplayProjectActivation
   recordedSurface?: ReactNode
   historyTruncated?: boolean
   onProjectActiveChange?: (active: boolean) => void
@@ -69,8 +76,17 @@ export const ReplayLiveRecord = ({
         <Button
           variant={tab === 'project' ? 'secondary' : 'ghost'}
           size="sm"
-          onClick={() => setTab('project')}
+          onClick={() => {
+            setTab('project')
+            if (!livePage && mode === 'follow' && !projectActivation?.opening)
+              projectActivation?.onOpen()
+          }}
           aria-pressed={tab === 'project'}
+          title={
+            mode === 'follow' && projectActivation && !livePage
+              ? t('Open project interface')
+              : undefined
+          }
         >
           {t('Project interface')}
         </Button>
@@ -91,8 +107,13 @@ export const ReplayLiveRecord = ({
             </>
           ) : null}
         </div>
-        {!livePage && tab === 'project'
-          ? (recordedSurface ?? (
+        {!livePage && tab === 'project' ? (
+          mode === 'follow' && projectActivation?.opening ? (
+            <p role="status" className="p-4 text-sm text-muted-foreground">
+              {t('Opening project interface…')}
+            </p>
+          ) : (
+            (recordedSurface ?? (
               <p role="status" className="p-4 text-sm text-muted-foreground">
                 {mode === 'inspect' || mode === 'history'
                   ? t(
@@ -101,7 +122,8 @@ export const ReplayLiveRecord = ({
                   : t('The project interface is not available for this run yet.')}
               </p>
             ))
-          : null}
+          )
+        ) : null}
       </div>
       {tab === 'record' ? (
         <>

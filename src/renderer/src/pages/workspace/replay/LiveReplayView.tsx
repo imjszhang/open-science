@@ -13,7 +13,7 @@ import type {
 } from '../../../../../shared/run-observation'
 import type { ReplayNotebookRunReader } from '@/lib/replay'
 import type { ReplayResourceReader } from './replay-resources'
-import type { ReplayRuntimeSurface } from './ReplayLiveRecord'
+import type { ReplayProjectActivation, ReplayRuntimeSurface } from './ReplayLiveRecord'
 import { ReplayPanel } from './ReplayPanel'
 import { ExecutionPurposeNotice } from './ExecutionPurposeNotice'
 
@@ -30,6 +30,7 @@ export type LiveReplayViewProps = {
   connection: 'connected' | 'reconnecting' | 'disconnected'
   readResource: ReplayResourceReader
   runtimeSurface?: ReplayRuntimeSurface
+  projectActivation?: ReplayProjectActivation
   renderLiveActions?: (enabled: boolean) => ReactNode
   renderRecordedSurface?: (snapshot: RunObservationSnapshot) => ReactNode | undefined
   renderResource?: (resource: ReplayResource, onClose: () => void) => ReactNode
@@ -141,6 +142,7 @@ const LiveReplayViewContent = (props: LiveReplayViewProps): React.JSX.Element =>
             history: projected.history,
             connection: props.connection,
             runtimeSurface: props.runtimeSurface,
+            projectActivation: props.projectActivation,
             renderActions: props.renderLiveActions,
             renderRecordedSurface: props.renderRecordedSurface,
             onAskSelection: (snapshot) => {

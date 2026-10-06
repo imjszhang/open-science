@@ -350,6 +350,35 @@ describe('recorded browser viewer', () => {
       kind: 'invalid-response'
     })
   })
+  it.each(['unknown', 'offline-demo', 'research'] as const)(
+    'accepts Main-owned recorded selection purpose %s without changing archive evidence',
+    async (purpose) => {
+      const recording: RecordedObservationPayload = {
+        ...payload(),
+        ...(purpose !== 'unknown'
+          ? { executionContext: { purpose, conditionChanges: ['Declared difference'] } }
+          : {})
+      }
+      const selected = {
+        ...selection(recording),
+        executionContext: recording.executionContext ?? { purpose: 'unknown', conditionChanges: [] }
+      }
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => json(selected))
+      const client = new ReplayViewerClient(fetcher)
+      expect(await client.selectRecording(recording, 'step')).toEqual(selected)
+      expect(await client.recordedSelection(recording)).toEqual(selected)
+      expect(recording.archive).not.toHaveProperty('executionContext')
+      fetcher.mockResolvedValueOnce(
+        json({
+          ...selected,
+          executionContext: { purpose, conditionChanges: ['Unselected difference'] }
+        })
+      )
+      await expect(client.selectRecording(recording, 'step')).rejects.toMatchObject({
+        kind: 'invalid-response'
+      })
+    }
+  )
   it('reads media only by an authorized mapping key, never an original source Version or pathname', async () => {
     const recording = payload(),
       projected = projectRecordedObservation(

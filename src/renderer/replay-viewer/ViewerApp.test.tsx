@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
+import type { RuntimeViewAccess } from '../../shared/runtime-view'
 import { ViewerApp } from './ViewerApp'
 import { ReplayViewerClient } from './client'
 import { staticHtml } from './static-html'
@@ -34,6 +35,24 @@ const context = {
   canInteract: false,
   canCancel: false,
   canReadArtifacts: false
+}
+const projectAccess: RuntimeViewAccess = {
+  url: `http://rv-view.localhost:1234/__open_science_view?grant=${'a'.repeat(64)}`,
+  view: {
+    viewId: 'view',
+    scope: {
+      projectId: 'p',
+      sessionId: 's',
+      runId: 'run',
+      environmentId: 'env',
+      generationId: 'generation'
+    },
+    title: 'Live project',
+    state: 'ready',
+    createdAt: '2026-10-06T00:00:00Z',
+    expiresAt: '2026-10-06T01:00:00Z',
+    embeddingAdapted: true
+  }
 }
 const makeClient = (): ReplayViewerClient => {
   const client = new ReplayViewerClient()
@@ -392,29 +411,11 @@ describe('standalone browser viewer', () => {
   it('opens the authorized project exactly on a click and reveals the common Replay project pane', async () => {
     const client = makeClient()
     vi.mocked(client.context).mockResolvedValue({ ...context, canInteract: true })
-    const access = {
-      url: `http://rv-view.localhost:1234/__open_science_view?grant=${'a'.repeat(64)}`,
-      view: {
-        viewId: 'view',
-        scope: {
-          projectId: 'p',
-          sessionId: 's',
-          runId: 'run',
-          environmentId: 'env',
-          generationId: 'generation'
-        },
-        title: 'Live project',
-        state: 'ready' as const,
-        createdAt: '2026-10-06T00:00:00Z',
-        expiresAt: '2026-10-06T01:00:00Z',
-        embeddingAdapted: true
-      }
-    }
-    const open = vi.spyOn(client, 'projectView').mockResolvedValue(access)
+    const open = vi.spyOn(client, 'projectView').mockResolvedValue(projectAccess)
     render(<ViewerApp client={client} />)
     await screen.findByText('actual browser host output')
     expect(open).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Open project interface' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
     const frame = await screen.findByTitle('Live project')
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-same-origin')
     expect(open).toHaveBeenCalledTimes(1)
@@ -427,7 +428,66 @@ describe('standalone browser viewer', () => {
         false
       )
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Execution record' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+    expect(screen.getByTitle('Live project')).toBe(frame)
+    expect(open).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen project interface' }))
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(2))
   })
+  it('deduplicates pending project-tab activation and distinguishes opening from unavailable', async () => {
+    const client = makeClient()
+    vi.mocked(client.context).mockResolvedValue({ ...context, canInteract: true })
+    const open = vi.spyOn(client, 'projectView').mockReturnValue(new Promise(() => undefined))
+    render(<ViewerApp client={client} />)
+    await screen.findByText('actual browser host output')
+    const toggle = screen.getByRole('button', { name: 'Project interface' })
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Opening project interface…')).toBeTruthy()
+    expect(
+      screen.queryByText('The project interface is not available for this run yet.')
+    ).toBeNull()
+  })
+  it('retries a failed project activation from the same project tab', async () => {
+    const client = makeClient()
+    vi.mocked(client.context).mockResolvedValue({ ...context, canInteract: true })
+    const open = vi
+      .spyOn(client, 'projectView')
+      .mockRejectedValueOnce(new Error('service not ready'))
+      .mockResolvedValue(projectAccess)
+    render(<ViewerApp client={client} />)
+    await screen.findByText('actual browser host output')
+    const toggle = screen.getByRole('button', { name: 'Project interface' })
+    fireEvent.click(toggle)
+    await screen.findByText('Could not open the project interface.')
+    fireEvent.click(toggle)
+    await screen.findByTitle('Live project')
+    expect(open).toHaveBeenCalledTimes(2)
+  })
+  it.each(['readonly', 'inspection', 'completed'] as const)(
+    'does not request a live lease from the project tab when %s',
+    async (mode) => {
+      const client = makeClient()
+      vi.mocked(client.context).mockResolvedValue({ ...context, canInteract: mode !== 'readonly' })
+      if (mode === 'completed')
+        vi.mocked(client.history).mockResolvedValue({
+          coverage: 'process-local',
+          truncated: false,
+          snapshots: [
+            { ...snapshot, phase: 'completed', run: { ...snapshot.run!, status: 'completed' } }
+          ]
+        })
+      const open = vi.spyOn(client, 'projectView').mockResolvedValue(projectAccess)
+      render(<ViewerApp client={client} />)
+      await screen.findByText('actual browser host output')
+      if (mode === 'inspection')
+        fireEvent.click(screen.getByRole('button', { name: 'Pause following' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(open).not.toHaveBeenCalled()
+    }
+  )
   it('static HTML retains saved content while removing scripts, external URLs, navigation and forms actions', () => {
     const html = staticHtml(
       '<meta http-equiv="refresh" content="0;url=https://elsewhere.test"><script>steal()</script><iframe src="http://localhost"></iframe><a href="https://example.com" onclick="steal()">Result</a><img src="https://tracker.test/pixel"><form action="http://localhost"><button>submit</button></form><p>Saved result</p>'

@@ -151,7 +151,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       expect(selection?.selectionId).toBe(captured.selectionId)
       expect(selection?.snapshot.run?.logs.stdout.text).toBe('project started')
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
-      await page.getByRole('button', { name: 'Open project interface', exact: true }).click()
+      await page.getByRole('button', { name: 'Project interface', exact: true }).click()
       const projectFrame = page.frameLocator('iframe[title="Interactive project"]')
       await expect(projectFrame.getByRole('heading', { name: 'Interactive project' }))
         .toBeVisible()
@@ -185,6 +185,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       })
       source = {
         ...source,
+        executionContext: { purpose: 'offline-demo', conditionChanges: [] },
         run: {
           ...source.run!,
           text: { ...source.run!.text, stdout: 'project started\nlater output' }
@@ -206,6 +207,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         (await viewers.selection(access.viewerId, { caller }))?.snapshot.run?.logs.stdout.text
       ).toBe('project started')
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
+      await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
       await expect(projectFrame.locator('output')).toHaveText('1')
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       expect(await frame?.evaluate((node) => node.isConnected)).toBe(true)
@@ -229,7 +231,11 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
   async () => {
     const { recordedFixture } =
       await import('../../main/run-observation/recorded-viewer.test-support')
-    const { payload, bytes } = recordedFixture()
+    const { payload: recordedPayload, bytes } = recordedFixture()
+    const payload = {
+      ...recordedPayload,
+      executionContext: { purpose: 'offline-demo' as const, conditionChanges: [] }
+    }
     const caller = createCallerContext({
       clientId: 'archive-browser',
       lifecycleClientId: 'archive-browser',
@@ -301,6 +307,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       })
       const selected = await viewers.recordingSelection(access.viewerId, { caller })
       expect(selected?.record.sourceEvidence.identity.runId).toBe('author-run')
+      expect(selected?.executionContext).toEqual(payload.executionContext)
+      await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
       await page.getByRole('button', { name: 'View files', exact: true }).click()
       await page.getByRole('button', { name: 'project.html', exact: true }).click()
       await expect(
