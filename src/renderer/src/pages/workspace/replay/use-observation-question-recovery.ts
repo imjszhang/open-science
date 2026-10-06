@@ -27,16 +27,22 @@ const stageRecoveredQuestion = (
   useRunObservationQuestionStore.getState().recover(selection, destination, () => {
     const navigation = useNavigationStore.getState()
     const sessionId = useSessionStore.getState().selectedSessionId
+    const selected = useSessionStore.getState().sessions.find((row) => row.id === sessionId)
+    const inlineSource = researchSourceFromSession(selected)
     const research =
-      useResearchWorkspaceStore.getState().draftResearchByProject[destination.projectId]
-    const draftKey =
-      sessionId ?? (research ? researchDraftKey(research) : ordinaryDraftKey(destination.projectId))
+      inlineSource ??
+      (!sessionId
+        ? useResearchWorkspaceStore.getState().draftResearchByProject[destination.projectId]
+        : undefined)
+    const draftKey = research
+      ? researchDraftKey(research)
+      : (sessionId ?? ordinaryDraftKey(destination.projectId))
     return (
       !signal?.aborted &&
       navigation.explicitNavigationRevision === revision &&
       navigation.view === 'workspace' &&
       navigation.activeProjectId === destination.projectId &&
-      sessionId === destination.sessionId &&
+      (inlineSource ? !destination.sessionId : sessionId === destination.sessionId) &&
       draftKey === destination.draftKey
     )
   })

@@ -83,6 +83,7 @@ import { ConversationPanel } from './ConversationPanel'
 import { useWorkspaceSessionDiscussion } from './workspace-session-discussion'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { ordinaryDraftKey, researchDraftKey } from './research-draft-identity'
+import { researchSourceFromSession } from './workspace-discussion-navigation'
 import {
   ensureResearchPreview,
   releaseAutomaticResearchPreview
@@ -213,11 +214,25 @@ const WorkspacePage = ({
   const draftResearch = useResearchWorkspaceStore(
     (state) => state.draftResearchByProject[scopedProjectId]
   )
-  const activeDraftResearch = selectedSessionId ? undefined : draftResearch
+  const selectedSourceSession = useSessionStore((state) => {
+    if (activeProject?.archivedAt !== undefined) return undefined
+    return state.sessions.find(
+      (session) =>
+        session.id === selectedSessionId &&
+        session.projectId === scopedProjectId &&
+        session.archivedAt === undefined &&
+        Boolean(session.packageOrigin || session.importedResearch)
+    )
+  })
+  const inlineResearch = useMemo(
+    () => researchSourceFromSession(selectedSourceSession),
+    [selectedSourceSession]
+  )
+  const activeDraftResearch = inlineResearch ?? (selectedSessionId ? undefined : draftResearch)
   const newConversationDraftKey = ordinaryDraftKey(scopedProjectId)
-  const currentDraftKey =
-    selectedSessionId ??
-    (activeDraftResearch ? researchDraftKey(activeDraftResearch) : newConversationDraftKey)
+  const currentDraftKey = activeDraftResearch
+    ? researchDraftKey(activeDraftResearch)
+    : (selectedSessionId ?? newConversationDraftKey)
   const selectedResearchMembership = useSessionStore(
     (state) =>
       state.sessions.find((session) => session.id === selectedSessionId)?.researchMembership
@@ -269,8 +284,27 @@ const WorkspacePage = ({
       releaseAutomaticResearchPreview(scopedProjectId)
       return
     }
-    if (selectedSessionId && selectedResearchMembership)
+    if (selectedSessionId && selectedResearchMembership) {
       useResearchWorkspaceStore.getState().rememberDiscussion(source, selectedSessionId)
+      // First send selects its new discussion without calling openSession. Persist that
+      // concrete destination so reopening the project restores the conversation just sent.
+      const selected = useSessionStore
+        .getState()
+        .sessions.find(
+          (session) => session.id === selectedSessionId && session.projectId === scopedProjectId
+        )
+      if (
+        selected &&
+        selected.archivedAt === undefined &&
+        !selected.packageOrigin &&
+        !selected.importedResearch
+      )
+        rememberResearchProjectDestination(
+          scopedProjectId,
+          { kind: 'session', sessionId: selectedSessionId },
+          useSessionStore.getState().sessions
+        )
+    }
     ensureResearchPreview(
       {
         projectId: source.sourceProjectId,
@@ -452,16 +486,20 @@ const WorkspacePage = ({
         review.checks.some((check) => check.status === 'warn' || check.status === 'fail')
     )
   })
-  const activeSession = useMemo(
+  const displayedSession = useMemo(
     () =>
       storedActiveSession && hasPersistedActiveFixLoop && !storedActiveSession.fixLoopActive
         ? { ...storedActiveSession, fixLoopActive: true }
         : storedActiveSession,
     [hasPersistedActiveFixLoop, storedActiveSession]
   )
+  // Source transcripts are display-only. Every mutating controller receives the new
+  // discussion draft instead of the imported Session, including model and permission controls.
+  const researchSourceSession = inlineResearch ? displayedSession : undefined
+  const activeSession = researchSourceSession ? undefined : displayedSession
   // Preserve the new composer through its pending-to-durable Session binding. Other
   // selections still remount the panel so local dialogs/details cannot cross Sessions.
-  const panelSessionId = activeSession?.id
+  const panelSessionId = displayedSession?.id
   const [panelIdentity, setPanelIdentity] = useState(() => ({
     projectId: scopedProjectId,
     sessionId: panelSessionId,
@@ -483,7 +521,7 @@ const WorkspacePage = ({
     })
   }
   const isReviewHistoryUnavailable =
-    storedActiveSession !== undefined &&
+    activeSession !== undefined &&
     (persistedReviewSnapshot === undefined || reviewLoadError !== undefined)
   const {
     activeAgentConfiguration,
@@ -495,7 +533,8 @@ const WorkspacePage = ({
   // Starter history is only consumed when no session is active, so this subscription collapses to
   // a stable empty list while a session is selected — background session updates then never
   // re-render the page through it.
-  const hideStarterHistory = activeSession !== undefined || activeProject?.archivedAt !== undefined
+  const hideStarterHistory =
+    displayedSession !== undefined || activeProject?.archivedAt !== undefined
   const starterHistorySessions = useSessionStore(
     useShallow(starterHistorySessionSelector(scopedProjectId, hideStarterHistory))
   )
@@ -639,10 +678,16 @@ const WorkspacePage = ({
     editable: canEditDraft,
     appendText: composer.actions.appendText
   })
-  useWorkspaceSessionDiscussion({ composer, draftKey: currentDraftKey, editable: canEditDraft })
+  const { sourceContextPending, sourceContextError, retrySourceContext } =
+    useWorkspaceSessionDiscussion({
+      composer,
+      draftKey: currentDraftKey,
+      editable: canEditDraft,
+      source: inlineResearch
+    })
   const delegationControl = useWorkspaceSessionDelegationControlOwner({
     activeSession,
-    selectedSessionId,
+    selectedSessionId: researchSourceSession ? undefined : selectedSessionId,
     selectedFrameworkId: selectedAgentFrameworkId,
     frameworks: agentFrameworks,
     setError: setAttachmentError,
@@ -713,7 +758,10 @@ const WorkspacePage = ({
         presentedWaitReason: visibleCredentialRequests.length > 0 ? 'waiting-for-user' : undefined
       })
     : undefined
-  const activeNotebookReference = activeSession ? notebookReferences[activeSession.id] : undefined
+  const displayedNotebookSessionId = displayedSession?.id
+  const activeNotebookReference = displayedNotebookSessionId
+    ? notebookReferences[displayedNotebookSessionId]
+    : undefined
   const activePermissionProfile =
     activeSession?.permissionProfile ?? newConversationPermissionProfile
   const activePermissionProfileState = activeSession
@@ -768,7 +816,7 @@ const WorkspacePage = ({
     agentConfigurationReady: !agentConfigurationUnavailable,
     permissionProfile: activePermissionProfile,
     isReviewing: isReviewBusy,
-    isTurnAdmissionBlocked: isReviewHistoryUnavailable,
+    isTurnAdmissionBlocked: isReviewHistoryUnavailable || sourceContextPending,
     promptInFlightSessionIds,
     sendPreparationInFlightSessionIds,
     saveAsSkillInFlightSessionIds,
@@ -795,7 +843,7 @@ const WorkspacePage = ({
       setPanelIdentity((current) =>
         current.projectId === scopedProjectId &&
         current.generation === panelIdentity.generation &&
-        !current.sessionId
+        (!current.sessionId || current.sessionId === researchSourceSession?.id)
           ? { ...current, sessionId: message.sessionId, pendingMessageId: message.messageId }
           : current
       )
@@ -1066,7 +1114,11 @@ const WorkspacePage = ({
         ...references,
         [notebook.sessionId]: notebook
       }))
-      if (notebook.projectId !== scopedProjectId || notebook.sessionId !== activeSessionId) return
+      if (
+        notebook.projectId !== scopedProjectId ||
+        notebook.sessionId !== displayedNotebookSessionId
+      )
+        return
       cancelPendingRegistration()
       cancelPendingRegistration = registerNotebookWhenProjectActive(notebook)
     })
@@ -1075,7 +1127,7 @@ const WorkspacePage = ({
       removeNotebookAvailableListener()
       cancelPendingRegistration()
     }
-  }, [activeSessionId, scopedProjectId])
+  }, [displayedNotebookSessionId, scopedProjectId])
 
   useEffect(() => {
     return window.api.notebook.onChanged?.(invalidateSessionNotebookCache) ?? (() => undefined)
@@ -1132,18 +1184,18 @@ const WorkspacePage = ({
   // The availability event only fires while the agent is live, so a session opened after relaunch
   // would lose its notebook entry until the next call. Probe persisted run.json on selection to
   // restore the composer entry immediately for any session that has used the notebook before.
-  const activeSessionCwd = activeSession?.cwd
+  const activeSessionCwd = displayedSession?.cwd
   // Notebooks are stored per project id (notebooks/<projectId>/<sessionId>), so the probe must pass
   // the session's project or it would look under the default project name and never find run.json.
-  const activeSessionProjectId = activeSession?.projectId
+  const activeSessionProjectId = displayedSession?.projectId
   useEffect(() => {
-    if (!activeSessionId) return
+    if (!displayedNotebookSessionId) return
 
     let cancelled = false
 
     void window.api.notebook
       .getReference({
-        sessionId: activeSessionId,
+        sessionId: displayedNotebookSessionId,
         workspaceCwd: activeSessionCwd ?? '',
         projectId: activeSessionProjectId
       })
@@ -1152,7 +1204,9 @@ const WorkspacePage = ({
 
         // Never clobber a reference the live availability event may have set in the meantime.
         setNotebookReferences((references) =>
-          references[activeSessionId] ? references : { ...references, [activeSessionId]: reference }
+          references[displayedNotebookSessionId]
+            ? references
+            : { ...references, [displayedNotebookSessionId]: reference }
         )
       })
       .catch((error) => {
@@ -1162,7 +1216,7 @@ const WorkspacePage = ({
     return () => {
       cancelled = true
     }
-  }, [activeSessionId, activeSessionCwd, activeSessionProjectId])
+  }, [displayedNotebookSessionId, activeSessionCwd, activeSessionProjectId])
 
   const resetNewConversationDelegation = delegationControl.resetNewConversation
 
@@ -1274,7 +1328,9 @@ const WorkspacePage = ({
         }
       }
       libraryLoadIntent.current = undefined
-      const draftKey = sessionId ?? (sourceSessionId ? newConversationDraftKey : currentDraftKey)
+      const draftKey =
+        sessionId ??
+        (sourceSessionId && !researchSourceSession ? newConversationDraftKey : currentDraftKey)
       const enqueue = (): void =>
         setPendingLibraryReferences((pending) => ({
           projectId,
@@ -1289,7 +1345,7 @@ const WorkspacePage = ({
       if (sessionId && sessionId !== sourceSessionId) {
         useNavigationStore.getState().openSession(projectId, sessionId, 'user', enqueue)
       } else {
-        if (!sessionId && sourceSessionId) openNewConversation()
+        if (!sessionId && sourceSessionId && !researchSourceSession) openNewConversation()
         enqueue()
       }
     }
@@ -1346,7 +1402,7 @@ const WorkspacePage = ({
     t
   ])
 
-  const activeSessionHasMessages = (activeSession?.messages.length ?? 0) > 0
+  const activeSessionHasMessages = (displayedSession?.messages.length ?? 0) > 0
 
   useEffect(() => {
     const openNewConversationFromShortcut = (event: KeyboardEvent): void => {
@@ -1823,6 +1879,9 @@ const WorkspacePage = ({
                 submissions={conversationSubmissions}
                 view={{
                   activeSession,
+                  researchSourceSession,
+                  researchSourceContextError: sourceContextError,
+                  retryResearchSourceContext: retrySourceContext,
                   composerFocusKey: currentDraftKey,
                   canEditDraft,
                   persistenceBlocked: persistenceBlockedSessionIds.includes(
@@ -2082,7 +2141,7 @@ const WorkspacePage = ({
         isSessionPersistenceReady && activeProjectId
           ? {
               projectId: scopedProjectId,
-              currentSessionId: selectedSessionId ?? undefined,
+              currentSessionId: activeSession?.id,
               canAddToCurrent: canEditDraft && activeSession?.contentLoaded !== false,
               add: addLibraryReferences
             }

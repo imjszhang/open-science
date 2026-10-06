@@ -46,7 +46,10 @@ vi.mock('@/stores/session-store', () => ({
     getState: () => ({
       selectedSessionId: mocks.selectedSessionId,
       sessions: mocks.sessions,
-      clearSelection: mocks.clearSelection
+      clearSelection: mocks.clearSelection,
+      selectSession: (sessionId: string) => {
+        mocks.selectedSessionId = sessionId
+      }
     })
   }
 }))
@@ -209,8 +212,7 @@ describe('direct research discussion navigation', () => {
       expect(mocks.ask).not.toHaveBeenCalled()
       expect(afterNavigate).toHaveBeenCalledWith({
         projectId: 'source-project',
-        sessionId: existing ? 'discussion' : undefined,
-        draftKey: existing ? 'discussion' : researchDraftKey(sourceMembership)
+        draftKey: researchDraftKey(sourceMembership)
       })
       expect(readResearchProjectDestination('source-project')).toEqual({
         kind: 'research',
@@ -224,8 +226,8 @@ describe('direct research discussion navigation', () => {
     const controller = new AbortController()
     const afterNavigate = vi.fn()
     let resume!: () => boolean
-    mocks.openProject.mockImplementation((projectId, _origin, callback, canNavigate) => {
-      resume = () => (canNavigate?.() === false ? false : navigate(projectId, 'recent', callback))
+    mocks.openSession.mockImplementation((projectId, sessionId, _origin, callback, canNavigate) => {
+      resume = () => (canNavigate?.() === false ? false : navigate(projectId, sessionId, callback))
       return false
     })
     await openResearchWorkspace(sourceMembership, { signal: controller.signal, afterNavigate })
@@ -270,7 +272,8 @@ describe('direct research discussion navigation', () => {
     expect(mocks.find).not.toHaveBeenCalled()
   })
 
-  it('reuses an owned durable discussion and opens its source replay', async () => {
+  it('can find an owned durable discussion when asking from outside the source', async () => {
+    mocks.selectedSessionId = undefined
     mocks.find.mockResolvedValue({ sessionId: 'discussion' })
     expect(await openResearchDiscussion(capture)).toBe(true)
     expect(mocks.find).toHaveBeenCalledWith({
@@ -318,7 +321,8 @@ describe('direct research discussion navigation', () => {
     expect(useResearchWorkspaceStore.getState().draftResearchByProject['source-project']).toEqual(
       sourceMembership
     )
-    expect(mocks.openSession).not.toHaveBeenCalled()
+    expect(mocks.selectedSessionId).toBe('source')
+    expect(mocks.sessions).toHaveLength(2)
   })
 
   it('uses the current owned discussion even after its reading binding changes', async () => {
@@ -347,7 +351,7 @@ describe('direct research discussion navigation', () => {
       mocks.draft = { projectId: 'source-project', sourceSessionId: 'source', draftKey: 'ordinary' }
       expect(await openResearchDiscussion(capture)).toBe(true)
       expect(mocks.find).toHaveBeenCalledOnce()
-      expect(mocks.openSession).not.toHaveBeenCalled()
+      expect(mocks.selectedSessionId).toBe('source')
       expect(mocks.ask).toHaveBeenCalledWith(
         capture,
         expect.objectContaining({ draftKey: researchDraftKey(sourceMembership) })
@@ -369,18 +373,20 @@ describe('direct research discussion navigation', () => {
   it('ignores stale or mismatched membership from a lookup result', async () => {
     mocks.sessions[0].researchMembership = { ...sourceMembership, sourceImportId: 'other-import' }
     mocks.find.mockResolvedValue({ sessionId: 'discussion' })
+    mocks.selectedSessionId = undefined
     await openResearchDiscussion(capture)
-    expect(mocks.openSession).not.toHaveBeenCalled()
+    expect(mocks.selectedSessionId).toBe('source')
   })
 
   it.each(['navigation', 'selection', 'unselected', 'abort'])(
     'does not take over after %s changes during lookup',
     async (change) => {
+      mocks.selectedSessionId = 'other'
       const finish = deferredLookup()
       const controller = new AbortController()
       const opening = openResearchDiscussion(capture, controller.signal)
       if (change === 'navigation') mocks.navigation.explicitNavigationRevision += 1
-      if (change === 'selection') mocks.selectedSessionId = 'other'
+      if (change === 'selection') mocks.selectedSessionId = 'another'
       if (change === 'unselected') mocks.selectedSessionId = undefined
       if (change === 'abort') controller.abort()
       finish({ sessionId: 'discussion' })
@@ -390,6 +396,7 @@ describe('direct research discussion navigation', () => {
   )
 
   it('does not replace a failed catalog lookup with an empty conversation', async () => {
+    mocks.selectedSessionId = undefined
     mocks.find.mockRejectedValue(new Error('Local Session catalog unavailable'))
     await expect(openResearchDiscussion(capture)).rejects.toThrow(
       'Local Session catalog unavailable'
@@ -405,58 +412,64 @@ describe('direct research discussion navigation', () => {
     expectNoHandoff()
   })
 
-  it('restores the last visited owned discussion without replacing step references', async () => {
+  it('opens the original research even when a last visited discussion exists', async () => {
     useResearchWorkspaceStore.getState().rememberDiscussion(sourceMembership, 'discussion')
     expect(await openResearchWorkspace(sourceMembership)).toBe(true)
     expect(mocks.openSession).toHaveBeenCalledWith(
       'source-project',
-      'discussion',
+      'source',
       'user',
       expect.any(Function),
       expect.any(Function)
     )
+    expect(mocks.find).not.toHaveBeenCalled()
     expect(mocks.context).not.toHaveBeenCalled()
     expect(mocks.ask).not.toHaveBeenCalled()
     expect(mocks.preview).toHaveBeenCalledOnce()
   })
 
-  it('opens a valid empty archive as a research draft without fabricating recorded evidence', async () => {
-    mocks.context.mockResolvedValue(undefined)
+  it('opens an empty archive as its original record without fabricating evidence', async () => {
     expect(await openResearchWorkspace(sourceMembership)).toBe(true)
     expect(useResearchWorkspaceStore.getState().draftResearchByProject['source-project']).toEqual(
       sourceMembership
     )
-    expect(mocks.selectedSessionId).toBeUndefined()
-    expect(mocks.openProject).toHaveBeenCalledWith(
-      'source-project',
-      'user',
-      expect.any(Function),
-      expect.any(Function)
-    )
+    expect(mocks.selectedSessionId).toBe('source')
     expect(mocks.preview).toHaveBeenCalledWith(
       expect.objectContaining({ sourceSessionId: 'source' })
     )
-    expect(mocks.ask).toHaveBeenCalledExactlyOnceWith(undefined)
+    expect(mocks.ask).not.toHaveBeenCalled()
+    expect(mocks.sessions).toHaveLength(2)
   })
 
-  it('explicit new discussion reuses the source draft and only adds a whole-source reference when unlinked', async () => {
+  it('explicit new discussion returns to the original source and its unsent draft', async () => {
     mocks.selectedSessionId = 'discussion'
     expect(await openResearchWorkspace(sourceMembership, { newDiscussion: true })).toBe(true)
+    expect(mocks.selectedSessionId).toBe('source')
     expect(mocks.find).not.toHaveBeenCalled()
-    expect(mocks.context).toHaveBeenCalledWith('source-project', 'source', undefined)
+    expect(mocks.context).not.toHaveBeenCalled()
+    expect(mocks.ask).not.toHaveBeenCalled()
+    expect(mocks.sessions).toHaveLength(2)
+  })
+
+  it('Ask on the original research stays in its source draft rather than resuming an older discussion', async () => {
+    useResearchWorkspaceStore.getState().rememberDiscussion(sourceMembership, 'discussion')
+    expect(await openResearchDiscussion(capture)).toBe(true)
+    expect(mocks.selectedSessionId).toBe('source')
+    expect(mocks.find).not.toHaveBeenCalled()
     expect(mocks.ask).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: 'session' }),
+      capture,
       expect.objectContaining({
         draftKey: researchDraftKey(sourceMembership),
-        onlyIfUnlinked: true
+        sessionId: undefined
       })
     )
+    expect(mocks.sessions).toHaveLength(2)
   })
 
   it('freezes the selected step before a deferred navigation confirmation', async () => {
     let confirm!: () => void
-    mocks.openProject.mockImplementation((projectId, _origin, callback) => {
-      confirm = () => navigate(projectId, undefined, callback)
+    mocks.openSession.mockImplementation((projectId, sessionId, _origin, callback) => {
+      confirm = () => navigate(projectId, sessionId, callback)
       return true
     })
     const mutable = structuredClone(capture)

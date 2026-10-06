@@ -149,8 +149,8 @@ test('opens imported research, asks about a recorded step and restores the ordin
     .getByRole('button', { name: 'Replay research', exact: true })
     .click()
   const replay = page.getByTestId('replay-panel')
-  // The project entry already opens the source's writable research workspace. Re-entering
-  // the same research must focus its existing draft without duplicating its reference.
+  // The research title opens the original transcript, with a separate unsent question beneath it.
+  // Re-entering the same source must not create a conversation or replace the imported record.
   await expect(replay).toBeVisible()
   await page
     .locator(`[data-research-id="${source.id}"] [data-slot="session-open-button"]`)
@@ -159,10 +159,23 @@ test('opens imported research, asks about a recorded step and restores the ordin
   await expect(page.getByRole('dialog', { name: 'Ask in a conversation' })).toHaveCount(0)
   await expect(replay).toBeVisible()
   const editor = page.getByRole('textbox', { name: 'Ask anything', exact: true })
-  await expect(editor).toBeFocused()
+  await expect(editor).toBeEditable()
+  const sourceHeader = page.getByTestId('research-workspace-header')
+  await expect(sourceHeader).toContainText(source.title)
+  await expect(sourceHeader).toContainText('Original record · Read-only')
   await expect(
-    page.getByRole('heading', { name: `Discussing ${source.title}`, exact: true })
-  ).toBeVisible()
+    page.locator(`[data-research-id="${source.id}"]`).getByRole('button', {
+      name: 'Original record · Read-only',
+      exact: true
+    })
+  ).toHaveCount(0)
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true })
+  await expect(conversation).toContainText('What does the saved experiment show?')
+  await expect(conversation).toContainText('The archived result is forty-two.')
+  await editor.fill('My unsent question stays alongside the original research.')
+  await expect(conversation).toContainText('The archived result is forty-two.')
+  await expect(sourceHeader).toContainText('Original record · Read-only')
+  await editor.clear()
   await expect(page.getByTestId('session-discussion-draft')).toContainText('Entire research')
   await expect(page.getByText('Conversation storage needs attention', { exact: true })).toHaveCount(
     0
@@ -295,6 +308,8 @@ test('opens imported research, asks about a recorded step and restores the ordin
   await expect(discussionBar.getByRole('button', { name: /^Use step / })).toHaveCount(0)
   await expect(editor).toContainText('Explain this saved result.')
   await editor.fill('Explain this saved result for a beginner.')
+  await expect(conversation).toContainText('The archived result is forty-two.')
+  await expect(sourceHeader).toContainText('Original record · Read-only')
   await discussionBar.evaluate((element) => {
     element.style.removeProperty('width')
   })
@@ -337,6 +352,17 @@ test('opens imported research, asks about a recorded step and restores the ordin
   )
   expect(target?.id).toBeTruthy()
   expect(target!.id).not.toBe(source.id)
+  await expect(
+    page.locator(
+      `[data-research-id="${source.id}"] [data-session-id="${target!.id}"] [data-slot="session-open-button"]`
+    )
+  ).toHaveAttribute('aria-current', 'page')
+  await expect(sourceHeader).not.toContainText('Original record · Read-only')
+  const sourceAfterFirstSend = await page.evaluate(
+    (request) => window.api.sessions.loadOne(request),
+    { projectId, sessionId: source.id }
+  )
+  expect(sourceAfterFirstSend).toEqual(before)
   expect(target!.researchMembership).toEqual({
     sourceProjectId: projectId,
     sourceSessionId: source.id,
@@ -374,6 +400,13 @@ test('opens imported research, asks about a recorded step and restores the ordin
     .getByRole('region', { name: 'Projects', exact: true })
     .getByRole('button', { name: 'Replay research', exact: true })
     .click()
+  // Project entry restores the last location, including a discussion created by first send.
+  // This is independent from clicking the research title, which always opens the source.
+  await expect(
+    page.locator(
+      `[data-research-id="${source.id}"] [data-session-id="${target!.id}"] [data-slot="session-open-button"]`
+    )
+  ).toHaveAttribute('aria-current', 'page')
   await page
     .getByRole('region', { name: 'Conversation', exact: true })
     .getByRole('button', { name: 'Show annotation source', exact: true })
@@ -555,8 +588,8 @@ test('opens imported research, asks about a recorded step and restores the ordin
   expect(learning!.runtimeContext!.sessionContext!.bindings[0].positions).toHaveLength(1)
   await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0)
 
-  // Return through the imported source after restart: durable association, not renderer cache,
-  // must bring the reader back to this same discussion without changing the source history.
+  // The research title always returns to the original record, even after discussions exist.
+  // Its saved child explicitly resumes the discussion after restart without changing the source.
   const promptsBeforeReturn = await conversationPrompts()
   page = await app.restart()
   await page
@@ -568,11 +601,20 @@ test('opens imported research, asks about a recorded step and restores the ordin
     .first()
   await sourceRow.click()
   await expect(page.getByRole('dialog', { name: 'Ask in a conversation' })).toHaveCount(0)
-  await expect(
-    page.locator(
-      `[data-session-preview][data-session-id="${target!.id}"] [data-slot="session-open-button"]`
-    )
-  ).toHaveAttribute('aria-current', 'page')
+  await expect(sourceRow).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByTestId('research-workspace-header')).toContainText(
+    'Original record · Read-only'
+  )
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
+    'The archived result is forty-two.'
+  )
+  await expect(page.getByRole('textbox', { name: 'Ask anything', exact: true })).toBeEmpty()
+  const savedDiscussion = page.locator(
+    `[data-research-id="${source.id}"] [data-session-id="${target!.id}"] [data-slot="session-open-button"]`
+  )
+  await expect(savedDiscussion).not.toHaveAttribute('aria-current', 'page')
+  await savedDiscussion.click()
+  await expect(savedDiscussion).toHaveAttribute('aria-current', 'page')
   await expect(page.getByTestId('replay-panel')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
     'I am new to this. Explain the research goal and where to start.'

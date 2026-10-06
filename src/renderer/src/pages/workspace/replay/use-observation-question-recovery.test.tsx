@@ -97,7 +97,7 @@ it('keeps ordinary Sessions on existing navigation and does not expose a foreign
   expect(result.current).toBeUndefined()
 })
 
-it('stages the selected archive only after navigation admits its exact new research draft', async () => {
+it('stages the selected archive into the inline draft while the original record remains selected', async () => {
   useSessionStore.setState({ sessions: [source], selectedSessionId: 'source' })
   const discuss = vi.spyOn(navigation, 'openResearchWorkspace').mockResolvedValue(true)
   const { result } = renderHook(() =>
@@ -109,7 +109,7 @@ it('stages the selected archive only after navigation admits its exact new resea
   const [membership, options] = discuss.mock.calls[0]
   act(() => {
     useNavigationStore.setState({ view: 'workspace', activeProjectId: 'project' })
-    useSessionStore.getState().clearSelection()
+    useSessionStore.getState().selectSession('source')
     useResearchWorkspaceStore.getState().openDraft(membership)
     options!.afterNavigate!({ projectId: 'project', draftKey: researchDraftKey(membership) })
   })

@@ -7382,8 +7382,6 @@
     "Experiment run · Run history": "Exécution de l’expérience · Historique",
     "Experiment run · Live observation": "Exécution de l’expérience · Observation en direct",
     "Session process · Reconstructed from records": "Déroulement de la conversation · Reconstitué à partir des enregistrements",
-    "Continue discussion": "Poursuivre la discussion",
-    "Continue discussing {{title}}": "Poursuivre la discussion sur {{title}}",
     "Could not open this project. Please retry.": "Impossible d’ouvrir ce projet. Veuillez réessayer.",
     "Saved observations from this source. Opening a recording does not run the experiment.": "Observations sauvegardées de cette source. Ouvrir un enregistrement ne lance pas l’expérience.",
     "Run recordings can be opened in the desktop app.": "Les enregistrements d’exécution peuvent être ouverts dans l’application de bureau.",
@@ -7393,6 +7391,8 @@
     "Some source files could not be checked for run recordings.": "Certains fichiers source n’ont pas pu être vérifiés pour les enregistrements d’exécution.",
     "Looking for saved run recordings…": "Recherche d’enregistrements d’exécution sauvegardés…",
     "More source files remain to be checked. This list may be incomplete.": "D’autres fichiers source restent à vérifier. Cette liste peut être incomplète.",
-    "Check more files": "Vérifier d’autres fichiers"
+    "Check more files": "Vérifier d’autres fichiers",
+    "Ask about this research": "Poser une question sur cette recherche",
+    "Sending your question creates a discussion. The original record stays unchanged.": "L’envoi de votre question crée une discussion. L’enregistrement d’origine reste inchangé."
   }
 }

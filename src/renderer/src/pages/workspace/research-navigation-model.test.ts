@@ -97,7 +97,6 @@ describe('research sidebar navigation', () => {
       visibleResearchNavigationRows(model.research, model.ordinary, collapsed)
     expect(rows(new Set()).map((row) => [row.kind, row.session.id])).toEqual([
       ['research', 'source'],
-      ['original', 'source'],
       ['session', 'child'],
       ['session', 'ordinary']
     ])

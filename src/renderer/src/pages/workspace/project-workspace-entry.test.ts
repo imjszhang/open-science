@@ -86,7 +86,7 @@ describe('intentional project entry', () => {
     })
   })
 
-  it('maps a first imported-only project visit to its research workspace', async () => {
+  it('opens the original research entry on a first imported-only project visit', async () => {
     useSessionStore.setState({ sessions: [source] })
     await openProjectWorkspace('project')
     expect(openResearch).toHaveBeenCalledWith(
@@ -97,6 +97,22 @@ describe('intentional project entry', () => {
       })
     )
     expect(useSessionStore.getState().sessions).toEqual([source])
+  })
+
+  it('restores an older research-draft preference through the source entry without a new Session', async () => {
+    const destination = {
+      kind: 'research' as const,
+      sourceSessionId: source.id,
+      sourceImportId: 'import'
+    }
+    rememberResearchProjectDestination('project', destination, [source, ordinary])
+    await openProjectWorkspace('project')
+    expect(openResearch).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSessionId: 'source', sourceImportId: 'import' }),
+      expect.not.objectContaining({ newDiscussion: true })
+    )
+    expect(useSessionStore.getState().sessions).toEqual([source, ordinary])
+    expect(useSessionStore.getState().selectedSessionId).toBeUndefined()
   })
 
   it('preserves exact source Session links and restores an explicitly selected original', async () => {
@@ -200,10 +216,10 @@ describe('intentional project entry', () => {
     expect(openResearch).not.toHaveBeenCalled()
   })
 
-  it('propagates catalog lookup failure instead of opening a blank substitute', async () => {
+  it('propagates research entry failure instead of opening a blank substitute', async () => {
     useSessionStore.setState({ sessions: [source] })
-    openResearch.mockRejectedValue(new Error('catalog unavailable'))
-    await expect(openProjectWorkspace('project')).rejects.toThrow('catalog unavailable')
+    openResearch.mockRejectedValue(new Error('entry unavailable'))
+    await expect(openProjectWorkspace('project')).rejects.toThrow('entry unavailable')
     expect(useNavigationStore.getState().view).toBe('home')
   })
 })

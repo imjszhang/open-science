@@ -5,6 +5,7 @@ import { createI18nTestStub } from '../../../../../test/i18n-test-stub'
 import { useSessionStore, type ChatSession } from '@/stores/session-store'
 import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import { ResearchWorkspaceHeader } from './ResearchWorkspaceHeader'
+import { FOCUS_COMPOSER_EVENT } from './composer-focus-events'
 
 const openResearch = vi.hoisted(() => vi.fn())
 vi.mock('react-i18next', () => createI18nTestStub())
@@ -78,7 +79,9 @@ it('keeps a discussion visible with its saved title when the source is missing',
   expect(screen.getByRole('button', { name: 'New discussion' }).hasAttribute('disabled')).toBe(true)
 })
 
-it('labels original records as read-only and resumes their discussion', async () => {
+it('keeps the original record open and focuses its inline question without navigating', async () => {
+  const focus = vi.fn()
+  window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
   render(
     <ResearchWorkspaceHeader source={source} historical>
       <span>Original title</span>
@@ -86,7 +89,9 @@ it('labels original records as read-only and resumes their discussion', async ()
   )
   expect(screen.getByText('Original record · Read-only')).toBeTruthy()
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Continue discussion' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this research' }))
   })
-  expect(openResearch).toHaveBeenCalledWith(source, { newDiscussion: false })
+  expect(openResearch).not.toHaveBeenCalled()
+  expect(focus).toHaveBeenCalledOnce()
+  window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
 })

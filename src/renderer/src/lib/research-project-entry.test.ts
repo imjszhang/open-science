@@ -46,7 +46,7 @@ describe('research project entry preferences', () => {
     ).toEqual(destination)
   })
 
-  it('distinguishes explicit original record from first-entry research workspace', () => {
+  it('preserves exact original identity for both explicit and first-entry destinations', () => {
     expect(resolveResearchProjectDestination('project', [source], undefined)).toEqual({
       kind: 'research',
       sourceSessionId: 'source',

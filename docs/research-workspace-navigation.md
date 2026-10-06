@@ -1,85 +1,88 @@
 # Research navigation and recorded-run viewing
 
 Implemented locally on top of the stage-three Replay branch, 2026-10-06.
-This change makes imported studies, their discussions and ordinary execution Sessions distinguishable
-without adding a Session type, changing `.science` v1, or changing execution authority.
+The research name is the entry to the original research. Its immutable transcript, right-hand
+Replay and question composer share one view. Saved discussions remain children of the research.
+This change adds no Session type, changes neither `.science` v1 nor execution authority, and keeps
+ordinary conversations on their existing path.
 
 ## Navigation contract
 
+- Clicking a research name always opens its original imported Session, including when saved
+  discussions exist. The header identifies the original record as read-only; there is no separate
+  original-record child or empty discussion landing page. Only saved discussions appear below it.
+- The original transcript remains visible while a question is drafted. The source-specific draft
+  is separate from the displayed Session: all mutating composer and execution controllers receive
+  a new-conversation target, never the imported source. Only sending creates a research-owned
+  discussion and selects it. Clicking the research name returns to the original record.
+- Saved discussion children remain exact Session destinations. New discussion from a discussion
+  returns to the research's unsent question. The original view's Ask action focuses that composer.
 - Projects containing imported research remember the last explicitly opened Session, research
-  workspace or ordinary draft in a local UI preference. Ordinary projects keep their existing
-  most-recent-Session behavior. Background Session updates do not replace that preference.
-- With no valid preference, a recent imported source opens its research workspace; a recent
-  ordinary Session opens that Session. Exact Session links, search results and notifications
-  still open the named Session. Internal `openProject` continuations retain their existing behavior.
-- A research parent resumes its discussion or presents an unsent, source-specific draft.
-  Its visible **Original record · Read-only** child opens the immutable imported Session.
-  Existing discussion children remain exact Session destinations. Creating a draft does not
-  create a Session or send a message.
-- Ordinary Sessions are never reclassified because they read or execute imported materials.
-  Only authoritative import and research membership identities establish the sidebar hierarchy.
+  or ordinary draft in a local preference. Ordinary projects keep their most-recent-Session
+  behavior. Old research-workspace preferences resolve to the original research with its question
+  draft; background Session updates do not replace explicit preferences.
+- Exact Session links, search results and notifications still open the named Session. Ordinary
+  Sessions are never reclassified because they use imported materials. Only authoritative import
+  and research membership identities establish sidebar ownership.
 - Deferred leave confirmations and asynchronous source lookups revalidate navigation intent,
   source import identity and destination availability before changing selection or preferences.
 
 ## Preview source and ownership
 
-The right pane continuously identifies its actual source and its relationship to the current
-conversation. The receiving source is independent of the selected left-hand Session. Source IDs
-and temporary viewer grants are not used as human-facing titles or as inferred local Run authority.
+The right pane identifies its actual source and its relationship to the selected record or
+conversation. The receiving source is independent of a question's submission target. Source IDs
+and temporary viewer grants are not human-facing titles or inferred local Run authority.
 
 Research navigation supplies a default preview only when there is no explicit user reference.
-Explicitly opening a tab or interacting inside it makes it a user reference. Entering a discussion
-does not replace an explicitly selected recording, file or source. Leaving research removes only
-automatic defaults. Invalid sources remain explicit unavailable states rather than being replaced
-with another Session or latest Version.
-
-Replay tool tabs remain runtime-only. The new local preference stores navigation destinations,
-not the complete preview layout, viewer URLs, grants, running processes or credentials.
+Explicitly opening a tab or interacting inside it makes it a user reference. Starting a discussion
+retains an explicitly selected recording, file or source. Leaving research removes only automatic
+defaults. Unavailable sources are disclosed rather than silently replaced with another Version.
+Replay tool tabs remain runtime-only; local navigation preferences never store viewer URLs,
+grants, running processes or credentials.
 
 ## Discovering saved runs
 
-The existing research preview offers **Session process**, **Run recordings**, **Original records**
-and **Source files**. A newly discovered recording list can become the initial view only before
-the user has interacted; delayed discovery must not interrupt playback, seeking, reading or scrolling.
-The imported Notebook also links to its saved recordings instead of trying to observe an author's Run.
+The research preview offers Session process, Run recordings, Original records and Source files.
+A newly discovered recording list becomes the initial view only before interaction; delayed
+results do not interrupt playback, seeking, reading or scrolling. The imported Notebook links
+to saved recordings instead of trying to observe an author's Run.
 
 Discovery reuses the source-scoped Replay Artifact catalog. It reads exact receiving Versions in
-pages of at most 32 candidates, two 4 KB previews concurrently. Conflicting or out-of-scope identities
-are rejected. Matching content is a discovery hint only; the existing main-process reader validates
-the full archive and media when opened. Multiple records and Versions are listed separately.
-Missing files, incomplete scans and unsupported hosts are disclosed, with retry/continuation actions.
-Viewing a recording never starts an experiment. Capture gaps and missing images retain their existing
-truthful presentation.
+pages of at most 32 candidates, with two concurrent 4 KB previews. Conflicting and out-of-scope
+identities are rejected. Viewer targets explicitly contain only the four receiving identity
+fields: presentation fields such as title and fingerprint never cross the strict IPC boundary.
+Matching content is a discovery hint; main validates the full archive and media on open. Multiple
+recordings and Versions remain separate. Missing files, incomplete scans and unsupported hosts
+have explicit states and retry/continuation actions. Viewing never starts an experiment.
 
 ## Asking about a step
 
-Recorded evidence can enter a writable receiving-project draft before it has a Session ID.
-The destination consists of project, draft identity and optional Session identity. Live observation
-still requires the exact execution Session. A readonly imported source offers an explicit discussion
-recovery action that retains the frozen selection and keeps the same archive Viewer open.
+The inline question uses the existing source-specific draft key and research membership. A whole
+research reference is prepared without navigating or replacing a restored step annotation.
+Preparation and persistence failures block Send and offer Retry; a valid metadata-only research
+may have no reconstructable replay context. Original history stays readable during preparation.
 
-The composer owns appending through `appendText(draftKey, text)`. It verifies the active draft and
-appends to its current document reference after draft restoration; a stale render cannot overwrite
-the destination's saved text. Delivery acknowledges only successful composer acceptance. Navigation
-changes, cancelled recovery and closed viewers invalidate pending handoffs. No message is sent.
+Recorded evidence can enter this draft before it has a Session ID. The destination contains
+project, draft identity and optional writable Session identity. Live observation still requires
+the exact execution Session. Explicit recovery from a different destination preserves the frozen
+selection and the open archive.
+
+The composer owns `appendText(draftKey, text)`: it verifies the draft and appends to its current
+restored document. A stale render cannot overwrite saved text. Delivery acknowledges only actual
+acceptance. Navigation, cancelled recovery and closed viewers invalidate pending handoffs.
+No Ask action sends a message. A first Send uses the research membership and source context to
+create a discussion; it cannot append to or change the imported Session.
 
 ## Validation and installed acceptance
 
-The source checks include exact routing, cancellation and deferred navigation, ordinary/draft
-independence, imported identity isolation, archive discovery limits and stale results, source labels,
-recorded-step recovery and a composed draft-restoration regression. The broader workspace run passed
-46 files / 1440 tests, with the five opt-in desktop embedding tests skipped in that invocation.
-The separately enabled fresh-viewer Electron run passed all five scenarios, including the actual
-source bar, real divider, small viewport, foreground capture, resizing and visible-notice rejection.
-The eight-locale guard passed 777 checks; module registration guards passed 44 checks.
-The nine desktop navigation/replay/project-switching journeys passed across the initial run and
-targeted reruns: two assertions were updated for explicitly retained previews, and re-entering
-an already-linked research draft exposed a focus bug that was fixed without changing its reference.
-Node, sandbox and Web type checks, changed-file lint and module ownership checks also passed.
+Automated coverage includes source entry and exact navigation, original transcript visibility,
+source/draft isolation, first-send membership and immutable source preservation, cancellation,
+stale handoffs, receiving identity checks, saved recording discovery, source labels and preview
+retention. Eight-locale guards, module registration checks, types and changed-file lint apply.
+Desktop journeys cover research-name navigation both before and after discussions and restart.
 
-Before delivery, build the exact reviewed commit through the independent Test maintenance tool,
-preserving its configuration/data and pre-install backup. Verify the existing live-07 receiving
-research (#84) and ordinary execution Session (#83): saved recording discovery, image readback,
-exact-step question into an unsent draft, source labels and ordinary-session navigation. Record
-the installed version and results in the Test release's acceptance receipt. Existing experiment
-receipts remain immutable; UI acceptance does not count as another scientific experiment.
+Build reviewed commits with the independent Test maintenance tool, retaining its data and backup.
+Use the existing live-07 receiving research (#84) and ordinary execution (#83) to verify source
+entry, inline questions, source read-only actions, saved-image viewing and exact-step Ask. Record
+the installed commit, version and results in that release's acceptance receipt. UI acceptance
+must not be represented as another scientific experiment.

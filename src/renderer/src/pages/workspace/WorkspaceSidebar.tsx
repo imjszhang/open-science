@@ -510,7 +510,7 @@ type SessionRowProps = {
   actions: SessionRowCallbacks
   researchToggle?: {
     expanded: boolean
-    onToggle: () => void
+    onToggle?: () => void
     activityStatus?: SessionStatus
   }
   onOpenResearch?: () => void
@@ -613,12 +613,12 @@ const SessionRow = memo(function SessionRow({
     <button
       type="button"
       data-slot="session-open-button"
-      title={researchToggle ? t('Continue discussion') : imported ? t('Read-only') : undefined}
+      title={
+        researchToggle ? t('Original record · Read-only') : imported ? t('Read-only') : undefined
+      }
       className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left after:absolute after:inset-0 after:rounded-[inherit]"
       aria-current={isActive ? 'page' : undefined}
-      aria-label={
-        onOpenResearch ? t('Continue discussing {{title}}', { title: session.title }) : undefined
-      }
+      aria-label={onOpenResearch ? session.title : undefined}
       aria-keyshortcuts={
         [
           shortcutNumber ? `${isMac ? 'Meta' : 'Control'}+${shortcutNumber}` : undefined,
@@ -709,7 +709,7 @@ const SessionRow = memo(function SessionRow({
         title={mobileMode ? session.title : undefined}
       >
         <div className="flex w-full min-w-0 items-center">
-          {researchToggle ? (
+          {researchToggle?.onToggle ? (
             <button
               type="button"
               className="relative z-[2] -ml-1 mr-1 grid size-5 shrink-0 place-items-center rounded hover:bg-bg-400"
@@ -879,7 +879,9 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
       discussionStatuses?.find((status) => status === 'error') ??
       'idle'
     const sourceActive = Boolean(
-      group && !activeSessionId && sameResearch(props.activeDraftResearch, group.source)
+      group &&
+      (activeSessionId === group.session.id ||
+        (!activeSessionId && sameResearch(props.activeDraftResearch, group.source)))
     )
     return (
       <SessionRow
@@ -914,7 +916,10 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
           group
             ? {
                 expanded: !collapsedResearch.has(group.key),
-                onToggle: () => props.onToggleResearch?.(group.key),
+                onToggle:
+                  group.discussions.length > 0
+                    ? () => props.onToggleResearch?.(group.key)
+                    : undefined,
                 activityStatus: researchActivity
               }
             : undefined
@@ -1414,49 +1419,12 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
                     {researchGroups.map((group) => (
                       <div key={group.key} data-research-id={group.session.id} className="mb-1">
                         {renderSession(group.session, 'Research', group)}
-                        {!collapsedResearch.has(group.key) ? (
+                        {group.discussions.length > 0 && !collapsedResearch.has(group.key) ? (
                           <div
                             className="ml-5 border-l border-border-300/30 pl-1"
                             data-research-discussions={group.session.id}
                           >
-                            <button
-                              type="button"
-                              className={cn(
-                                'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-bg-300 hover:text-text-000',
-                                activeSessionId === group.session.id && 'bg-bg-300 text-text-000'
-                              )}
-                              aria-current={
-                                activeSessionId === group.session.id ? 'page' : undefined
-                              }
-                              aria-keyshortcuts={
-                                shortcutNumberByRow.has(`original:${group.session.id}`)
-                                  ? `${isMac ? 'Meta' : 'Control'}+${shortcutNumberByRow.get(`original:${group.session.id}`)}`
-                                  : undefined
-                              }
-                              onClick={() => props.onOpenSession(group.session.id)}
-                            >
-                              <Lock className="size-3.5 shrink-0" aria-hidden="true" />
-                              <span className="min-w-0 flex-1 truncate">
-                                {t('Original record · Read-only')}
-                              </span>
-                              {showSessionShortcuts &&
-                              shortcutNumberByRow.has(`original:${group.session.id}`) ? (
-                                <kbd aria-hidden="true" className="shrink-0 font-sans text-[11px]">
-                                  {isMac ? '⌘' : 'Ctrl+'}
-                                  {shortcutNumberByRow.get(`original:${group.session.id}`)}
-                                </kbd>
-                              ) : null}
-                            </button>
                             {group.discussions.map((session) => renderSession(session, 'Research'))}
-                            <button
-                              type="button"
-                              className="mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-bg-300 hover:text-text-000 disabled:opacity-50"
-                              disabled={!canCreateConversation}
-                              onClick={() => props.onOpenResearch?.(group.source, true)}
-                            >
-                              <Plus className="size-3.5" aria-hidden="true" />
-                              {t('New discussion')}
-                            </button>
                           </div>
                         ) : null}
                       </div>

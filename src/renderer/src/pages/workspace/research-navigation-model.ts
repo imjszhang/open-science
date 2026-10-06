@@ -48,7 +48,6 @@ export const buildResearchNavigation = (
 
 export type ResearchNavigationRow =
   | { kind: 'research'; session: ChatSession; source: ResearchMembership }
-  | { kind: 'original'; session: ChatSession }
   | { kind: 'session'; session: ChatSession }
 
 // Rendering and numbered shortcuts consume the same sequence, including collapsed groups.
@@ -61,10 +60,7 @@ export const visibleResearchNavigationRows = (
     { kind: 'research', session: group.session, source: group.source },
     ...(collapsed.has(group.key)
       ? []
-      : [
-          { kind: 'original' as const, session: group.session },
-          ...group.discussions.map((session) => ({ kind: 'session' as const, session }))
-        ])
+      : group.discussions.map((session) => ({ kind: 'session' as const, session })))
   ]),
   ...ordinary.map((session) => ({ kind: 'session' as const, session }))
 ]

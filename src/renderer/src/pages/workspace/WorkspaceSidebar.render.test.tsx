@@ -504,13 +504,17 @@ describe('WorkspaceSidebar accessible render', () => {
         )
       }
       await navigateSecond()
-      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('source-a')
-      const original = [...group.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-        button.textContent?.includes('Original record · Read-only')
+      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('child-a')
+      expect(group.textContent).not.toContain('Original record · Read-only')
+      expect(group.textContent).not.toContain('New discussion')
+      const childButton = group.querySelector(
+        '[data-session-id="child-a"] [data-slot="session-open-button"]'
       )!
-      expect(original.getAttribute('aria-keyshortcuts')).toContain('+2')
-      await act(async () => original.click())
-      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('source-a')
+      expect(childButton.getAttribute('aria-keyshortcuts')).toContain('+2')
+      await sidebar.selectSession('source-a')
+      expect(
+        group.querySelector('[data-session-id="source-a"] [aria-current="page"]')
+      ).not.toBeNull()
       const collapse = group.querySelector<HTMLButtonElement>('[aria-label="Collapse research"]')!
       await act(async () => collapse.click())
       expect(group.querySelector('[data-session-id="child-a"]')).toBeNull()
@@ -535,7 +539,7 @@ describe('WorkspaceSidebar accessible render', () => {
   })
 
   it.each([true, false])(
-    'identifies imported research without labelling its writable workspace as locked (details loaded: %s)',
+    'identifies imported research as the original record without a second destination (details loaded: %s)',
     async (loaded) => {
       const html = await renderSidebar([
         createSession({
@@ -563,7 +567,12 @@ describe('WorkspaceSidebar accessible render', () => {
       expect(icon).toBeNull()
       expect(
         imported?.querySelector('[data-slot="session-open-button"]')?.getAttribute('title')
-      ).toBe('Continue discussion')
+      ).toBe('Original record · Read-only')
+      expect(imported?.querySelector('[aria-label="Collapse research"]')).toBeNull()
+      expect(container.querySelector('[data-research-discussions]')).toBeNull()
+      expect(
+        imported?.querySelector('[data-slot="session-open-button"]')?.getAttribute('aria-current')
+      ).toBe('page')
       expect(container.querySelector('[data-session-id="local"] [role="img"]')).toBeNull()
     }
   )

@@ -7052,8 +7052,6 @@
     "Experiment run · Run history": "실험 실행 · 실행 이력",
     "Experiment run · Live observation": "실험 실행 · 실시간 관찰",
     "Session process · Reconstructed from records": "세션 프로세스 · 기록에서 재구성",
-    "Continue discussion": "논의 계속하기",
-    "Continue discussing {{title}}": "{{title}} 논의 계속하기",
     "Could not open this project. Please retry.": "이 프로젝트를 열 수 없습니다. 다시 시도해 주세요.",
     "Saved observations from this source. Opening a recording does not run the experiment.": "이 출처에 저장된 관찰 기록입니다. 기록을 열어도 실험이 실행되지 않습니다.",
     "Run recordings can be opened in the desktop app.": "데스크톱 앱에서 실행 기록을 열 수 있습니다.",
@@ -7063,6 +7061,8 @@
     "Some source files could not be checked for run recordings.": "일부 원본 파일에서 실행 기록을 확인하지 못했습니다.",
     "Looking for saved run recordings…": "저장된 실행 기록 검색 중…",
     "More source files remain to be checked. This list may be incomplete.": "아직 확인하지 않은 원본 파일이 있습니다. 이 목록이 불완전할 수 있습니다.",
-    "Check more files": "더 많은 파일 확인"
+    "Check more files": "더 많은 파일 확인",
+    "Ask about this research": "이 연구에 대해 질문하기",
+    "Sending your question creates a discussion. The original record stays unchanged.": "질문을 보내면 토론이 생성됩니다. 원본 기록은 그대로 유지됩니다."
   }
 }
