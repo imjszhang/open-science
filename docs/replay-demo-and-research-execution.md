@@ -50,8 +50,9 @@ are untrusted data, and confer no execution or network authority.
 - [x] Installed Test-client verification, including visible Replay states, project interaction,
       public profile configuration and preserved ordinary-session navigation. Production installation
       and original input packages must remain unchanged. No upstream submission is included.
-- [ ] Installed private-credential entry and operating-system credential access acceptance.
-      Native profile/store/lease tests do not substitute for this desktop interaction.
+- [x] Installed private-field entry, OS-encrypted persistence, restart readback and exclusion from
+      SDK responses/package export, using synthetic non-service values. Remote authentication and
+      a newly locked-vault authorization prompt are not established by this check.
 
 ## Scope and remaining acceptance conditions
 
@@ -264,8 +265,8 @@ previous SHA-256 hashes after installation.
 - Starting a demo on build `9442595c9` no longer produces the unrelated external-Session creation
   notice. The backing Session remains discoverable through its explicit management action.
 - An external configuration request opened the local desktop form. Saving public configuration
-  returned a ready profile ID without starting an experiment. Private credential entry and the
-  operating-system credential dialog were not exercised in this UI check.
+  returned a ready profile ID without starting an experiment. A subsequent synthetic private-field
+  acceptance, described below, exercised the installed encrypted store without a provider request.
 
 The long-log defect was reproduced on build `9442595c9`: auto-follow scrolled the view controls out
 of the visible region, and revealing them could enter inspection before a click. Build `2cf23e346`
@@ -275,8 +276,31 @@ switches, manual upward scrolling entering inspection, and **Back to live** rest
 project page. A project screenshot was captured for subsequent historical viewing.
 
 No installed-client check made a paid provider request. The final application source is `2cf23e346`;
-later lease-count assertions and this ledger change only tests/documentation. Installed private
-credential entry and real provider acceptance remain separate unchecked items.
+later lease-count assertions and this ledger change only tests/documentation. Real provider
+acceptance remains unchecked.
+
+The private-field acceptance is recorded under
+`tuanzi-v056-live-reproduction-20261007/private-fields-ui-01/`. It imported the pending live
+materials into an explicitly labelled configuration-only project and created an empty ordinary
+Session. It did not read the user's `.env`, prepare an environment or request execution.
+
+- The trusted desktop form rejected missing required fields and URL-shaped service hostnames.
+  Both private inputs stayed masked. Two explicitly synthetic, invalid service values were saved;
+  service host authorization remained empty.
+- Both stored references use the `enc:` OS-encryption path. Neither placeholder appeared in the
+  profile document as plaintext. After a normal application quit/relaunch, preflight decrypted the
+  configured slots successfully and returned `ready` with `remoteServicesVerified: false`.
+- Reopening the form showed empty private inputs with **Already configured** placeholders.
+  Saving without replacing those inputs retained the same profile and configured slots. The SDK
+  exposed no private values or encrypted references. The ordinary Session remained empty and had
+  zero output Artifacts.
+- Export through the installed native owner produced `configured-source.science` (SHA-256
+  `fa94d30768e99fd68a121aa1282e0d8f2f902286a4cdd7fd14d29a48ed4039f2`). Checking its 53 uncompressed
+  archive files found neither the synthetic private values nor their encrypted references.
+
+The existing Test vault was already unlocked and no new system authorization prompt appeared.
+This proves installed encrypted persistence/readback on that machine; it does not prove a remote
+credential is valid or replace the separate blocked-vault recovery tests.
 
 ## Remaining verification boundaries
 
