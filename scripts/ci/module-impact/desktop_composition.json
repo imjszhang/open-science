@@ -1120,6 +1120,7 @@
       "src/renderer/src/pages/workspace/ConversationExportDialog.interaction.test.tsx",
       "src/renderer/src/pages/workspace/ManagedVersionDiffContent.fallback.test.tsx",
       "src/renderer/src/pages/workspace/ManagedVersionDiffContent.test.tsx",
+      "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
       "src/renderer/src/pages/workspace/WorkspaceElicitationCard.interaction.test.tsx",
       "src/renderer/src/pages/workspace/artifact-publication-preview.integration.test.tsx",
       "src/renderer/src/pages/workspace/managed-version-diff-presentation.test.ts",

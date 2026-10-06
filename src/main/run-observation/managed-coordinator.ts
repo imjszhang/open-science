@@ -8,6 +8,7 @@ import {
 } from '../../shared/managed-execution'
 import { runObservationTargetSchema, type RunObservationTarget } from '../../shared/run-observation'
 import type { RunObservationArchiveMedia } from '../../shared/run-observation-archive'
+import type { ArtifactVersionFile } from '../../shared/artifact-provenance'
 import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
 import type { SessionOperationContext } from '../notebook/session-operation-owner'
 import {
@@ -61,7 +62,7 @@ type Context = Pick<
   'projectId' | 'sessionId' | 'provenanceContext' | 'saveAuxiliaryOutput'
 >
 type Artifacts = Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'> &
-  Partial<Pick<ArtifactProvenanceRepository, 'replayVersion'>>
+  Partial<Pick<ArtifactProvenanceRepository, 'replayVersion' | 'readPublishedVersionForWrite'>>
 export type ManagedObservationBegin = {
   result: ManagedObservationResult
   handle?: RunObservationRecordingHandle
@@ -310,7 +311,10 @@ export class ManagedRunObservationCoordinator {
             artifactId: artifact.artifactId,
             versionId: artifact.versionId
           }
-          await this.verify(target, writtenReference, false)
+          // The ordinary turn publisher has not finalized this Version yet. Its finalized-only
+          // descriptor reader cannot prove a pending write; retain the exact Main write receipt
+          // now and independently verify publication after the original turn ends.
+          this.assertWrittenReference(target, writtenReference, artifact)
           await this.remember(record, writtenReference)
           return this.publication(record, true)
         } catch {
@@ -348,8 +352,37 @@ export class ManagedRunObservationCoordinator {
     return this.exclusive(target, async () => {
       const record = await this.read(target)
       const recorder = this.dependencies.recorder()
-      if (!record?.reference || !recorder) return record?.result
+      if (!record || !recorder) return record?.result
       try {
+        if (!record.reference) {
+          const saved = await recorder.load(target)
+          if (!saved?.archive || !this.dependencies.artifacts.readPublishedVersionForWrite)
+            return record.result
+          const content = JSON.stringify(saved.archive)
+          const expected = {
+            filename: `replay-${record.recordingId}.json`,
+            checksum: hash(content),
+            sizeBytes: Buffer.byteLength(content)
+          }
+          for (const attempt of record.attempts) {
+            this.assertAttempt(attempt, record, expected)
+            // Unlike replayVersion, this reader never recovers staged writes or repairs routes.
+            const artifact = await this.dependencies.artifacts.readPublishedVersionForWrite(
+              attempt.request
+            )
+            if (!artifact) continue
+            const reference = {
+              ...expected,
+              artifactId: artifact.artifactId,
+              versionId: artifact.versionId
+            }
+            this.assertWrittenReference(target, reference, artifact)
+            await this.verify(target, reference, true)
+            await this.remember(record, reference)
+            break
+          }
+        }
+        if (!record.reference) return record.result
         await this.verify(target, record.reference, true)
         const { artifactId, versionId, checksum, sizeBytes } = record.reference
         const publication = await recorder.markPublished(target, {
@@ -397,7 +430,7 @@ export class ManagedRunObservationCoordinator {
         // A publication hook may run inside saveOutput. Do not wait on the operation whose
         // writer is awaiting that hook; the durable receipt will be checked on the next hint.
         if (
-          record.reference &&
+          (record.reference || record.attempts.length > 0) &&
           record.result.status !== 'published' &&
           !this.operations.has(record.recordingId)
         )
@@ -467,6 +500,26 @@ export class ManagedRunObservationCoordinator {
       (requirePublished && (version.state !== 'finalized' || !version.isPublished))
     )
       throw new Error('Original capture Version is unavailable or awaiting publication.')
+  }
+  private assertWrittenReference(
+    target: RunObservationTarget,
+    reference: Reference,
+    artifact: ArtifactVersionFile
+  ): void {
+    referenceSchema.parse(reference)
+    if (
+      artifact.projectId !== target.projectId ||
+      artifact.sessionId !== target.sessionId ||
+      !artifact.artifactId ||
+      artifact.artifactId !== reference.artifactId ||
+      artifact.versionId !== reference.versionId ||
+      artifact.name !== reference.filename ||
+      artifact.mimeType !== 'application/json' ||
+      artifact.checksum !== reference.checksum ||
+      artifact.size !== reference.sizeBytes ||
+      artifact.producerRunId
+    )
+      throw new Error('Capture save receipt differs from its exact Main write.')
   }
   private assertContext(
     target: RunObservationTarget,

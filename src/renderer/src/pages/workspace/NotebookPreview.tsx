@@ -1115,7 +1115,9 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
                 run={run}
                 observationTarget={
                   !document.documentElement.hasAttribute(WEB_CALLER_LOCATION_ATTRIBUTE) &&
-                  run.submissionIdentity?.startsWith('managed-') &&
+                  // Public Run DTOs omit the private submission identity. The retained invocation
+                  // identifies managed execution; Main still authorizes the exact Run on opening.
+                  run.executionInvocationId?.startsWith('managed-') &&
                   session &&
                   !session.packageOrigin &&
                   !session.importedResearch

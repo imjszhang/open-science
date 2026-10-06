@@ -346,6 +346,7 @@ async function setup(): Promise<{
         versionId,
         versionNumber: 1,
         name: output.filename,
+        mimeType: output.contentType,
         checksum: sha(bytes),
         size: bytes.length,
         createdAt: new Date(0).toISOString(),

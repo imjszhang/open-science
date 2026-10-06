@@ -881,6 +881,41 @@ class ArtifactProvenanceRepository {
     )
   }
 
+  /** Read an already published result of an exact Main-issued write without recovering writes
+   * or changing compatibility routes. Safe for status reconciliation after a lost save receipt. */
+  async readPublishedVersionForWrite(
+    request: ReplayArtifactVersionRequest
+  ): Promise<ArtifactVersionFile | undefined> {
+    const projectId = assertSafeSegment(request.projectId, 'project id')
+    const appSessionId = assertSafeSegment(request.appSessionId, 'session id')
+    assertSafeSegment(request.artifactStorageSessionId, 'artifact storage session id')
+    const artifactRunId = assertSafeSegment(request.artifactRunId, 'artifact run id')
+    const writeOperationId = assertSafeSegment(request.writeOperationId, 'write operation id')
+    const normalizedFilename = normalizeFilename(request.filename)
+    const client = await this.options.getClient()
+    const existing = await client.artifactVersion.findUnique({
+      where: { writeOperationId },
+      include: { artifact: true }
+    })
+    if (!existing || existing.state !== 'finalized' || existing.managedVisibleAt === null)
+      return undefined
+    const version = requireAgentArtifactVersion(existing)
+    const producerMatches =
+      request.producerRunId !== undefined
+        ? (version.producerRunId ?? undefined) === request.producerRunId
+        : version.producerRunId === null || hasServerInferredProducer(version.evidenceJson)
+    if (
+      version.artifact.projectId !== projectId ||
+      version.artifact.sessionId !== appSessionId ||
+      version.artifactRunId !== artifactRunId ||
+      version.artifact.normalizedFilename !== normalizedFilename ||
+      (version.contentType ?? undefined) !== request.contentType ||
+      !producerMatches
+    )
+      throw new Error('Published Artifact write does not match its original request.')
+    return this.toArtifactVersionFile(version, projectId, appSessionId)
+  }
+
   private replayRoutingPublisher(
     projectId: string,
     artifactStorageSessionId: string,

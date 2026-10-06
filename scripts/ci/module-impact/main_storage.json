@@ -673,6 +673,7 @@
       "src/renderer/src/pages/settings/SpecialistEditor.persistence.render.test.tsx",
       "src/renderer/src/pages/workspace/ArtifactProvenancePanel.render.test.tsx",
       "src/renderer/src/pages/workspace/ConversationExportDialog.interaction.test.tsx",
+      "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
       "src/renderer/src/pages/workspace/artifact-publication-preview.integration.test.tsx",
       "src/renderer/src/pages/workspace/previews/preview-pagination-contract.test.tsx",
       "src/renderer/src/stores/locale-preference-recovery.render.test.tsx",

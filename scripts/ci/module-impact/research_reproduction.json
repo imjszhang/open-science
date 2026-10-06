@@ -27,6 +27,7 @@
     ],
     "contract": [],
     "consumer": [
+      "src/main/run-observation/managed-coordinator.test.ts",
       "src/main/session-package/research-reproduction.integration.test.ts",
       "src/main/composition/managed-execution.integration.test.ts",
       "src/main/index-fatal-errors.test.ts",

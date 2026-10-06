@@ -154,7 +154,14 @@ it.skipIf(!enabled)(
         document.body.append(cover)
       })
       await expect(capture()).rejects.toThrow()
-      await frame.evaluate(() => document.getElementById('cover')!.remove())
+      await frame.evaluate(async () => {
+        document.getElementById('cover')!.remove()
+        // DOM removal precedes compositor submission. Let the actual frame paint again
+        // before asserting restored pixels; capture must still reject the overlays above.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+      })
     }
     expect(await capture()).toEqual(observed)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide())

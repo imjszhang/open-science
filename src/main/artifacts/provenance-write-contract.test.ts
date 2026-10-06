@@ -73,6 +73,7 @@ const PUBLIC_METHODS = [
   'releaseRunWriteReservations',
   'releaseAllWriteReservations',
   'replayVersion',
+  'readPublishedVersionForWrite',
   'validateFinalizationOwnership',
   'finalizeRun',
   'activateFinalizedRun',

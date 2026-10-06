@@ -212,3 +212,51 @@ Remaining delivery gates are exact-commit Test package/installation,
 the current Codex and Test import/run/view/question/capture/export/reimport journey using an actual
 bounded offline Tuanzi engineering run, production foreground capture after unlock, and a clean
 locally committed delivery checkout. Preserve existing evidence, Test data and the formal app.
+
+## First installed acceptance, 2026-10-06
+
+The independent Test client was built and installed from
+`c93b4a48813ecc3cd7f935e966189e34a8e80911` as `0.35.0-test.c93b4a48813e.2`.
+Its application checksum and packaged viewer resources were verified; the existing Test state
+was backed up before installation. The formal application and its data were not changed.
+
+The strict Electron foreground fixture now passes with `productionForegroundVerified: true`.
+It verifies actual 125% zoom/Retina pixels and rejects obscured or hidden frames. Its fixture
+waits for the renderer to paint after removing the test overlay; the production constraints and
+pixel assertions are unchanged. This fixture is not a Tuanzi screenshot or experiment artifact.
+
+Actual installed attempt `20261006-live-01` imported the prepared source package into a fresh
+project and normal Session #65, then ran one bounded offline engineering case. Current Codex
+displayed the real Tuanzi interface before and after its four actions with zero external requests.
+Selecting/copying a frozen observation, returning to live, and explicit missing historical images
+were verified through the actual browser UI. The Run completed, but full acceptance did not:
+
+- The Test Notebook hid its Observe button because it depended on private `submissionIdentity`,
+  which the real public Run projection removes. The narrow correction uses the existing public
+  managed `executionInvocationId`; Main still authorizes the exact Run. Regression coverage now
+  crosses the real public DTO and full Notebook renderer instead of relying on private fixtures.
+- Persistence classified the provider-free Codex operation as a restarted Session while its Main
+  operation lease was still active. The correction makes that exact project/session lease visible
+  to persistence without inventing a provider session or weakening real crash recovery.
+- The ordinary Artifact publisher finalized the Replay file, but its observation coordinator had
+  attempted finalized-Version verification before the turn was published. It retained an original
+  write attempt without a save reference and reported `saving` after the file existed. The
+  correction retains the exact Main save receipt and reconciles already published original writes
+  without executing the experiment or initiating another Artifact write.
+
+The helper stopped at the archive status assertion before result export/import. Its existing
+Run, output Versions, retained environment and evidence directory remain available:
+`/Users/jszhang/github/projects/tuanzi-gs-research/tuanzi-v056-replay-live-stage3/installed-20261006-live-01`.
+No actual Tuanzi product screenshot was captured. The acceptance helper now distinguishes genuine
+image captures from ordinary output-file references in archive media; the latter do not satisfy
+the screenshot requirement. A separate recovery-only helper will verify the existing result after
+the fixed Test upgrade. Final delivery still requires an explicitly identified acceptance attempt
+that passes the real Test capture/draft flow and the recorded package round trip.
+
+The narrow fixes passed 84 Notebook/public-projection/action tests, 236 operation-liveness tests,
+64 observation/service tests, 32 publication/contract checks and 74 consumer/architecture checks.
+The real publication tests cover both an ordinary pending save receipt and a lost response followed
+by service/recorder restart. Status reconciliation recovers the same published Version without
+calling the mutable write-replay path or increasing the Artifact count. Relevant Node/Sandbox/Web
+type checks and changed-file lint passed; no new renderer strings or package-format changes were
+introduced by these corrections.

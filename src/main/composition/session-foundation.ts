@@ -74,6 +74,7 @@ export async function composeSessionFoundation({
   }
   const sessionRepository = createDefaultSessionRepository(
     (projectId, sessionId) =>
+      (runtimeRef.current?.hasActiveSessionOperation(projectId, sessionId) ?? false) ||
       (runtimeRef.current?.getActivePromptSessions() ?? []).some(
         (session) => session.projectId === projectId && session.sessionId === sessionId
       ),

@@ -930,6 +930,7 @@
       "src/renderer/src/pages/literature/detail/LiteratureMetadataEditor.test.tsx",
       "src/renderer/src/pages/onboarding/OnboardingWizard.regressions.test.tsx",
       "src/renderer/src/pages/workspace/ArtifactProvenancePanel.render.test.tsx",
+      "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
       "src/renderer/src/pages/workspace/artifact-publication-preview.integration.test.tsx",
       "src/renderer/src/pages/workspace/previews/preview-pagination-contract.test.tsx",
       "src/renderer/src/stores/locale-preference-recovery.render.test.tsx",

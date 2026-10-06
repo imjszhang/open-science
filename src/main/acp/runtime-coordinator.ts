@@ -182,6 +182,7 @@ class AcpRuntimeCoordinator {
   private readonly rootAdmissionTails = new Map<string, Promise<void>>()
   private readonly rootAdmissionCancellations = new Map<string, Set<RootAdmissionCancellation>>()
   private readonly activeRootAdmissions = new Map<string, RootAdmissionLease>()
+  private readonly sessionOperationProjects = new Map<string, string>()
   private promptAdmissionGuard?: (sessionId: string) => Promise<void>
   private promptDispatchAdmissionGuard?: PromptAdmissionGuard
   private sessionResumeObserver?: (
@@ -408,6 +409,12 @@ class AcpRuntimeCoordinator {
   hasLiveSession(projectId: string, sessionId: string): boolean {
     const runtime = this.sessionRuntimes.get(sessionId)
     return runtime?.hasLiveSession(projectId, sessionId) ?? false
+  }
+
+  // These Main-owned turns have no provider attachment. Persistence must nevertheless retain
+  // their running state until execution, cleanup, output publication and terminal writes settle.
+  hasActiveSessionOperation(projectId: string, sessionId: string): boolean {
+    return this.sessionOperationProjects.get(sessionId) === projectId
   }
 
   sessionMemorySignal(sessionId: string): AbortSignal | undefined {
@@ -1080,7 +1087,10 @@ class AcpRuntimeCoordinator {
 
   // Application-owned operations share root admission with Agent prompts. They create no provider
   // process; the caller retains this lease through output publication and terminal persistence.
-  async reserveSessionOperation(sessionId: string, onCancel: () => void): Promise<() => void> {
+  async reserveSessionOperation(
+    { projectId, sessionId }: { projectId: string; sessionId: string },
+    onCancel: () => void
+  ): Promise<() => void> {
     this.assertPromptAdmissionOpen()
     if (
       this.rootAdmissionTails.has(sessionId) ||
@@ -1104,8 +1114,13 @@ class AcpRuntimeCoordinator {
           release = resolve
         })
         void cancellation.promise.catch(() => onCancel())
-        acquire(release)
-        await settled
+        this.sessionOperationProjects.set(sessionId, projectId)
+        try {
+          acquire(release)
+          await settled
+        } finally {
+          this.sessionOperationProjects.delete(sessionId)
+        }
       },
       'operation'
     )

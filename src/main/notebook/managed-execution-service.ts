@@ -214,7 +214,7 @@ export type ManagedExecutionServiceDependencies = {
     | 'acknowledgeCollection'
   >
   artifacts: Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'> &
-    Partial<Pick<ArtifactProvenanceRepository, 'replayVersion'>>
+    Partial<Pick<ArtifactProvenanceRepository, 'replayVersion' | 'readPublishedVersionForWrite'>>
   /** Optional independent Main capture; enabled only by the recordObservation request option. */
   observations?: Pick<RunObservationRecorder, 'start' | 'load' | 'markPublished'>
   notebooks: Pick<NotebookRunRepository, 'readSessionDocuments'>
@@ -484,6 +484,9 @@ export class ManagedExecutionService {
     )
       throw new Error('The recorded execution identity is unavailable.')
     if (!journal.recordObservation) return { target, state: 'not-recorded' }
+    // An app restart may follow a successful Artifact write but precede its private recording
+    // receipt. Reconcile only that original published write; this never executes or saves again.
+    await this.observationCoordinator.confirm(observationTarget(journal))
     // Preserve the caller's validated selector in the response. Recorder storage uses its own
     // canonical admission target; adding/removing selectors here would invalidate the viewer scope.
     const recorded = await this.dependencies.observations?.load(observationTarget(journal))

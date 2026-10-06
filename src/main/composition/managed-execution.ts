@@ -174,7 +174,7 @@ export async function composeManagedExecution({
         const runtime = runtimeRef.current
         if (!runtime) throw new Error('Session admission is not initialized.')
         const releaseRoot = await runtime.reserveSessionOperation(
-          scope.sessionId,
+          scope,
           onCancel ?? (() => undefined)
         )
         try {
