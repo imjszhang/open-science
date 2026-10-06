@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { _electron, type ElectronApplication } from '@playwright/test'
 import { expect, it } from 'vitest'
@@ -35,6 +36,51 @@ it
         (policy === 'legacy-upgrade-absolute-redirect' ? '; upgrade-insecure-requests' : '')
       const html = join(directory, 'index.html')
       const workspaceCapture = policy === 'workspace-shaped-capture'
+      const viewerHtml = await readFile(resolve('out/replay-viewer/index.html'), 'utf8')
+      const stylePath = viewerHtml.match(/href="([^"]+\.css)"/)?.[1]
+      expect(stylePath).toBeDefined()
+      const stylesheet = pathToFileURL(
+        resolve('out/replay-viewer', stylePath!.replace(/^\//, ''))
+      ).href
+      const noticesScript = join(directory, 'notices.js')
+      if (workspaceCapture)
+        await build({
+          stdin: {
+            resolveDir: process.cwd(),
+            sourcefile: 'desktop-notices-fixture.tsx',
+            loader: 'tsx',
+            contents: `
+import {useState} from 'react'
+import {createRoot} from 'react-dom/client'
+import {createInstance} from 'i18next'
+import {initReactI18next} from 'react-i18next'
+createInstance().use(initReactI18next).init({lng:'en',fallbackLng:'en',resources:{},keySeparator:false,nsSeparator:false,initImmediate:false})
+import {ActionToast,ActionToastStack,BottomNoticeStack} from './src/renderer/src/components/ActionToast'
+import {EnvStatusBanner} from './src/renderer/src/pages/workspace/EnvStatusBanner'
+import {PermissionUndoSnackbar} from './src/renderer/src/components/PermissionUndoSnackbar'
+import {SessionPersistenceAlert} from './src/renderer/src/components/SessionPersistenceAlert'
+import {useSettingsUndoPortal} from './src/renderer/src/components/use-settings-undo-portal'
+import {useArchiveUndoStore} from './src/renderer/src/stores/archive-undo-store'
+window.api={platform:'darwin'}
+function Empty(){return null}
+function Notices(){
+ const [mode,setMode]=useState('empty'),[settings,setSettings]=useState(false)
+ const portal=useSettingsUndoPortal(<PermissionUndoSnackbar allowsArchiveShortcut={()=>false}/>)
+ globalThis.fixtureNotices={setMode,setSettings,setUndo:active=>useArchiveUndoStore.setState({notices:active?[{key:'project:fixture:1',kind:'project',projectId:'fixture',archivedAt:1,revision:0,expiresAt:Date.now()+60000,messageKey:'Archived project “{{name}}”.',messageParams:{name:'Fixture archive receipt'}}]:[]})}
+ return <><ActionToastStack>{null}{[false,null]}<Empty/>{mode==='normal'||mode==='compact'?<ActionToast title="A real visible notice" detail={mode==='normal'?'This notice must block a screenshot of the area it covers.':undefined} dismissLabel="Close" onDismiss={()=>setMode('empty')}/>:null}{mode==='alert'?<SessionPersistenceAlert title="Saved conversations could not be loaded" message="Fixture recovery notice"/>:null}{portal.background}</ActionToastStack>{settings?<ActionToastStack ref={portal.settingsHostRef}/>:null}<BottomNoticeStack><div style={{display:'contents'}}><EnvStatusBanner ui={{kind:'ready'}}/></div></BottomNoticeStack></>
+}
+createRoot(document.getElementById('notices')).render(<Notices/>)
+`
+          },
+          outfile: noticesScript,
+          bundle: true,
+          format: 'iife',
+          platform: 'browser',
+          jsx: 'automatic',
+          alias: { '@': resolve('src/renderer/src') },
+          define: { 'process.env.NODE_ENV': '"production"' },
+          logLevel: 'silent'
+        })
       // Mirror WorkspacePage's p10, workspace-panel-layout's compensating -mr10, the resizable
       // panel overflow and PreviewPanel's fractional vertical padding. The old flat fixture's
       // right inset did not represent the actual desktop iframe's ancestors.
@@ -44,7 +90,7 @@ it
         : frame
       await writeFile(
         html,
-        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body style="margin:0">${content}</body></html>`
+        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">${workspaceCapture ? `<link rel="stylesheet" href="${stylesheet}">` : ''}</head><body style="margin:0">${content}${workspaceCapture ? `<div id="notices" style="display:contents"></div><script src="${pathToFileURL(noticesScript).href}"></script>` : ''}</body></html>`
       )
       const main = join(directory, 'main.cjs')
       await build({
@@ -246,6 +292,14 @@ app.on('window-all-closed',()=>app.quit())
       await viewer.getByTestId('open-project-interface').click({ timeout: 20_000 })
       const project = viewer.frameLocator('iframe[title="Bound project"]')
       await project.locator('#project-ready').waitFor({ state: 'visible', timeout: 8000 })
+      // The first wide-layout measurement can open the existing files column. Child locators
+      // alone only stabilize the project's local box, not the moving parent iframe.
+      await viewer.locator('iframe[title="Bound project"]').evaluate(async () => {
+        await document.fonts.ready
+      })
+      await (await viewer
+        .locator('iframe[title="Bound project"]')
+        .elementHandle())!.waitForElementState('stable')
       await project.locator('#project-next').click()
       await project.locator('#project-ready').waitFor({ state: 'visible' })
       if (policy === 'small-pane-capture' || workspaceCapture) {
@@ -315,6 +369,17 @@ app.on('window-all-closed',()=>app.quit())
             })
           )
         expect(response.status()).toBe(200)
+        if (workspaceCapture) {
+          expect(
+            await page
+              .locator('[data-action-toast-stack]')
+              .evaluate((element) => element.getBoundingClientRect().height)
+          ).toBe(0)
+          expect(await page.locator('[data-testid="permission-undo-stack"]').count()).toBe(1)
+          expect(await page.locator('[data-testid="env-status-ready-announcement"]').count()).toBe(
+            1
+          )
+        }
         await viewer.getByText('This captured image is awaiting archive publication.').waitFor()
         const captured = await electron.evaluate(
           () => (globalThis as unknown as { fixture: CaptureFixture }).fixture.captures[0]
@@ -391,7 +456,131 @@ app.on('window-all-closed',()=>app.quit())
           (response) => new URL(response.url()).pathname === '/api/capture'
         )
         await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
-        expect((await resizedResponse).status()).toBe(200)
+        const resized = await resizedResponse
+        if (resized.status() !== 200)
+          console.error(
+            'Root overlap candidates',
+            await page.locator('#viewer').evaluate((frame) => {
+              const b = frame.getBoundingClientRect()
+              return [...document.querySelectorAll('body *')]
+                .filter((e) => e !== frame && !e.contains(frame))
+                .map((e) => ({
+                  tag: e.tagName,
+                  testId: e.getAttribute('data-testid'),
+                  classes: e.className,
+                  rect: e.getBoundingClientRect().toJSON(),
+                  clip: getComputedStyle(e).clip,
+                  clipPath: getComputedStyle(e).clipPath,
+                  position: getComputedStyle(e).position,
+                  transform: getComputedStyle(e).transform,
+                  filter: getComputedStyle(e).filter,
+                  overflow: getComputedStyle(e).overflow,
+                  display: getComputedStyle(e).display,
+                  opacity: getComputedStyle(e).opacity
+                }))
+                .filter(
+                  (e) =>
+                    e.rect.width > 0 &&
+                    e.rect.height > 0 &&
+                    e.rect.right > b.left &&
+                    e.rect.bottom > b.top &&
+                    e.rect.left < b.right &&
+                    e.rect.top < b.bottom
+                )
+            })
+          )
+        expect(resized.status()).toBe(200)
+        if (workspaceCapture) {
+          type NoticesFixture = {
+            setMode(mode: string): void
+            setUndo(active: boolean): void
+            setSettings(open: boolean): void
+          }
+          const setMode = (mode: string): Promise<void> =>
+            page.evaluate(
+              (mode) =>
+                (
+                  globalThis as unknown as { fixtureNotices: NoticesFixture }
+                ).fixtureNotices.setMode(mode),
+              mode
+            )
+          const rootStack = await page.locator('[data-action-toast-stack]').elementHandle()
+          const assertDeniedAndRecover = async (clear: () => Promise<void>): Promise<void> => {
+            const denied = page.waitForResponse(
+              (response) => new URL(response.url()).pathname === '/api/capture'
+            )
+            await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+            expect((await denied).status()).toBe(503)
+            await clear()
+            await expect
+              .poll(() =>
+                page
+                  .locator('[data-action-toast-stack]')
+                  .first()
+                  .evaluate((element) => element.getBoundingClientRect().height)
+              )
+              .toBe(0)
+            const recovered = page.waitForResponse(
+              (response) => new URL(response.url()).pathname === '/api/capture'
+            )
+            await viewer.getByRole('button', { name: 'Retry', exact: true }).click()
+            expect((await recovered).status()).toBe(200)
+          }
+          for (const mode of ['normal', 'compact', 'alert']) {
+            await setMode(mode)
+            await expect
+              .poll(() =>
+                page
+                  .locator('[data-action-toast-stack]')
+                  .evaluate((element) => element.getBoundingClientRect().height)
+              )
+              .toBeGreaterThan(0)
+            await assertDeniedAndRecover(() => setMode('empty'))
+          }
+          await page.evaluate(() =>
+            (globalThis as unknown as { fixtureNotices: NoticesFixture }).fixtureNotices.setUndo(
+              true
+            )
+          )
+          const receipt = await page
+            .locator('[data-testid="archive-undo-snackbar"]')
+            .elementHandle()
+          expect(receipt).not.toBeNull()
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { fixtureNotices: NoticesFixture }
+            ).fixtureNotices.setSettings(true)
+          )
+          await expect.poll(() => page.locator('[data-action-toast-stack]').count()).toBe(2)
+          expect(
+            await receipt!.evaluate((element) =>
+              document.querySelectorAll('[data-action-toast-stack]')[1].contains(element)
+            )
+          ).toBe(true)
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { fixtureNotices: NoticesFixture }
+            ).fixtureNotices.setSettings(false)
+          )
+          await expect.poll(() => page.locator('[data-action-toast-stack]').count()).toBe(1)
+          expect(
+            await receipt!.evaluate((element) =>
+              document.querySelector('[data-action-toast-stack]')!.contains(element)
+            )
+          ).toBe(true)
+          await assertDeniedAndRecover(() =>
+            page.evaluate(() =>
+              (globalThis as unknown as { fixtureNotices: NoticesFixture }).fixtureNotices.setUndo(
+                false
+              )
+            )
+          )
+          expect(
+            await rootStack!.evaluate(
+              (element) => element === document.querySelector('[data-action-toast-stack]')
+            )
+          ).toBe(true)
+        }
         await writeFile(
           join(
             tmpdir(),
@@ -420,6 +609,14 @@ app.on('window-all-closed',()=>app.quit())
                 'production layout and native capture; fixture Artifact IDs, no Artifact publication',
               projectIframePreservedAfterResize: true,
               internalScrollPreserved: true,
+              ...(workspaceCapture
+                ? {
+                    actualNoticeComponents: true,
+                    emptyNoticeHostsHaveNoBox: true,
+                    visibleNoticesRejected: true,
+                    undoPortalIdentityPreserved: true
+                  }
+                : {}),
               capture: captured,
               geometry,
               scientificTrials: 0,

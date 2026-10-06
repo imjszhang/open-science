@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
+import { runInNewContext } from 'node:vm'
 import { createElectronCallerContext } from '../caller-context'
 import {
   createElectronProjectCapture,
@@ -118,6 +119,82 @@ function setup(): {
     viewerQuery,
     reportDiagnostic
   }
+}
+
+// Execute the actual Main-generated, read-only query. Native browser tests independently cover
+// these computed styles and compositor pixels; this fixture isolates conservative CSS parsing.
+function useRootOverlay(
+  h: ReturnType<typeof setup>,
+  overlayStyle: Partial<Record<string, string>>
+): void {
+  const style = {
+    display: 'block',
+    visibility: 'visible',
+    opacity: '1',
+    position: 'absolute',
+    transform: 'none',
+    perspective: 'none',
+    filter: 'none',
+    clipPath: 'none',
+    clip: 'auto',
+    maskImage: 'none',
+    zoom: '1',
+    overflowX: 'visible',
+    overflowY: 'visible',
+    borderLeftWidth: '0px',
+    borderTopWidth: '0px',
+    borderRightWidth: '0px',
+    borderBottomWidth: '0px',
+    paddingLeft: '0px',
+    paddingTop: '0px',
+    paddingRight: '0px',
+    paddingBottom: '0px'
+  }
+  const frame = {
+    src: 'http://127.0.0.1:3001/bootstrap',
+    parentElement: null,
+    getBoundingClientRect: () => ({
+      x: 80,
+      y: 60,
+      left: 80,
+      top: 60,
+      right: 680,
+      bottom: 460,
+      width: 600,
+      height: 400
+    }),
+    contains: (element: unknown) => element === frame
+  }
+  const overlay = {
+    getBoundingClientRect: () => ({
+      x: 90,
+      y: 70,
+      left: 90,
+      top: 70,
+      right: 110,
+      bottom: 90,
+      width: 20,
+      height: 20
+    }),
+    contains: () => false
+  }
+  h.rootQuery.mockImplementation(async (code) =>
+    runInNewContext(code, {
+      URL,
+      document: {
+        visibilityState: 'visible',
+        querySelectorAll: (selector: string) =>
+          selector === 'iframe' ? [frame] : [frame, overlay],
+        elementFromPoint: () => frame
+      },
+      location: { href: 'file:///app/index.html' },
+      innerWidth: 1000,
+      innerHeight: 800,
+      devicePixelRatio: 1.25,
+      getComputedStyle: (element: unknown) =>
+        element === overlay ? { ...style, ...overlayStyle } : style
+    })
+  )
 }
 
 describe('visible Electron project capture', () => {
@@ -356,5 +433,68 @@ describe('visible Electron project capture', () => {
       measurement: 'after'
     })
     expect(h.capturePage).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { clipPath: 'inset(50%)' },
+    { clipPath: 'inset(0% 50%)' },
+    { clipPath: 'inset(60% 0% 40%)' },
+    { clipPath: 'inset(0% 25% 0% 75%)' },
+    { clipPath: 'inset(80%)' },
+    { clip: 'rect(0px, 0px, 0px, 0px)', position: 'absolute' },
+    { clip: 'rect(4px, 10px, 4px, 0px)', position: 'fixed' },
+    { clip: 'rect(0px, 2px, 10px, 3px)', position: 'absolute' }
+  ])('does not mistake a proven zero-area CSS clip for painted overlap: %j', async (style) => {
+    const h = setup()
+    useRootOverlay(h, style)
+    await expect(h.capture(h.input)).resolves.toHaveProperty('bytes')
+    expect(h.capturePage).toHaveBeenCalledOnce()
+    expect(h.reportDiagnostic).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { pointerEvents: 'none' },
+    { clipPath: 'inset(49.99%)', pointerEvents: 'none' },
+    { clipPath: 'inset(50% 0% 49.99% 0%)', pointerEvents: 'none' },
+    { clipPath: 'inset(0% 0% 0% 0%)' },
+    { clipPath: 'inset(calc(50%))' },
+    { clipPath: 'inset(50% round 1px)' },
+    { clipPath: 'inset(50%) border-box' },
+    { clipPath: 'inset(10px)' },
+    { clipPath: 'url("#unverified-clip")' },
+    { clipPath: 'path("M 0 0")' },
+    { clip: 'rect(0px, 1px, 1px, 0px)', pointerEvents: 'none' },
+    { clip: 'rect(0px, 0px, 0px, 0px)', position: 'static' },
+    { clip: 'rect(0px, 0px, 0px, 0px)', position: 'relative' },
+    { clip: 'rect(auto, 0px, 0px, auto)' }
+  ])('still rejects visible or unproven clipped overlaps: %j', async (style) => {
+    const h = setup()
+    useRootOverlay(h, style)
+    await expect(h.capture(h.input)).rejects.toThrow('Visible project frame')
+    expect(h.capturePage).not.toHaveBeenCalled()
+    expect(h.reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      stage: 'measure-root',
+      reason: 'overlapping-element',
+      measurement: 'initial'
+    })
+  })
+
+  it('discards a capture when an empty clip becomes partially painted during capturePage', async () => {
+    const h = setup()
+    const style = { clipPath: 'inset(50%)', pointerEvents: 'none' }
+    useRootOverlay(h, style)
+    const capturePage = h.capturePage.getMockImplementation()!
+    h.capturePage.mockImplementation(async (rect) => {
+      const image = await capturePage(rect)
+      style.clipPath = 'inset(49%)'
+      return image
+    })
+    await expect(h.capture(h.input)).rejects.toThrow('Visible project frame')
+    expect(h.capturePage).toHaveBeenCalledOnce()
+    expect(h.reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      stage: 'measure-root',
+      reason: 'overlapping-element',
+      measurement: 'after'
+    })
   })
 })

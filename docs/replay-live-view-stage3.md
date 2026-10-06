@@ -55,6 +55,31 @@ distinguish frame rejection from image decoding, sampling and writing failures, 
 URLs, content or credentials or changing the public error. Capture/composition checks passed
 45 tests, and scoped architecture/ownership/i18n guards passed 851 tests.
 
+Release `0.35.0-test.a851f824e940.2` made the remaining installed failure diagnosable. Attempt
+`20261006-live-05` reached real project views in Test and Codex, completed its four offline
+actions, verified all 15 native receiving Versions and released its runtime, but again saved no
+image. Main reported `measure-root / overlapping-element` before capture. Closing the hidden
+Notebook preview and retrying the same capture did not change that result. The actual workspace
+always mounts `ActionToastStack`: without notifications it still had a transparent 52px padded
+box overlapping the viewer. Its empty Settings undo portal means `:empty` alone is insufficient;
+the stack must retain its mounted host while hiding when there are no status/alert descendants.
+The full production notification fixture also exposed a one-pixel screen-reader announcement
+whose `clip-path: inset(50%)` has no painted area. Capture needs to distinguish a provably empty
+clip from an actual overlay, without moving accessibility content or ignoring visible notices.
+The installed attempt remains incomplete; its API/native provenance successes are recorded
+separately from missing screenshot acceptance.
+
+The correction keeps accessibility announcements in their original position and excludes only
+provably zero-area CSS clips from overlap detection. Unknown or partially painted clips and
+visible `pointer-events:none` overlays remain rejected, including changes during capture.
+The actual Main measurement script passed 53 focused checks and 15 composition checks.
+The production notification fixture mounts real React notification/Undo portal components and
+retains its host identity across Settings portal moves; visible notices still reject capture.
+Component checks passed 42 tests and scoped i18n/ownership/architecture guards passed 851.
+All five real Electron embedding/capture scenarios passed, including notification visibility,
+original-position screen-reader announcements and resizing. The old wide-frame navigation check
+now waits for fonts and the parent iframe to settle before clicking inside the child frame.
+
 The existing generic entrypoint suite now passes eight real checks: the three original plain
 executions; external, ordinary Main and fork executions with observation and interactive project
 views; cancellation; and read-owner/operation-owner close and reconstruction. They use a real
@@ -205,10 +230,11 @@ page, select a step and inspect saved evidence from the current Codex conversati
 capabilities in Open Science. APIs returning success or screenshots alone do not satisfy this gate.
 
 
-## Implementation refinement and current evidence
+## Historical implementation checkpoint
 
-The current implementation stays on the isolated stage-three worktree. `main` and the installed
-Test release remain unchanged. This section records partial evidence, not completion of the ledger.
+The following section preserves an earlier checkpoint, before the installed acceptance follow-ups
+above. At that checkpoint the work stayed on the isolated stage-three worktree and the Test release
+was still stage two. These statements are historical evidence, not the current delivery status.
 
 - Recording is an explicit `recordObservation` execution option, independent of `projectView`.
   The default leaves ordinary executions unchanged. Run observation itself does not require a

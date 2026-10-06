@@ -47,5 +47,23 @@
   ],
   "src/main/caller-context.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
   "src/renderer/index.html": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
-  "src/main/preview-context-menu.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"]
+  "src/main/preview-context-menu.ts": ["src/main/replay-viewer/desktop-embed.integration.test.ts"],
+  "src/renderer/src/components/ActionToast.tsx": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/renderer/src/components/PermissionUndoSnackbar.tsx": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/renderer/src/components/SessionPersistenceAlert.tsx": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/renderer/src/components/use-settings-undo-portal.tsx": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/renderer/src/pages/workspace/EnvStatusBanner.tsx": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ],
+  "src/renderer/src/stores/archive-undo-store.ts": [
+    "src/main/replay-viewer/desktop-embed.integration.test.ts"
+  ]
 }

@@ -162,7 +162,7 @@ function checkedOrigin(input: string): string {
 /** Fixed, read-only query in the trusted app/viewer only. No caller rectangle or project script.
  * Reject effects, clipping and overlapping siblings rather than guessing a transformed crop. */
 function measurementScript(origin: string): string {
-  return `(() => {
+  return String.raw`(() => {
     const origin = ${JSON.stringify(origin)};
     if (document.visibilityState !== 'visible') return {unavailable:'document-hidden'};
     const matches = [...document.querySelectorAll('iframe')].filter(element => {
@@ -195,6 +195,24 @@ function measurementScript(origin: string): string {
         if (style.overflowY !== 'visible' && (rect.y < y || endY > y + element.clientHeight)) return {unavailable:'ancestor-clipped-y',ancestorDepth,excessPx:Math.max(y-rect.y,endY-y-element.clientHeight)};
       }
     }
+    // Prove only empty CSS clips, not whether a decorative box happens to paint a background.
+    // Computed percentage-only inset shapes use the element's reference box; opposing insets
+    // covering an entire axis leave no painted area. Unknown shapes/units remain conservative.
+    const hasEmptyClip = style => {
+      if (/^inset\(\d+(?:\.\d+)?%(?:\s+\d+(?:\.\d+)?%){0,3}\)$/.test(style.clipPath)) {
+        const values = style.clipPath.slice(6, -1).trim().split(/\s+/).map(Number.parseFloat);
+        const [top, right = top, bottom = top, left = right] = values;
+        if (top + bottom >= 100 || left + right >= 100) return true;
+      }
+      // Legacy clip only applies to positioned boxes. Do not interpret auto, calc, SVG or
+      // partially clipped shapes as invisible, nor alter the target iframe's own checks.
+      if (['absolute', 'fixed'].includes(style.position) &&
+          /^rect\(-?\d+(?:\.\d+)?px,\s*-?\d+(?:\.\d+)?px,\s*-?\d+(?:\.\d+)?px,\s*-?\d+(?:\.\d+)?px\)$/.test(style.clip)) {
+        const [top, right, bottom, left] = style.clip.slice(5, -1).split(',').map(Number.parseFloat);
+        return bottom <= top || right <= left;
+      }
+      return false;
+    };
     // Include pointer-events:none overlays, which elementFromPoint alone would miss. Trusted
     // layouts with overlapping decorative layers deliberately report unavailable instead of
     // saving a screenshot whose visible evidence is uncertain.
@@ -205,7 +223,7 @@ function measurementScript(origin: string): string {
       const box = element.getBoundingClientRect();
       if (box.width <= 0 || box.height <= 0 || box.right <= rect.x || box.bottom <= rect.y || box.left >= endX || box.top >= endY) continue;
       const style = getComputedStyle(element);
-      if (style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) !== 0) return {unavailable:'overlapping-element'};
+      if (style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) !== 0 && !hasEmptyClip(style)) return {unavailable:'overlapping-element'};
     }
     for (const x of [rect.x + 0.5, rect.x + rect.width / 2, endX - 0.5]) {
       for (const y of [rect.y + 0.5, rect.y + rect.height / 2, endY - 0.5]) {
