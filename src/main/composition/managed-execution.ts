@@ -34,7 +34,11 @@ import { RunObservationOwner } from '../run-observation/owner'
 import { ObservationViewers } from '../run-observation/viewers'
 import { RunObservationRecorder } from '../run-observation/recorder'
 import { createRecordedObservationReader } from '../run-observation/recorded-reader'
-import { ObservationMediaCollector } from '../run-observation/media-collector'
+import {
+  ObservationMediaCollector,
+  ObservationMediaCaptureError
+} from '../run-observation/media-collector'
+import { createLogger } from '../logger'
 import { readObservationProjectExport } from '../run-observation/project-export-reader'
 import { captureElectronObservationView } from '../run-observation/electron-capture'
 import { ReplayViewerHttpHost } from '../replay-viewer/http-host'
@@ -495,24 +499,47 @@ export async function composeManagedExecution({
       }
     },
     capture: async ({ target, request, assertAuthorized, signal, host }) => {
-      const exact = await mediaTarget(target)
-      signal.throwIfAborted()
-      assertAuthorized()
-      let created = false
-      const result = await observationMedia.capture(exact, request, {
-        assertAuthorized,
-        signal,
-        onCreated: () => {
-          created = true
-        },
-        ...(host
-          ? {
-              captureHostView: (captureSignal: AbortSignal) =>
-                captureElectronObservationView({ ...host, signal: captureSignal })
-            }
-          : {})
-      })
-      return { result, created }
+      let stage: 'preflight' | 'collector' | 'host-capture' | 'collector-after-host' = 'preflight'
+      try {
+        const exact = await mediaTarget(target)
+        signal.throwIfAborted()
+        assertAuthorized()
+        let created = false
+        stage = 'collector'
+        const result = await observationMedia.capture(exact, request, {
+          assertAuthorized,
+          signal,
+          onCreated: () => {
+            created = true
+          },
+          ...(host
+            ? {
+                captureHostView: async (captureSignal: AbortSignal) => {
+                  stage = 'host-capture'
+                  const image = await captureElectronObservationView({
+                    ...host,
+                    signal: captureSignal
+                  })
+                  stage = 'collector-after-host'
+                  return image
+                }
+              }
+            : {})
+        })
+        return { result, created }
+      } catch (error) {
+        // Main-only bounded classification: do not log project URLs, capture keys or arbitrary
+        // thrown text. This also distinguishes decoding/sampling/writing from host geometry.
+        try {
+          createLogger('observation-capture').warn('Project image intake rejected', {
+            stage,
+            reason: error instanceof ObservationMediaCaptureError ? error.code : 'unavailable'
+          })
+        } catch {
+          /* Logging never changes optional image-capture behavior. */
+        }
+        throw error
+      }
     },
     recordingStatus: (target) => service.recordingStatus(target),
     viewers: observationViewers,

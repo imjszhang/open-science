@@ -38,6 +38,23 @@ The project viewport was 115 CSS pixels high and the native PNG 770×230 pixels.
 fixture Artifact IDs: it establishes layout and native capture, not the installed publication
 journey. Main's focus, clipping, occlusion and frame-origin checks remain unchanged.
 
+Installed release `0.35.0-test.a2161f3984c4.2` then exposed a second boundary in the separately
+identified `20261006-live-04` attempt. The real project frame fit the pane and scrolled normally,
+but capture and a same-request foreground retry still failed. The Run completed, its original
+outputs/archive passed API export/import, and the environment was released; zero screenshots
+means the attempt remains incomplete. The earlier small-pane fixture had omitted the workbench's
+negative right margin, which cancels its outer padding. A fixture with the full ancestor layout
+reproduced the rejection even at a 674px viewer height: the outer iframe touched the window edge,
+where all three rightmost `elementFromPoint` samples returned null. The correction is scoped to
+the desktop observation container, retaining a one-pixel inner margin without relaxing capture
+checks. Evidence: `installed-20261006-live-04/{acceptance,installed-ui-audit}.json`.
+The full-parent regression then passed twice at 1024×768 and again after resizing to 1101×801;
+the original project viewport was 368 CSS pixels high. All five production Electron scenarios
+and nine parent-preview component checks passed. Main-only fixed diagnostic categories now
+distinguish frame rejection from image decoding, sampling and writing failures, without logging
+URLs, content or credentials or changing the public error. Capture/composition checks passed
+45 tests, and scoped architecture/ownership/i18n guards passed 851 tests.
+
 The existing generic entrypoint suite now passes eight real checks: the three original plain
 executions; external, ordinary Main and fork executions with observation and interactive project
 views; cancellation; and read-owner/operation-owner close and reconstruction. They use a real

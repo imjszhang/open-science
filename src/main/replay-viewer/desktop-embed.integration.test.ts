@@ -14,6 +14,7 @@ it
   .each([
     'production',
     'small-pane-capture',
+    'workspace-shaped-capture',
     'catalog-load-failure',
     'legacy-upgrade-absolute-redirect'
   ] as const)(
@@ -33,9 +34,17 @@ it
         productionCsp +
         (policy === 'legacy-upgrade-absolute-redirect' ? '; upgrade-insecure-requests' : '')
       const html = join(directory, 'index.html')
+      const workspaceCapture = policy === 'workspace-shaped-capture'
+      // Mirror WorkspacePage's p10, workspace-panel-layout's compensating -mr10, the resizable
+      // panel overflow and PreviewPanel's fractional vertical padding. The old flat fixture's
+      // right inset did not represent the actual desktop iframe's ancestors.
+      const frame = `<iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${workspaceCapture ? 'min-height:0;width:100%;flex:1' : policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:420px' : 'width:100vw;height:100vh'}"></iframe>`
+      const content = workspaceCapture
+        ? `<main style="box-sizing:border-box;height:100vh;overflow:hidden;padding:10px"><div style="position:relative;display:flex;height:100%"><div data-slot="resizable-panel-group" style="display:flex;height:100%;min-width:0;flex:1;margin-right:-10px"><section style="flex:60 1 0;overflow:hidden">Conversation</section><div data-slot="resizable-panel" style="flex:40 1 0;min-width:0;overflow:hidden"><aside id="right-panel" style="position:relative;box-sizing:border-box;display:flex;flex-direction:column;height:100%;min-width:0;width:100%;overflow:hidden;padding:.7px 0"><div style="display:flex;flex-shrink:0;height:40px">Notebook / Replay</div><div style="min-height:0;min-width:0;flex:1"><section hidden><div style="height:100%">Inactive Notebook content</div></section><section role="tabpanel" style="height:100%;min-height:0;width:100%;overflow-y:auto"><div style="box-sizing:border-box;display:flex;height:100%;min-height:0;flex-direction:column;padding:1px">${frame}</div></section></div></aside></div></div><button style="position:absolute;right:8px;top:0;width:28px;height:28px">×</button></div></main>`
+        : frame
       await writeFile(
         html,
-        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body style="margin:0"><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:420px' : 'width:100vw;height:100vh'}"></iframe></body></html>`
+        `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body style="margin:0">${content}</body></html>`
       )
       const main = join(directory, 'main.cjs')
       await build({
@@ -65,7 +74,7 @@ const decisions = []
 const diagnostics = []
 const menus = []
 const nativeMenus = []
-const capturePane = ${JSON.stringify(policy)} === 'small-pane-capture'
+const capturePane = ${JSON.stringify(policy)}.endsWith('capture')
 const captures = []
 let observationRevision = 0
 if (${JSON.stringify(policy)} === 'legacy-upgrade-absolute-redirect') {
@@ -239,7 +248,7 @@ app.on('window-all-closed',()=>app.quit())
       await project.locator('#project-ready').waitFor({ state: 'visible', timeout: 8000 })
       await project.locator('#project-next').click()
       await project.locator('#project-ready').waitFor({ state: 'visible' })
-      if (policy === 'small-pane-capture') {
+      if (policy === 'small-pane-capture' || workspaceCapture) {
         type CaptureFixture = {
           captures: Array<{
             size: { width: number; height: number }
@@ -266,7 +275,46 @@ app.on('window-all-closed',()=>app.quit())
           (response) => new URL(response.url()).pathname === '/api/capture'
         )
         await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
-        expect((await captureResponse).status()).toBe(200)
+        const response = await captureResponse
+        if (response.status() !== 200 && workspaceCapture)
+          console.error(
+            'Workspace capture geometry',
+            await page.locator('#viewer').evaluate((frame) => {
+              const bounds = frame.getBoundingClientRect()
+              const parents = []
+              for (let element = frame.parentElement; element; element = element.parentElement) {
+                const b = element.getBoundingClientRect(),
+                  s = getComputedStyle(element)
+                parents.push({
+                  tag: element.tagName,
+                  bounds: b.toJSON(),
+                  clientWidth: element.clientWidth,
+                  clientHeight: element.clientHeight,
+                  overflow: [s.overflowX, s.overflowY]
+                })
+              }
+              return {
+                bounds: bounds.toJSON(),
+                viewport: [innerWidth, innerHeight],
+                points: [
+                  bounds.left + 0.5,
+                  bounds.left + bounds.width / 2,
+                  bounds.right - 0.5
+                ].flatMap((x) =>
+                  [bounds.top + 0.5, bounds.top + bounds.height / 2, bounds.bottom - 0.5].map(
+                    (y) => ({
+                      x,
+                      y,
+                      hit: document.elementFromPoint(x, y)?.tagName,
+                      matches: document.elementFromPoint(x, y) === frame
+                    })
+                  )
+                ),
+                parents
+              }
+            })
+          )
+        expect(response.status()).toBe(200)
         await viewer.getByText('This captured image is awaiting archive publication.').waitFor()
         const captured = await electron.evaluate(
           () => (globalThis as unknown as { fixture: CaptureFixture }).fixture.captures[0]
@@ -286,7 +334,7 @@ app.on('window-all-closed',()=>app.quit())
             viewportHeight: innerHeight
           }
         })
-        expect(geometry.height).toBeLessThan(384)
+        if (!workspaceCapture) expect(geometry.height).toBeLessThan(384)
         expect(geometry.height).toBe(initialHeight)
         expect(geometry.top).toBeGreaterThan(0)
         expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight)
@@ -319,9 +367,15 @@ app.on('window-all-closed',()=>app.quit())
               .getAttribute('data-observation-record')
           )
           .not.toBe(previousCursor)
-        await page.locator('#viewer').evaluate((frame) => {
-          frame.style.height = '500px'
-        })
+        if (workspaceCapture) {
+          await electron.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0].setSize(1101, 801)
+          )
+        } else {
+          await page.locator('#viewer').evaluate((frame) => {
+            frame.style.height = '500px'
+          })
+        }
         await expect
           .poll(() => projectElement.evaluate((frame) => frame.getBoundingClientRect().height))
           .toBeGreaterThan(geometry.height)
@@ -339,11 +393,25 @@ app.on('window-all-closed',()=>app.quit())
         await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
         expect((await resizedResponse).status()).toBe(200)
         await writeFile(
-          join(tmpdir(), 'open-science-production-small-pane-capture.json'),
+          join(
+            tmpdir(),
+            workspaceCapture
+              ? 'open-science-production-workspace-capture.json'
+              : 'open-science-production-small-pane-capture.json'
+          ),
           JSON.stringify(
             {
               window: { width: 1024, height: 768 },
-              pane: { width: '40%', initialHeight: 420, rightInset: 10 },
+              pane: workspaceCapture
+                ? {
+                    width: '40%',
+                    workspaceRootPadding: 10,
+                    groupRightMargin: -10,
+                    previewPaddingY: 0.7,
+                    viewerInset: 1,
+                    resizedWindow: { width: 1101, height: 801 }
+                  }
+                : { width: '40%', initialHeight: 420, rightInset: 10 },
               productionViewer: true,
               strictForeground: true,
               actualScreenshotButton: true,

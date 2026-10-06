@@ -23,6 +23,7 @@ function setup(): {
   capturePage: Mock
   rootQuery: Mock
   viewerQuery: Mock
+  reportDiagnostic: Mock
 } {
   const rootQuery = vi.fn(async () => ({
     documentUrl: 'file:///app/index.html',
@@ -92,7 +93,9 @@ function setup(): {
     isMinimized: () => false,
     isFocused: () => true
   }
+  const reportDiagnostic = vi.fn()
   const capture = createElectronProjectCapture({
+    reportDiagnostic,
     fromId: (id) => (id === 7 ? contents : undefined),
     windowFor: () => window
   })
@@ -112,7 +115,8 @@ function setup(): {
     input,
     capturePage,
     rootQuery,
-    viewerQuery
+    viewerQuery,
+    reportDiagnostic
   }
 }
 
@@ -275,5 +279,82 @@ describe('visible Electron project capture', () => {
     })
     await expect(h.capture(h.input)).rejects.toThrow()
     expect(h.capturePage).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['root', 'ancestor-clipped-y'],
+    ['viewer', 'hit-test-mismatch'],
+    ['viewer', 'overlapping-element']
+  ] as const)(
+    'reports bounded %s measurement diagnostics for %s without changing the public error',
+    async (frame, reason) => {
+      const h = setup()
+      const query = frame === 'root' ? h.rootQuery : h.viewerQuery
+      query.mockResolvedValue({ unavailable: reason, ancestorDepth: 2, excessPx: 0.3046875 })
+      await expect(h.capture(h.input)).rejects.toThrow(
+        'Visible project frame is unavailable or changed during capture.'
+      )
+      expect(h.reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+        stage: `measure-${frame}`,
+        reason,
+        measurement: 'initial',
+        ancestorDepth: 2,
+        excessPx: 0.3046875
+      })
+      expect(h.capturePage).not.toHaveBeenCalled()
+    }
+  )
+  it('never includes untrusted measurement fields, URLs or exception text in private diagnostics', async () => {
+    const h = setup()
+    h.rootQuery.mockResolvedValue({
+      unavailable: 'ancestor-clipped-y',
+      url: 'https://private/?grant=secret',
+      excessPx: Infinity
+    })
+    await expect(h.capture(h.input)).rejects.toThrow()
+    expect(h.reportDiagnostic).toHaveBeenLastCalledWith({
+      stage: 'measure-root',
+      reason: 'measurement-invalid',
+      measurement: 'initial'
+    })
+    h.rootQuery.mockRejectedValue(new Error('private source path and grant=secret'))
+    await expect(h.capture(h.input)).rejects.toThrow(
+      'Visible project frame is unavailable or changed during capture.'
+    )
+    expect(h.reportDiagnostic).toHaveBeenLastCalledWith({
+      stage: 'measure-root',
+      reason: 'host-error',
+      measurement: 'initial'
+    })
+    expect(JSON.stringify(h.reportDiagnostic.mock.calls)).not.toMatch(/private|secret|https/)
+  })
+  it('distinguishes a focus failure from pixel acquisition and survives diagnostic sink failure', async () => {
+    const h = setup()
+    h.window!.isFocused = () => false
+    h.reportDiagnostic.mockImplementation(() => {
+      throw new Error('diagnostic sink failed')
+    })
+    await expect(h.capture(h.input)).rejects.toThrow(
+      'Visible project frame is unavailable or changed during capture.'
+    )
+    expect(h.reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      stage: 'frame-binding',
+      reason: 'window-unfocused'
+    })
+    expect(h.capturePage).not.toHaveBeenCalled()
+  })
+  it('reports image-validation failures only after the trusted frame capture succeeded', async () => {
+    const h = setup()
+    h.capturePage.mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1, height: 1 }),
+      toPNG: () => Buffer.from('irrelevant')
+    })
+    await expect(h.capture(h.input)).rejects.toThrow()
+    expect(h.reportDiagnostic).toHaveBeenCalledExactlyOnceWith({
+      stage: 'image-validation',
+      reason: 'image-size',
+      measurement: 'after'
+    })
+    expect(h.capturePage).toHaveBeenCalledOnce()
   })
 })

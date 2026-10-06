@@ -265,7 +265,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     }
   }, [access, admission, props.isActive, props.onAskSelection, props.onAskArchiveSelection])
   return (
-    <div className="flex h-full min-h-0 flex-col" hidden={!props.isActive}>
+    // Keep the admitted iframe wholly inside the workbench's fractional clipping edges and
+    // viewport edge. Workspace's negative right margin otherwise makes it flush with that edge.
+    <div className="flex h-full min-h-0 flex-col p-px" hidden={!props.isActive}>
       {openFailed ? (
         <ErrorNotice
           inline
