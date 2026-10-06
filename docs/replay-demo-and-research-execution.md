@@ -62,8 +62,9 @@ the existing observation timeline/media archive; MP4 rendering is not part of th
 
 The older Tuanzi live-07 package contains offline engineering evidence only. Its draft live
 protocol is not a completed reference experiment. A separate v0.5.6 live-materials set now freezes
-one small author baseline and three recipient executions. The live runner and checker are prepared;
-no live baseline or recipient outcome is claimed. These four executions validate the product path,
+one small author baseline and three recipient executions. The first real G request reached the
+configured provider but hit the experiment's 60-second I/O timeout before a complete response.
+No valid G/S baseline or recipient outcome is claimed. These four executions validate the product path,
 not the proposed 20-pair scientific study or a statistically supported treatment effect.
 
 The user authorized the existing Tuanzi `.env` configuration and then replaced the monetary limit
@@ -330,3 +331,33 @@ A receipt that cannot be associated with the same verified native Artifact Run r
 including recovery records published under a different turn. Observation coverage is sampled and
 reported explicitly; it is not a promise of a full recording, MP4 export or identical stochastic
 model output. These limits do not require changing the `.science` format.
+
+## Token-budget acceptance evidence (2026-10-07)
+
+The user replaced the monetary ceiling with 1,000,000,000 cumulative input-plus-output tokens.
+The acceptance harness and public materials now preserve conservative reservations separately from
+reported usage, including incomplete streams and unknown usage. Focused harness tests passed
+(55 cases), public transport/checker tests passed (25 cases), and the unchanged renderer locale
+guards passed (777 cases). Node/sandbox types, lint and formatting passed.
+
+The token material package passed native export in
+`tuanzi-v056-live-reproduction-20261007/materials-package-token-02/`. Its archive SHA-256 is
+`92703f2ae4620d64938405d8db35c3399d6ee385757b33f930430d162cdaafff`.
+The product sensitive-content scanner remains unchanged. Two public code/document phrases that
+resembled credential assignments were rewritten equivalently before this successful export.
+
+`live-token-01` failed before starting the project service because the acceptance harness omitted
+its declared project view and therefore Main's required adapter/proof. The harness now uses the
+real `ManagedRuntimeViews` registry; a native sandbox service test passed. An explicit reconciliation
+bound the failed result, receipt, native operation and Notebook Run hashes in the existing ledger.
+It retained the original reservation and zero-usage evidence; it did not reset the ledger.
+
+`live-token-02` dispatched one G request through the configured relay. HTTP 200 headers arrived,
+but the stream did not complete before the frozen 60,000 ms G timeout. Tuanzi recorded
+`adaptive_io_timeout`; S was never called. The native run failed, available evidence was retained,
+and the service stopped. Evidence-integrity checks passed while valid-G/S checks correctly failed.
+The provider did not return final usage: actual tokens remain **unknown**, and the 12,582,912-token
+trial reservation remains occupied. That reservation is not reported consumption. No receiving
+trial or successful result-package round trip was started, and no scientific success is claimed.
+See `token-budget-delivery.json`, `live-token-02/author/validation.json` and the durable budget ledger
+beside the materials. A scan of retained evidence/packages found neither configured credential.
