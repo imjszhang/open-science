@@ -10,6 +10,7 @@ import {
   inspectResearchMaterials,
   prepareResearchMaterials,
   ResearchMaterialUnavailableError,
+  ResearchMaterialVersionSelectionError,
   type ResearchMaterialAuthority,
   type ResearchMaterialVersion
 } from './research-materials'
@@ -364,7 +365,15 @@ describe('verified preparation into caller-owned staging', () => {
         descriptorVersionId: 'descriptor',
         materialKeys: ['source']
       })
-    ).rejects.toThrow(/explicitly/)
+    ).rejects.toBeInstanceOf(ResearchMaterialVersionSelectionError)
+    await expect(
+      prepareResearchMaterials(authority, {
+        stagingDirectory: path,
+        descriptorVersionId: 'descriptor',
+        materialKeys: ['source'],
+        materialVersions: { source: 'unrelated' }
+      })
+    ).rejects.toBeInstanceOf(ResearchMaterialVersionSelectionError)
     const receipt = await prepareResearchMaterials(authority, {
       stagingDirectory: path,
       descriptorVersionId: 'descriptor',

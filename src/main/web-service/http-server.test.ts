@@ -44,6 +44,8 @@ import {
 import {
   prepareResearchMaterials,
   ResearchMaterialUnavailableError,
+  ResearchMaterialVersionSelectionError,
+  RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE,
   type ResearchMaterialAuthority
 } from '../notebook/research-materials'
 import { createLogger, flushLogs, initLogger } from '../logger'
@@ -5290,7 +5292,84 @@ describe('managed execution HTTP API', () => {
     }
   )
 
-  it.each(['io', 'content-verification', 'size-verification', 'same-name-error'] as const)(
+  it('requires an explicit matching Version through preparation, HTTP and the SDK without choosing equal bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'execution-material-selection-http-'))
+    roots.push(root)
+    const payload = Buffer.from('fixed experiment input')
+    const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
+    const descriptor = Buffer.from(
+      JSON.stringify({
+        format: 'open-science-reproduction-description',
+        descriptionVersion: 1,
+        title: 'Repeated immutable inputs',
+        materials: [
+          {
+            key: 'input',
+            role: 'data',
+            availability: 'included',
+            filename: 'input.txt',
+            sha256: sha(payload),
+            sizeBytes: payload.length,
+            restorePath: 'input.txt'
+          }
+        ],
+        plans: [
+          {
+            key: 'inspect',
+            title: 'Inspect',
+            scope: 'engineering-check',
+            materialKeys: ['input'],
+            claim: 'Engineering only',
+            limitations: []
+          }
+        ]
+      })
+    )
+    const readVersion = vi.fn(async (id: string) => (id === 'descriptor' ? descriptor : payload))
+    const authority: ResearchMaterialAuthority = {
+      source: { projectId: 'project', sessionId: 'research', identity: 'source' },
+      versions: [
+        { versionId: 'descriptor', filename: 'research-reproduction.json', bytes: descriptor },
+        { versionId: 'original-input', filename: 'input.txt', bytes: payload },
+        { versionId: 'recorded-input', filename: 'recorded.txt', bytes: payload }
+      ].map(({ bytes, ...version }) => ({
+        ...version,
+        sourceIdentity: 'source',
+        sha256: sha(bytes),
+        sizeBytes: bytes.length
+      })),
+      readVersion
+    }
+    const client = await materialClient((received) =>
+      prepareResearchMaterials(authority, { stagingDirectory: root, ...received.materials })
+    )
+    const materials = { descriptorVersionId: 'descriptor', materialKeys: ['input'] }
+    for (const selection of [undefined, { input: 'unrelated' }]) {
+      await expect(
+        client.execution.prepare(materialRequest({ ...materials, materialVersions: selection }))
+      ).rejects.toMatchObject({
+        status: 400,
+        code: 'invalid_request',
+        message: RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE
+      })
+    }
+    expect(readVersion.mock.calls.map(([id]) => id)).toEqual(['descriptor', 'descriptor'])
+    const prepared = await client.execution.prepare(
+      materialRequest({ ...materials, materialVersions: { input: 'recorded-input' } })
+    )
+    expect(prepared).toMatchObject({
+      inputs: [{ versionId: 'descriptor' }, { versionId: 'recorded-input', materialKey: 'input' }]
+    })
+    expect(await readFile(join(root, 'input.txt'), 'utf8')).toBe('fixed experiment input')
+  })
+
+  it.each([
+    'io',
+    'content-verification',
+    'size-verification',
+    'same-name-error',
+    'same-selection-name-error'
+  ] as const)(
     'keeps %s failures internal without exposing private details as material guidance',
     async (reason) => {
       const root = await mkdtemp(join(tmpdir(), 'execution-materials-internal-'))
@@ -5298,6 +5377,8 @@ describe('managed execution HTTP API', () => {
       const bytes = Buffer.from('expected')
       const failure = new Error('missing /private/research/secret')
       if (reason === 'same-name-error') failure.name = 'ResearchMaterialUnavailableError'
+      if (reason === 'same-selection-name-error')
+        failure.name = 'ResearchMaterialVersionSelectionError'
       const authority: ResearchMaterialAuthority = {
         source: { projectId: 'project', sessionId: 'research', identity: 'source' },
         versions: [
@@ -5347,6 +5428,23 @@ describe('managed execution HTTP API', () => {
       code: 'conflict',
       message:
         'The selected research material is unavailable. Inspect the research materials and select an available version.'
+    })
+  })
+
+  it('returns fixed selection guidance without exposing modified internal error text', async () => {
+    const error = new ResearchMaterialVersionSelectionError()
+    error.message = 'select /private/research/secret'
+    const client = await materialClient(async () => {
+      throw error
+    })
+    await expect(
+      client.execution.prepare(
+        materialRequest({ descriptorVersionId: 'descriptor', materialKeys: ['input'] })
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_request',
+      message: RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE
     })
   })
 

@@ -6,7 +6,9 @@ import {
 import type { ManagedExecutionService } from './notebook/managed-execution-service'
 import {
   ResearchMaterialUnavailableError,
-  researchMaterialUnavailableMessage
+  researchMaterialUnavailableMessage,
+  ResearchMaterialVersionSelectionError,
+  RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE
 } from './notebook/research-materials'
 import { withDataRootWrite } from './storage/migration-state'
 import type { CallerContext } from './caller-context'
@@ -99,6 +101,11 @@ export function createManagedExecutionExternalPort(dependencies: {
           )
         return result
       } catch (error) {
+        if (error instanceof ResearchMaterialVersionSelectionError)
+          throw new ManagedExecutionExternalError(
+            'invalid_request',
+            RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE
+          )
         if (error instanceof ResearchMaterialUnavailableError) {
           const message = researchMaterialUnavailableMessage(error.reason)
           if (message) throw new ManagedExecutionExternalError('conflict', message)

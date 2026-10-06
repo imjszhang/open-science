@@ -85,6 +85,16 @@ export class ResearchMaterialUnavailableError extends Error {
     this.name = 'ResearchMaterialUnavailableError'
   }
 }
+
+export const RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE =
+  'Select a matching immutable version explicitly in materials.materialVersions using the IDs returned by inspectMaterials.'
+
+export class ResearchMaterialVersionSelectionError extends Error {
+  constructor() {
+    super(RESEARCH_MATERIAL_VERSION_SELECTION_MESSAGE)
+    this.name = 'ResearchMaterialVersionSelectionError'
+  }
+}
 export type ResearchMaterialInspection = {
   source: ResearchMaterialSource
   status: 'no-description' | 'choose-description' | 'ready' | 'unsupported' | 'invalid'
@@ -317,7 +327,7 @@ export const prepareResearchMaterials = async (
       const versionId =
         selected ?? (state.versionIds?.length === 1 ? state.versionIds[0] : undefined)
       if (!versionId || !state.versionIds?.includes(versionId))
-        return failure('select a matching version explicitly for the material.')
+        throw new ResearchMaterialVersionSelectionError()
       const version = findVersion(versionId)
       if (!material.archive && version.sizeBytes > limits.maxExpandedBytes - totalBytes)
         failure('the selected materials exceed the host output limits.')
