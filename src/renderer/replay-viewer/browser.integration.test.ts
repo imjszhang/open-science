@@ -35,6 +35,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
     const proof = randomBytes(32).toString('hex'),
       proofPath = `/__open_science_proof_${randomBytes(16).toString('hex')}`
     let projectLoads = 0,
+      projectViewRequests = 0,
       count = 0
     const project = createServer((req, res) => {
       if (req.url === proofPath) {
@@ -144,6 +145,9 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         : '/tmp/replay-viewer-production-browser-acceptance'
       await mkdir(evidence, { recursive: true })
       page.on('pageerror', (error) => errors.push(error.message))
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/project-view') projectViewRequests++
+      })
       page.on('console', (message) => {
         if (message.type() === 'error')
           errors.push(message.text().replace(/grant=[a-f0-9]+/g, 'grant=[redacted]'))
@@ -199,6 +203,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         await expect(page.getByRole('group', { name: 'Run view', exact: true })).toBeInViewport({
           ratio: 1
         })
+        await page.screenshot({ path: join(evidence, 'replay-viewer-following-long-log.png') })
         await page
           .getByRole('button', { name: 'Project interface', exact: true })
           .scrollIntoViewIfNeeded()
@@ -248,6 +253,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         await page.getByRole('button', { name: 'Project interface', exact: true }).click()
         await expect(page.locator('iframe[title="Interactive project"]')).toBeHidden()
         expect(projectLoads).toBe(1)
+        expect(projectViewRequests).toBe(1)
         await page.getByRole('button', { name: 'Back to live', exact: true }).click()
         await expect(projectFrame.locator('output')).toHaveText('1')
       }
@@ -291,11 +297,27 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       expect(await frame?.evaluate((node) => node.isConnected)).toBe(true)
       expect(projectLoads).toBe(1)
+      expect(projectViewRequests).toBe(1)
       await page.screenshot({ path: join(evidence, 'replay-viewer-wide.png') })
       await page.setViewportSize({ width: 560, height: 850 })
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       expect(projectLoads).toBe(1)
       await page.screenshot({ path: join(evidence, 'replay-viewer-narrow.png') })
+      await writeFile(
+        join(evidence, 'result.json'),
+        JSON.stringify(
+          {
+            longLogs,
+            beforeProjectClick,
+            projectLoads,
+            projectViewRequests,
+            manualInspectionPreserved: longLogs,
+            errors
+          },
+          null,
+          2
+        )
+      )
       expect(errors).toEqual([])
     } finally {
       abort.abort()
