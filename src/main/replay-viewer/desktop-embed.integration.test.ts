@@ -9,7 +9,9 @@ const enabled = process.env.RUN_OBSERVATION_DESKTOP_EMBED === '1' && process.pla
 
 /** Uses the production root CSP, production navigation guard, real registry and both actual HTTP
  * owners. A bare file:// iframe fixture cannot detect privileged desktop embedding regressions. */
-it.skipIf(!enabled).each(['production', 'legacy-upgrade-absolute-redirect'] as const)(
+it
+  .skipIf(!enabled)
+  .each(['production', 'catalog-load-failure', 'legacy-upgrade-absolute-redirect'] as const)(
   'checks real owner-bound desktop embedding: %s',
   async (policy) => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'os-service-run-')))
@@ -138,8 +140,11 @@ app.whenReady().then(async () => {
   })
   const viewers = new ObservationViewers({observer:observation,authorizeScope:async()=>undefined,
     onRevoked:viewerId=>host.closeViewer(viewerId)})
+  const readAsset = createReplayViewerAssetReader(join(root,'out/replay-viewer'))
   const host = new ReplayViewerHttpHost({viewers,projectViews,
-    readAsset:createReplayViewerAssetReader(join(root,'out/replay-viewer'))})
+    desktopLocale:()=> 'de',
+    readAsset:path=>${JSON.stringify(policy)} === 'catalog-load-failure' && path.startsWith('assets/de-') && path.endsWith('.js')
+      ? Promise.resolve(undefined) : readAsset(path)})
   const access = await host.open(target,caller,{allowInteraction:true,desktopParent:'file:'})
   await owner.webContents.executeJavaScript('document.getElementById("viewer").src='+JSON.stringify(access.url))
   globalThis.fixture = {
@@ -211,6 +216,15 @@ app.on('window-all-closed',()=>app.quit())
       await project.locator('#project-ready').waitFor({ state: 'visible' })
       expect(page.url()).toMatch(/^file:/)
       const viewerFrame = page.frames().find((frame) => /^http:\/\/viewer-/.test(frame.url()))!
+      expect(await viewerFrame.evaluate(() => document.documentElement.lang)).toBe(
+        policy === 'catalog-load-failure' ? 'en' : 'de'
+      )
+      const german = JSON.parse(await readFile(resolve('src/shared/i18n/locales/de.json'), 'utf8'))
+      expect(await viewer.getByTestId('open-project-interface').textContent()).toBe(
+        policy === 'catalog-load-failure'
+          ? 'Reopen project interface'
+          : german.renderer['Reopen project interface']
+      )
       const projectFrame = page.frames().find((frame) => /^http:\/\/rv-/.test(frame.url()))!
       expect(new URL(viewerFrame.url()).pathname).toBe('/')
       await expect.poll(() => new URL(projectFrame.url()).pathname).toBe('/next')

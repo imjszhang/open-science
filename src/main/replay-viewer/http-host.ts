@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { Socket } from 'node:net'
 import { z } from 'zod'
 import type { CallerContext } from '../caller-context'
+import type { Locale } from '../../shared/locale'
 import {
   desktopObservationFrameRegistry,
   type DesktopObservationRegistration
@@ -62,6 +63,8 @@ type Viewers = Pick<
   | 'revoke'
 >
 export interface ReplayViewerHttpDependencies {
+  /** Main's persisted desktop preference; browser viewers retain their own device language. */
+  desktopLocale?(): Locale
   listCaptures?(
     target: RunObservationTarget,
     signal: AbortSignal
@@ -725,6 +728,9 @@ export class ReplayViewerHttpHost {
           return {
             ...descriptor,
             presentation: binding.caller.surface === 'electron' ? 'desktop' : 'browser',
+            ...(binding.caller.surface === 'electron' && this.dependencies.desktopLocale
+              ? { locale: this.dependencies.desktopLocale() }
+              : {}),
             canInteract:
               descriptor.mode !== 'recorded' && binding.options.allowInteraction === true,
             canCancel:

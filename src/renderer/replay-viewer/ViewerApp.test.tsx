@@ -5,6 +5,8 @@ import type { RunObservationSnapshot } from '../../shared/run-observation'
 import { ViewerApp } from './ViewerApp'
 import { ReplayViewerClient } from './client'
 import { staticHtml } from './static-html'
+import { ReferencePanel } from './ReferencePanel'
+import { setI18nLocale } from '../src/i18n'
 const snapshot: RunObservationSnapshot = {
   identity: { projectId: 'p', sessionId: 's', operationId: 'op', runId: 'run' },
   cursor: { epoch: 'epoch', sequence: 1 },
@@ -79,10 +81,34 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  setI18nLocale('en')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 describe('standalone browser viewer', () => {
+  it('applies the desktop language after an initial bootstrap context read failed', async () => {
+    const client = makeClient()
+    vi.mocked(client.context)
+      .mockRejectedValueOnce(new Error('temporarily offline'))
+      .mockResolvedValue({ ...context, presentation: 'desktop', locale: 'zh-Hans' })
+    expect(await client.initialLocale('en')).toBe('en')
+    render(<ViewerApp client={client} />)
+    await screen.findAllByText('研究回放')
+    expect(document.documentElement.lang).toBe('zh-Hans')
+  })
+
+  it.each(['browser', 'desktop'] as const)(
+    'keeps step copying but shows manual conversation instructions only in the browser: %s',
+    (presentation) => {
+      render(<ReferencePanel reference='{"stepKey":"one"}' presentation={presentation} />)
+      expect(screen.getByRole('button', { name: 'Copy step reference' })).toBeTruthy()
+      const instructions = screen.queryByText(
+        'Paste this reference into your conversation. Your agent can read the saved selection through the Open Science SDK.'
+      )
+      expect(Boolean(instructions)).toBe(presentation === 'browser')
+    }
+  )
+
   it('retries archive admission without reopening the completed project or losing the current evidence', async () => {
     const client = makeClient()
     const archive = {

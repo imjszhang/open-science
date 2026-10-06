@@ -3,6 +3,39 @@
 Status: implementation in progress. This ledger preserves the complete agreed scope; an isolated
 module test or a rendered mock-up does not establish delivery.
 
+## Installed acceptance follow-up, 2026-10-06
+
+The independent Test release `0.35.0-test.2acd6eb5fccc.2` now renders the actual saved native
+Tuanzi observation in its right pane. A result file card opens, the Notebook's saved-archive
+entry works, and selecting a recorded step appends its evidence to the current draft while
+preserving text entered normally through the editor. No message was sent and no Session was
+created. Keyboard resizing was visibly checked at splitter values 70 and 55. In the current
+Codex browser, historical navigation, explicit missing-image text, and reading the actual
+UI-selected evidence through the installed SDK were verified. This is recorded-history
+acceptance only, not the outstanding live project/capture journey.
+
+The original native archive's 14 output files and 13 media references were read successfully,
+including distinct Versions with identical bytes. Its `.science` export/import returned a
+confirmed receiving Project and Session. An independent read-only audit verified all 15 receiving
+Versions, 13 media mappings and preserved producer/source identities. The receiving viewer was
+nevertheless rejected because production observation admission reused the writable-Session gate,
+which deliberately rejects imported research. The fix uses the existing Project lifecycle fence
+and exact read-only Session snapshot; execution and all write admission remain unchanged.
+Verification resumes against that confirmed import rather than importing or running it again.
+
+Actual UI acceptance also identified three presentation fixes: pass Main's desktop language into
+the isolated viewer origin; distinguish a step reference from a bibliographic reference and omit
+browser paste instructions after desktop draft delivery; and present a recorded terminal Run's
+outcome when the sampled operation was still collecting results. The archive and selected source
+evidence retain their exact original operation phase. Catalog-load failure must still render the
+normal viewer in English, rather than leave a blank page.
+
+Evidence remains under the independent `tuanzi-v056-replay-live-stage3` directory:
+`installed-2acd-native-archive-ui-audit.json`,
+`recovery-20261006-live-01-20261006T054031450Z/recovery.json`, and
+`audit-20261006T055241136915Z/native-provenance.json`. The failed recovery receipt is immutable;
+the existing-import verifier writes a new receipt and cannot execute, import or export.
+
 ## Baseline and authorization
 
 - Stage two: `6249da8b48fbbf745876ceabd2587b9d2f31f42b` on

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LOCALES, type Locale } from '../../shared/locale'
 import {
   applyRunObservationChanges,
   runObservationCursorSchema,
@@ -44,6 +45,7 @@ const liveContextSchema = z
     target: runObservationTargetSchema,
     expiresAt: z.number().finite(),
     presentation: z.enum(['desktop', 'browser']).optional(),
+    locale: z.enum(LOCALES).optional(),
     canInteract: z.boolean(),
     canCancel: z.boolean(),
     canCapture: z.boolean().optional(),
@@ -281,6 +283,15 @@ export class ReplayViewerClient {
   }
   context(signal?: AbortSignal): Promise<ReplayViewerContext> {
     return this.json('/api/context', contextSchema, undefined, signal)
+  }
+  async initialLocale(fallback: Locale, signal?: AbortSignal): Promise<Locale> {
+    try {
+      const context = await this.context(signal)
+      return context.presentation === 'desktop' ? (context.locale ?? fallback) : fallback
+    } catch {
+      // Render the normal reconnect/authorization surface even if initial context is unavailable.
+      return fallback
+    }
   }
   recordingStatus(signal?: AbortSignal): Promise<RunObservationRecordingStatus> {
     return this.json(

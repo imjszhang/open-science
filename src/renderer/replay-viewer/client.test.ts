@@ -25,6 +25,35 @@ const record = (sequence = 1): RunObservationSnapshot => ({
 const json = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 describe('scoped browser viewer transport', () => {
+  it.each(['live', 'recorded'] as const)(
+    'uses validated desktop language before painting %s Replay without overriding browser preferences',
+    async (mode) => {
+      const context = {
+        mode,
+        viewerId: 'viewer',
+        expiresAt: 10000,
+        target:
+          mode === 'recorded'
+            ? { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }
+            : { projectId: 'p', sessionId: 's', runId: 'run' },
+        presentation: 'desktop',
+        locale: 'zh-Hans',
+        canInteract: false,
+        canCancel: false,
+        canReadArtifacts: true
+      }
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(context))
+      const client = new ReplayViewerClient(fetcher)
+      expect(await client.initialLocale('en')).toBe('zh-Hans')
+      fetcher.mockResolvedValueOnce(json({ ...context, presentation: 'browser' }))
+      expect(await client.initialLocale('de')).toBe('de')
+      fetcher.mockResolvedValueOnce(json({ ...context, locale: 'unsupported' }))
+      expect(await client.initialLocale('en')).toBe('en')
+      fetcher.mockRejectedValueOnce(new Error('Offline'))
+      expect(await client.initialLocale('ja')).toBe('ja')
+    }
+  )
+
   it('requests only its bound archive and validates the exact receiving Version and bootstrap destination', async () => {
     const target = { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }
     const access = {

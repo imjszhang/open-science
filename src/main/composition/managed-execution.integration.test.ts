@@ -1,3 +1,14 @@
+import { createHash } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { ManagedFileVersionService } from '../managed-file-versions/service'
+import { ImmutableInputAuthority } from '../immutable-input-authority'
+import { ManagedFileIndexRepository } from '../project-files/repository'
+import { UploadRepository } from '../uploads/repository'
+import { SessionPackageService } from '../session-package/service'
+import { SessionPersistenceCoordinator } from '../session-persistence/coordinator'
+import { buildRunObservationArchive } from '../run-observation/archive'
+import type { RecordedObservationPayload } from '../../shared/run-observation-recorded'
 import { afterEach, expect, it, vi, type Mock } from 'vitest'
 import { createArtifactHandlers } from '../artifacts/ipc'
 import { ArtifactRunRegistry } from '../artifacts/run-registry'
@@ -25,29 +36,50 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function setup(): Promise<{
+async function setup(options: { persistedObservationAdmission?: boolean } = {}): Promise<{
   h: SessionOperationTestHarness
   composed: Awaited<ReturnType<typeof composeManagedExecution>>
   releaseRoot: Mock<() => void>
   releaseWork: Mock<() => void>
-  assertSessionAvailable: Mock<() => Promise<void>>
+  assertSessionAvailable: Mock<(projectId: string, sessionId: string) => Promise<void>>
   shutdownAll: Mock<() => Promise<{ reaped: boolean }>>
   archive: ArchiveCoordinator
   publish: Mock
   reserveSessionOperation: Mock
+  packages: SessionPackageService
+  versions: ManagedFileVersionService
 }> {
   const h = await createSessionOperationTestHarness(cleanups)
+  const versions = new ManagedFileVersionService({
+    storageRoot: h.fixture.storageRoot,
+    getClient: async () => h.fixture.client
+  })
+  const files = new ManagedFileIndexRepository(
+    async () => h.fixture.client,
+    h.fixture.storageRoot,
+    versions,
+    new UploadRepository(h.fixture.storageRoot, { getClient: async () => h.fixture.client })
+  )
+  const persistence = new SessionPersistenceCoordinator(h.sessions, files)
+  const packages = new SessionPackageService({
+    storageRoot: h.fixture.storageRoot,
+    getClient: async () => h.fixture.client
+  })
+  cleanups.push(() => packages.close())
   const registry = new ArtifactRunRegistry()
   const releaseRoot = vi.fn<() => void>()
   const releaseWork = vi.fn<() => void>()
   const reserveSessionOperation = vi.fn(async () => releaseRoot)
-  const assertSessionAvailable = vi.fn(async () => undefined)
+  const assertSessionAvailable = vi.fn(async (projectId: string, sessionId: string) => {
+    if (options.persistedObservationAdmission)
+      await persistence.assertSessionAvailable(projectId, sessionId)
+  })
   const shutdownAll = vi.fn(async () => ({ reaped: true }))
   const publish = vi.fn()
   const archive = new ArchiveCoordinator(
     {
-      get: async () => ({
-        id: scope.projectId,
+      get: async (id) => ({
+        id,
         name: 'Test',
         description: '',
         isExample: false,
@@ -58,7 +90,12 @@ async function setup(): Promise<{
     },
     {
       assertSessionAvailable,
-      sessionProjectId: async () => scope.projectId,
+      sessionProjectId: async (sessionId) =>
+        options.persistedObservationAdmission
+          ? (await h.sessions.loadAllWithDiagnostics({ mode: 'read-only' })).result.sessions.find(
+              (session) => session.id === sessionId
+            )?.projectId
+          : scope.projectId,
       assertProjectArchivable: vi.fn(),
       updateArchive: vi.fn()
     },
@@ -82,12 +119,16 @@ async function setup(): Promise<{
       artifactRepository: h.fixture.compatibilityRepository,
       artifactRunRegistry: registry,
       artifactProvenanceRepository: h.artifacts,
-      notebookRepository: h.fixture.notebookRepository
+      notebookRepository: h.fixture.notebookRepository,
+      immutableInputAuthority: new ImmutableInputAuthority({
+        storageRoot: h.fixture.storageRoot,
+        managedFileVersions: versions
+      })
     },
     sessionAuthority: {
+      projectFilesRepository: files,
       sessionPersistenceCoordinator: {
-        readSessionSnapshot: (projectId: string, sessionId: string) =>
-          h.read({ projectId, sessionId }),
+        readSessionSnapshot: persistence.readSessionSnapshot.bind(persistence),
         readSessionForOperation: (projectId: string, sessionId: string) =>
           h.read({ projectId, sessionId }),
         loadSessionForContinuation: async (projectId: string, sessionId: string) => {
@@ -106,7 +147,7 @@ async function setup(): Promise<{
         })
       }
     },
-    sessionPackages: { sessionPackageService: {} },
+    sessionPackages: { sessionPackageService: packages },
     projectLifecycle: { archiveCoordinator: archive },
     notebookRuntime: {
       notebookService: h.notebook,
@@ -136,7 +177,9 @@ async function setup(): Promise<{
     shutdownAll,
     archive,
     publish,
-    reserveSessionOperation
+    reserveSessionOperation,
+    packages,
+    versions
   }
 }
 
@@ -504,3 +547,155 @@ it.each(['quiesce', 'close'] as const)(
     expect(reconcile).toHaveBeenCalledOnce()
   }
 )
+
+it('opens a real imported recording through production composition without granting write admission', async () => {
+  const {
+    h,
+    composed,
+    packages,
+    versions,
+    archive,
+    assertSessionAvailable,
+    reserveSessionOperation
+  } = await setup({ persistedObservationAdmission: true })
+  const originalScope = { projectId: scope.projectId, sessionId: scope.sessionId }
+  const content = Buffer.from('{"status":"ready"}')
+  const media = []
+  for (const name of ['initial-status.json', 'final-status.json']) {
+    media.push(
+      await versions.adoptLegacyArtifact({
+        ...originalScope,
+        sourceFileId: name,
+        logicalFilename: name,
+        content,
+        contentType: 'application/json'
+      })
+    )
+  }
+  const recording = buildRunObservationArchive({
+    recordingId: 'composition-recording',
+    capturedAt: 100,
+    stopReason: 'run-ended',
+    history: {
+      coverage: 'process-local',
+      truncated: false,
+      snapshots: [
+        {
+          identity: { ...originalScope, runId: 'original-run' },
+          cursor: { epoch: 'original-epoch', sequence: 0 },
+          observedAt: 99,
+          phase: 'completed',
+          stepId: 'run:original-run',
+          artifacts: [],
+          artifactsTruncated: false,
+          run: {
+            runId: 'original-run',
+            kernelKind: 'bash',
+            status: 'completed',
+            startedAt: 10,
+            endedAt: 90,
+            logs: {
+              stdout: { text: 'ready', truncated: false, redacted: false },
+              stderr: { text: '', truncated: false, redacted: false },
+              traceback: { text: '', truncated: false, redacted: false }
+            }
+          }
+        }
+      ]
+    },
+    media: media.map((file, index) => ({
+      mediaKey: `status-${index}`,
+      name: index ? 'final-status.json' : 'initial-status.json',
+      mimeType: 'application/json',
+      checksum: createHash('sha256').update(content).digest('hex'),
+      sizeBytes: content.length,
+      sourceVersionId: file.versionId,
+      stepKeys: ['observation-0']
+    }))
+  })
+  const source = await versions.adoptLegacyArtifact({
+    ...originalScope,
+    sourceFileId: 'observation',
+    logicalFilename: 'run-observation.json',
+    content: Buffer.from(JSON.stringify(recording)),
+    contentType: 'application/json'
+  })
+  const packagePath = join(h.fixture.storageRoot, 'recording.science')
+  await packages.exportTo(originalScope, packagePath)
+  const imported = await packages.importFrom(packagePath)
+  const receipt = await packages.readOrigin(imported)
+  const target = {
+    projectId: imported.projectId,
+    sessionId: imported.sessionId,
+    artifactId: receipt.identities[source.fileId],
+    versionId: receipt.identities[source.versionId]
+  }
+  const importedSession = await h.read(imported)
+  expect(importedSession?.packageOrigin).toBeDefined()
+  const sessionPath = join(
+    h.fixture.storageRoot,
+    'sessions',
+    imported.projectId,
+    `${imported.sessionId}.json`
+  )
+  const before = await readFile(sessionPath)
+  // This is the real pre-existing write-admission rule, not a mock that silently accepts imports.
+  await expect(
+    archive.withSessionAvailable(imported.projectId, imported.sessionId, async () => undefined)
+  ).rejects.toThrow('read-only')
+  assertSessionAvailable.mockClear()
+  const mapping = vi.spyOn(packages, 'readArtifactSourceVersionMapping')
+  const caller = createTaskCallerContext()
+  const view = (await composed.external.observation!.call('openRecorded', { target }, caller)) as {
+    viewerId: string
+  }
+  const payload = (await composed.external.observation!.call(
+    'recording',
+    { viewerId: view.viewerId },
+    caller
+  )) as RecordedObservationPayload
+  expect(payload.receiving).toEqual(target)
+  expect(payload.archive).toEqual(recording)
+  expect(payload.media.map((item) => item.versionId)).toEqual(
+    media.map((item) => receipt.identities[item.versionId])
+  )
+  expect(mapping).toHaveBeenCalledWith(
+    imported,
+    expect.objectContaining({ artifactId: target.artifactId, versionId: target.versionId })
+  )
+  const selection = await composed.external.observation!.call(
+    'selectRecording',
+    { viewerId: view.viewerId, stepKey: 'observation-0' },
+    caller
+  )
+  expect(selection).toMatchObject({ receiving: target, record: recording.records[0] })
+  expect(await readFile(sessionPath)).toEqual(before)
+  expect(assertSessionAvailable).not.toHaveBeenCalled()
+  expect(reserveSessionOperation).not.toHaveBeenCalled()
+  expect(h.kernelExecute).not.toHaveBeenCalled()
+  // Cross-scope IDs and revocation still fail; no new execution or imported Session mutation.
+  await expect(
+    composed.external.observation!.call(
+      'openRecorded',
+      { target: { ...target, sessionId: scope.sessionId } },
+      caller
+    )
+  ).rejects.toMatchObject({ code: 'unavailable' })
+  composed.hold()
+  await expect(
+    composed.external.observation!.call('recording', { viewerId: view.viewerId }, caller)
+  ).rejects.toMatchObject({ code: 'unavailable' })
+  composed.resume()
+  await archive.withProjectDeletion(imported.projectId, async () => undefined)
+  await expect(
+    composed.external.observation!.call('recording', { viewerId: view.viewerId }, caller)
+  ).rejects.toMatchObject({ code: 'unavailable' })
+  archive.releaseProjectDeletion(imported.projectId)
+  // A persisted Session archive remains unavailable even though its immutable Artifact exists.
+  const envelope = JSON.parse(before.toString())
+  envelope.session.archivedAt = 1
+  await writeFile(sessionPath, JSON.stringify(envelope))
+  await expect(
+    composed.external.observation!.call('openRecorded', { target }, caller)
+  ).rejects.toMatchObject({ code: 'unavailable' })
+}, 60000)

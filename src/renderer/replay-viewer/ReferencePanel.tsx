@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../src/components/ui/button'
 export const ReferencePanel = ({
   reference,
-  observedAt
+  observedAt,
+  presentation
 }: {
   reference: string
   observedAt?: number
+  presentation?: 'desktop' | 'browser'
 }): React.JSX.Element => {
   const { t } = useTranslation()
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'manual'>('idle')
@@ -24,11 +26,13 @@ export const ReferencePanel = ({
       aria-label={t('Recorded step reference')}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs">
-          {t(
-            'Paste this reference into your conversation. Your agent can read the saved selection through the Open Science SDK.'
-          )}
-        </p>
+        {presentation !== 'desktop' ? (
+          <p className="text-xs">
+            {t(
+              'Paste this reference into your conversation. Your agent can read the saved selection through the Open Science SDK.'
+            )}
+          </p>
+        ) : null}
         <Button
           size="sm"
           variant="secondary"
@@ -36,7 +40,7 @@ export const ReferencePanel = ({
             void copy()
           }}
         >
-          {copyState === 'copied' ? t('Copied') : t('Copy reference')}
+          {copyState === 'copied' ? t('Copied') : t('Copy step reference')}
         </Button>
       </div>
       {observedAt !== undefined ? (

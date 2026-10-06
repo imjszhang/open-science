@@ -134,7 +134,16 @@ export const projectRecordedObservation = (
       },
       cursor: { epoch: syntheticId, sequence: index },
       observedAt: record.observedAt,
-      phase: record.phase,
+      // Publication happens after the Run ends. An immutable recording may therefore end
+      // with a terminal Run and a still-collecting operation. Present the recorded Run's
+      // outcome; selections below retain the exact original record and publication phase.
+      phase:
+        record.phase === 'collecting' &&
+        record.run &&
+        record.run.status !== 'queued' &&
+        record.run.status !== 'running'
+          ? record.run.status
+          : record.phase,
       stepId: record.stepKey,
       // The archive clone already owns and freezes these logs; reuse them across projections.
       run: record.run ? { ...record.run, runId: syntheticId } : null,

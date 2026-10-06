@@ -7364,6 +7364,7 @@
     "This captured image is awaiting archive publication.": "Esta imagen capturada está pendiente de la publicación del archivo.",
     "Previous image": "Imagen anterior",
     "Next image": "Imagen siguiente",
-    "Recorded project image": "Imagen registrada del proyecto"
+    "Recorded project image": "Imagen registrada del proyecto",
+    "Copy step reference": "Copiar referencia del paso"
   }
 }

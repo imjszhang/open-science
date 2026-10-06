@@ -88,6 +88,30 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('recorded Run observation preview', () => {
+  it('shows the saved Run outcome without presenting archive publication as ongoing work', () => {
+    const archive = fixture()
+    archive.records[1].phase = 'collecting'
+    archive.records[1].run!.status = 'completed'
+    const ask = vi.fn()
+    render(
+      <RecordedRunObservationPreview
+        archive={archive}
+        receiving={receiving}
+        media={[]}
+        title="Archived run"
+        readResource={vi.fn()}
+        onAskArchiveSelection={ask}
+      />
+    )
+    expect(screen.getByText('Recorded run: Completed')).toBeTruthy()
+    expect(screen.getByTestId('observation-phase').textContent).toBe('Completed')
+    expect(screen.queryByText('Saving results')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this step' }))
+    expect(ask.mock.calls[0][0].record).toMatchObject({
+      phase: 'collecting',
+      run: { status: 'completed' }
+    })
+  })
   it('shows a saved capture in its exact archive step with actual capture time and no live page', async () => {
     const archive = fixture()
     archive.media = [

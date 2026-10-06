@@ -56,6 +56,7 @@ function harness(
     listCaptures?: ReplayViewerHttpDependencies['listCaptures']
     readCapture?: ReplayViewerHttpDependencies['readCapture']
     recordingStatus?: ReplayViewerHttpDependencies['recordingStatus']
+    desktopLocale?: ReplayViewerHttpDependencies['desktopLocale']
   } = {}
 ): Harness {
   let authorized = true
@@ -130,6 +131,7 @@ function harness(
             : undefined)
   )
   const host = new ReplayViewerHttpHost({
+    desktopLocale: options.desktopLocale,
     ...(options.capture
       ? {
           capture: options.capture,
@@ -295,6 +297,33 @@ describe('isolated Replay viewer HTTP host', () => {
       expect((await v.post('/api/open-archive', {})).status).toBe(409)
       expect(create).not.toHaveBeenCalled()
       expect(h.projectOpen).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['live', 'recorded'] as const)(
+    'projects Main desktop language only to %s Electron viewers',
+    async (mode) => {
+      const h = harness({ recorded: true, desktopLocale: () => 'zh-Hans' })
+      const owner = createCallerContext({ ...h.owner, surface: 'electron', clientId: '17' })
+      const archive = {
+        projectId: scope.projectId,
+        sessionId: scope.sessionId,
+        artifactId: 'a',
+        versionId: 'v'
+      }
+      const access =
+        mode === 'recorded'
+          ? await h.host.openRecorded(archive, owner, { desktopParent: 'file:' })
+          : await h.host.open(scope, owner, { desktopParent: 'file:' })
+      const boot = await http(access.url)
+      const cookie = boot.headers['set-cookie']![0].split(';')[0]
+      expect(
+        JSON.parse(
+          (await http(new URL(access.url).origin + '/api/context', { headers: { cookie } })).body
+        )
+      ).toMatchObject({ presentation: 'desktop', locale: 'zh-Hans' })
+      const browser = await open(h)
+      expect(JSON.parse((await browser.get('/api/context')).body)).not.toHaveProperty('locale')
     }
   )
 

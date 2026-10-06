@@ -87,6 +87,20 @@ const media = [
 ]
 
 describe('portable observation UI projection', () => {
+  it.each(['completed', 'failed', 'cancelled', 'interrupted', 'timeout'] as const)(
+    'presents a %s recorded Run while preserving the sampled publication phase in evidence',
+    (status) => {
+      const archive = fixture()
+      const last = archive.records.at(-1)!
+      last.phase = 'collecting'
+      last.run!.status = status
+      const projected = projectRecordedObservation(archive, receiving, media)
+      expect(projected.snapshots.at(-1)!.phase).toBe(status)
+      expect(projected.snapshots[0].phase).toBe('running')
+      expect(projected.select(projected.snapshots.at(-1)!).record).toEqual(last)
+      expect(last.phase).toBe('collecting')
+    }
+  )
   it('retains sender evidence separately and authorizes only exact receiver media Versions', async () => {
     const archive = fixture(),
       projected = projectRecordedObservation(archive, receiving, media)

@@ -56,6 +56,7 @@ export const RecordedViewerApp = ({
     <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
       {reference ? (
         <ReferencePanel
+          presentation={context.presentation}
           key={reference}
           reference={reference}
           observedAt={selection?.record.observedAt}

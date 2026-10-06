@@ -18,6 +18,8 @@ import { ObservationRecordingStatus } from '../src/pages/workspace/replay/Observ
 import { ObservationCaptureControls } from './ObservationCaptureControls'
 import { capturesForObservation, useViewerCaptures } from './use-viewer-captures'
 import { RecordedProjectImages } from '../src/pages/workspace/replay/RecordedProjectImages'
+import { i18next, prepareI18nLocale, setI18nLocale } from '../src/i18n'
+import { applyHtmlLang } from '../src/lib/locale-preference'
 
 const unavailableResource = async (): Promise<{
   status: 'unavailable'
@@ -44,6 +46,23 @@ export const ViewerApp = ({
   const [client] = useState(() => providedClient ?? new ReplayViewerClient())
   const [retry, setRetry] = useState(0)
   const { context, history, recording, connection, error } = useViewerObservation(client, retry)
+  const desktopLocale = context?.presentation === 'desktop' ? context.locale : undefined
+  useEffect(() => {
+    if (!desktopLocale || i18next.language === desktopLocale) return
+    let disposed = false
+    // A timed-out initial context read must not permanently strand a desktop viewer in its
+    // browser fallback language after the normal observation connection recovers.
+    void Promise.resolve(prepareI18nLocale(desktopLocale))
+      .then(() => {
+        if (disposed) return
+        setI18nLocale(desktopLocale)
+        applyHtmlLang(desktopLocale)
+      })
+      .catch(() => undefined)
+    return () => {
+      disposed = true
+    }
+  }, [desktopLocale])
   const snapshot = history?.snapshots.at(-1)
   const captured = useViewerCaptures(
     client,
@@ -291,6 +310,7 @@ export const ViewerApp = ({
       ) : null}
       {reference ? (
         <ReferencePanel
+          presentation={context?.presentation}
           key={reference}
           reference={reference}
           observedAt={selection?.snapshot.observedAt}

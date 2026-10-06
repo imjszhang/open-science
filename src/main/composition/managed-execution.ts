@@ -75,6 +75,7 @@ export async function composeManagedExecution({
   projectLifecycle,
   notebookRuntime,
   runtimeRef,
+  desktopLocale,
   modules
 }: {
   applicationEvents: ApplicationEventPublisher
@@ -84,6 +85,7 @@ export async function composeManagedExecution({
   projectLifecycle: ReturnType<typeof composeProjectLifecycle>
   notebookRuntime: Awaited<ReturnType<typeof composeNotebookRuntime>>
   runtimeRef: { current: ReturnType<typeof createAcpRuntime> | undefined }
+  desktopLocale?: () => import('../../shared/locale').Locale
   modules: ApplicationModuleBuilder
 }): Promise<ManagedExecutionComposition> {
   const dataRoot = await realpath(resolveDataRoot()).catch((error: NodeJS.ErrnoException) => {
@@ -393,8 +395,19 @@ export async function composeManagedExecution({
     sessionId: string
   }): Promise<void> => {
     assertOpen(scope)
-    await archive.withSessionAvailable(scope.projectId, scope.sessionId, async () => {
-      if (!(await sessions.readSessionSnapshot(scope.projectId, scope.sessionId)))
+    // Observing an imported research Session is read-only. The execution admission gate rejects
+    // packageOrigin by design, so keep the Project lifecycle fence and use the existing non-owning
+    // Session read instead. Execute/material/write entry points retain their writable admission.
+    await archive.withProjectAvailable(scope.projectId, async () => {
+      const session = await sessions.readSessionSnapshot(scope.projectId, scope.sessionId, {
+        preserveRuntimeState: true
+      })
+      if (
+        !session ||
+        session.id !== scope.sessionId ||
+        session.projectId !== scope.projectId ||
+        session.archivedAt !== undefined
+      )
         throw new Error('The observed Session is unavailable.')
     })
     assertOpen(scope)
@@ -452,6 +465,7 @@ export async function composeManagedExecution({
     }
   }
   const viewerHost = new ReplayViewerHttpHost({
+    desktopLocale,
     listCaptures: async (target, signal) => {
       signal.throwIfAborted()
       try {
