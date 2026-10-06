@@ -64,7 +64,9 @@ The older Tuanzi live-07 package contains offline engineering evidence only. Its
 protocol is not a completed reference experiment. A separate v0.5.6 live-materials set now freezes
 one small author baseline and three recipient executions. The first real G request reached the
 configured provider but hit the experiment's 60-second I/O timeout before a complete response.
-No valid G/S baseline or recipient outcome is claimed. These four executions validate the product path,
+That failed trial is retained. A separately recorded timeout/output amendment has since completed
+the author G/S baseline and native result-package round trip with 14,037 reported tokens. The three
+recipient entries are still being verified. These four executions validate the product path,
 not the proposed 20-pair scientific study or a statistically supported treatment effect.
 
 The user authorized the existing Tuanzi `.env` configuration and then replaced the monetary limit

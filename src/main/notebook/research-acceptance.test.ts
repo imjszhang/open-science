@@ -8,9 +8,12 @@ import {
   ephemeralAcceptanceCipher,
   readAcceptanceBudgetSeal,
   readAcceptanceCredentials,
+  reconcileAcceptanceAdmissionFailure,
   reconcileAcceptanceZeroDispatchFailure,
+  recordAcceptanceAdmissionFailure,
   recordAcceptanceTrialUsage,
-  reserveAcceptanceTrial
+  reserveAcceptanceTrial,
+  type AcceptanceAdmissionFailure
 } from './research-acceptance.test-support'
 vi.mock('electron', () => ({ safeStorage: { isEncryptionAvailable: () => false } }))
 const roots: string[] = []
@@ -36,7 +39,7 @@ async function fixture(): Promise<{ root: string; budgetPath: string }> {
   await writeFile(budgetPath, JSON.stringify(sealed))
   return { root, budgetPath }
 }
-const zeroUsage = {
+const zeroUsage: AcceptanceAdmissionFailure['usage'] = {
   unit: 'tokens' as const,
   state: 'complete' as const,
   knownUnits: 0,
@@ -271,6 +274,176 @@ it('serializes explicit admission so concurrent duplicate starts consume an arm 
     reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')
   ])
   expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+})
+async function admissionFailureFixture(
+  evidenceBasis: AcceptanceAdmissionFailure['evidenceBasis'] = 'harness-catch'
+): Promise<
+  Awaited<ReturnType<typeof zeroDispatchFixture>> & {
+    receiptPath: string
+    admission: AcceptanceAdmissionFailure
+  }
+> {
+  const f = await zeroDispatchFixture()
+  const receipt: AcceptanceAdmissionFailure = {
+    schemaVersion: 1,
+    kind: 'acceptance-before-execution-entry-failure',
+    status: 'failed',
+    evidenceBasis,
+    recordedAt: new Date().toISOString(),
+    trialId: 'author',
+    budgetDocumentSha256: f.seal.sha256,
+    phase: 'prepare',
+    dispatchAttempted: false,
+    usage: zeroUsage,
+    errorCode: 'PREPARE_FAILED',
+    source: {
+      inputPackageSha256: 'a'.repeat(64),
+      descriptorSha256: 'b'.repeat(64),
+      sourceIdentity: evidenceBasis === 'harness-catch' ? 'source' : null,
+      projectId: 'project',
+      sessionId: 'session'
+    },
+    request: {
+      method: 'execution.prepare',
+      requestId: 'prepare-research',
+      sha256: evidenceBasis === 'harness-catch' ? 'c'.repeat(64) : null
+    },
+    nativeOperationId: null,
+    notebookRunIds: [],
+    basisFiles: []
+  }
+  if (evidenceBasis === 'operator-attestation') {
+    for (const [role, bytes] of [
+      ['harness-log', 'Synthetic prepare error, before execute.'],
+      ['harness-source', 'Synthetic code review: execute follows successful prepare.'],
+      [
+        'ledger-snapshot',
+        await readFile(join(f.root, 'live-acceptance-budget-ledger.json'), 'utf8')
+      ]
+    ] as const) {
+      const path = join(f.root, role + '.txt')
+      await writeFile(path, bytes)
+      receipt.basisFiles.push({ role, path, sha256: digest(bytes) })
+    }
+  }
+  const receiptPath = join(f.root, 'before-execution-entry-failure.json')
+  await recordAcceptanceAdmissionFailure(receiptPath, receipt)
+  return { ...f, receiptPath, admission: receipt }
+}
+it.each(['harness-catch', 'operator-attestation'] as const)(
+  'requires explicit one-shot reconciliation for a %s pre-execution failure, retaining original spend',
+  async (basis) => {
+    const f = await admissionFailureFixture(basis)
+    const path = join(f.root, 'live-acceptance-budget-ledger.json')
+    const before = JSON.parse(await readFile(path, 'utf8')).reservations[0]
+    await expect(reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')).rejects.toThrow(
+      'already reserved'
+    )
+    await expect(
+      recordAcceptanceAdmissionFailure(f.receiptPath, f.admission)
+    ).rejects.toMatchObject({ code: 'EEXIST' })
+    await reconcileAcceptanceAdmissionFailure(f.budgetPath, f.seal, 'author', f.receiptPath)
+    const armed = JSON.parse(await readFile(path, 'utf8')).reservations[0]
+    expect(armed.admissionFailureReconciliation).toMatchObject({
+      previousUsage: zeroUsage,
+      previousUsageRecordedAt: before.usageRecordedAt,
+      receipt: { sha256: digest(await readFile(f.receiptPath, 'utf8')) },
+      attestation: f.admission
+    })
+    expect(armed.zeroDispatchReconciliation).toBeUndefined()
+    await reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')
+    const ledger = JSON.parse(await readFile(path, 'utf8'))
+    expect(ledger.reservations).toHaveLength(1)
+    expect(ledger.reservations[0]).toMatchObject({
+      reservedAt: before.reservedAt,
+      maximumUnits: before.maximumUnits,
+      usage: { state: 'unknown', knownUnits: null },
+      admissionFailureReconciliation: { consumedAt: expect.any(String) }
+    })
+    await expect(reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')).rejects.toThrow(
+      'already reserved'
+    )
+    await recordAcceptanceTrialUsage(f.budgetPath, f.seal, 'author', zeroUsage)
+    await expect(
+      reconcileAcceptanceAdmissionFailure(f.budgetPath, f.seal, 'author', f.receiptPath)
+    ).rejects.toThrow('one explicit')
+    await expect(
+      reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+    ).rejects.toThrow('one explicit')
+  }
+)
+it.each([
+  ['dispatchAttempted', true],
+  ['phase', 'execute'],
+  ['status', 'completed'],
+  ['trialId', 'external'],
+  ['budgetDocumentSha256', '0'.repeat(64)],
+  ['usage', { ...zeroUsage, state: 'unknown', knownUnits: null }],
+  ['nativeOperationId', 'possibly-started'],
+  ['notebookRunIds', ['started-run']],
+  ['errorCode', 'arbitrary unreviewed server text'],
+  ['errorMessage', 'raw sensitive text'],
+  [
+    'source',
+    {
+      inputPackageSha256: 'a'.repeat(64),
+      descriptorSha256: 'b'.repeat(64),
+      sourceIdentity: null,
+      projectId: 'p',
+      sessionId: 's'
+    }
+  ],
+  ['request', { method: 'execution.prepare', requestId: 'request', sha256: null }]
+] as const)(
+  'refuses an uncertain or mismatched pre-execution attestation: %s',
+  async (key, value) => {
+    const f = await admissionFailureFixture()
+    await writeFile(f.receiptPath, JSON.stringify({ ...f.admission, [key]: value }))
+    const ledgerPath = join(f.root, 'live-acceptance-budget-ledger.json'),
+      before = await readFile(ledgerPath, 'utf8')
+    await expect(
+      reconcileAcceptanceAdmissionFailure(f.budgetPath, f.seal, 'author', f.receiptPath)
+    ).rejects.toThrow('reviewed pre-execution')
+    expect(await readFile(ledgerPath, 'utf8')).toBe(before)
+  }
+)
+it.each([
+  'missing-log',
+  'changed-source',
+  'mismatched-ledger',
+  'unknown-current-usage',
+  'prior-reconciliation'
+])('refuses insufficient or stale manual review evidence: %s', async (mode) => {
+  const f = await admissionFailureFixture('operator-attestation')
+  const ledgerPath = join(f.root, 'live-acceptance-budget-ledger.json')
+  if (mode === 'missing-log')
+    f.admission.basisFiles = f.admission.basisFiles.filter((file) => file.role !== 'harness-log')
+  if (mode === 'changed-source')
+    await writeFile(
+      f.admission.basisFiles.find((file) => file.role === 'harness-source')!.path,
+      'Changed code'
+    )
+  if (mode === 'mismatched-ledger') {
+    const basis = f.admission.basisFiles.find((file) => file.role === 'ledger-snapshot')!
+    const value = JSON.parse(await readFile(basis.path, 'utf8'))
+    value.reservations[0].reservedAt = 'another reservation'
+    const bytes = JSON.stringify(value)
+    await writeFile(basis.path, bytes)
+    basis.sha256 = digest(bytes)
+  }
+  if (mode === 'unknown-current-usage') {
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'))
+    delete ledger.reservations[0].usageRecordedAt
+    await writeFile(ledgerPath, JSON.stringify(ledger))
+  }
+  if (mode === 'prior-reconciliation')
+    await reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  await writeFile(f.receiptPath, JSON.stringify(f.admission))
+  const before = await readFile(ledgerPath, 'utf8')
+  await expect(
+    reconcileAcceptanceAdmissionFailure(f.budgetPath, f.seal, 'author', f.receiptPath)
+  ).rejects.toThrow()
+  expect(await readFile(ledgerPath, 'utf8')).toBe(before)
 })
 it.each([
   { status: 'pending' },

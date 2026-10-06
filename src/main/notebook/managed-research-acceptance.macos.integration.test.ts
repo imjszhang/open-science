@@ -16,9 +16,18 @@ import {
   ephemeralAcceptanceCipher,
   readAcceptanceBudgetSeal,
   readAcceptanceCredentials,
+  recordAcceptanceAdmissionFailure,
+  type AcceptanceAdmissionFailure,
   recordAcceptanceTrialUsage,
   reserveAcceptanceTrial
 } from './research-acceptance.test-support'
+import {
+  readAcceptanceResume,
+  copyAcceptanceResume,
+  verifyAcceptanceMaterialFiles,
+  verifyAcceptanceResumeReservations,
+  type ValidatedAcceptanceResume
+} from './research-acceptance-resume.test-support'
 import { ApplicationEventHub } from '../application-events'
 import { ImmutableInputAuthority } from '../immutable-input-authority'
 import { createManagedExecutionExternalPort } from '../managed-execution-external-port'
@@ -38,7 +47,7 @@ import {
   createResearchMaterialAuthority,
   resolvePreparedResearchMaterialInput
 } from './research-material-authority'
-import type { ResearchMaterialInspection } from './research-materials'
+import { inspectResearchMaterials, type ResearchMaterialInspection } from './research-materials'
 import {
   createSessionOperationTestHarness,
   operationTestScope,
@@ -62,6 +71,8 @@ vi.mock('electron', () => ({
 // No project-specific API, command, outcome or material path belongs in this generic harness.
 const materialsRoot = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_MATERIALS
 const evidenceRoot = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_OUTPUT
+const resumeRoot = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_RESUME_FROM
+const validateResumeOnly = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_RESUME_VALIDATE_ONLY === '1'
 const packageOnly = process.env.OPEN_SCIENCE_MANAGED_RESEARCH_PACKAGE_ONLY === '1'
 const cleanups: Array<() => Promise<unknown>> = []
 async function disposeCleanups(from = 0): Promise<void> {
@@ -272,6 +283,105 @@ async function publishMaterials(
   return path
 }
 
+async function verifyResumedNativeArchives(
+  output: string,
+  snapshot: ValidatedAcceptanceResume,
+  descriptorSha256: string
+): Promise<void> {
+  const cleanupStart = cleanups.length
+  try {
+    const h = await createSessionOperationTestHarness(cleanups, { canonicalStorageRoot: true })
+    const packages = packageService(h),
+      api = await client(h, transfer(packages))
+    const versions = new ManagedFileVersionService({
+      storageRoot: h.fixture.storageRoot,
+      getClient: async () => h.fixture.client
+    })
+    const inputAuthority = new ImmutableInputAuthority({
+      storageRoot: h.fixture.storageRoot,
+      managedFileVersions: versions
+    })
+    const catalog = new ManagedFileIndexRepository(
+      async () => h.fixture.client,
+      h.fixture.storageRoot,
+      versions,
+      new UploadRepository(h.fixture.storageRoot, { getClient: async () => h.fixture.client })
+    )
+    for (const entry of [undefined, ...snapshot.report.entries]) {
+      const filePath = join(output, entry ? `${entry.entry}-results.science` : 'research.science')
+      const preview = await api.packages.preflightImport({
+        filePath,
+        target: { projectId: scope.projectId }
+      })
+      const imported = await api.packages.commitImport({ preflightId: preview.preflightId })
+      expect(imported.cleanupPending).not.toBe(true)
+      const target = { projectId: imported.projectId, sessionId: imported.sessionId }
+      const authority = await createResearchMaterialAuthority(
+        {
+          catalog,
+          inputAuthority,
+          readSession: (projectId, sessionId) => h.read({ projectId, sessionId }),
+          readOrigin: (request) => packages.readOrigin(request)
+        },
+        {
+          projectId: target.projectId,
+          targetSessionId: scope.sessionId,
+          sourceSessionId: target.sessionId
+        }
+      )
+      const matchingDescriptors = authority.versions.filter(
+        (version) =>
+          (version.descriptor || version.filename === 'research-reproduction.json') &&
+          version.sha256 === descriptorSha256
+      )
+      expect(matchingDescriptors.length).toBeGreaterThan(0)
+      const inspected = await inspectResearchMaterials(authority, {
+        descriptorVersionId: matchingDescriptors.sort((a, b) =>
+          a.versionId.localeCompare(b.versionId)
+        )[0].versionId
+      })
+      expect(inspected.status).toBe('ready')
+      expect(inspected.descriptor?.sha256).toBe(descriptorSha256)
+      if (!entry) continue
+      const origin = await packages.readOrigin(target)
+      const mappedRunId = origin.identities[entry.notebookRunId]
+      expect(typeof mappedRunId).toBe('string')
+      const runs = await h.fixture.notebookRepository.readSessionRuns(
+        target.projectId,
+        target.sessionId
+      )
+      expect(runs.find((run) => run.runId === mappedRunId)).toMatchObject({
+        status: 'completed',
+        exitCode: 0
+      })
+      const session = (await h.read(target))!
+      for (const [path, bytes] of snapshot.files) {
+        if (!path.startsWith(entry.entry + '/')) continue
+        const filename = path.slice(entry.entry.length + 1)
+        const candidates = (session.artifacts ?? []).filter(
+          (artifact) => artifact.name === filename && artifact.versionId
+        )
+        let verified = false
+        for (const artifact of candidates) {
+          const version = await h.fixture.client.artifactVersion.findUnique({
+            where: { id: artifact.versionId! }
+          })
+          if (version?.producerRunId !== mappedRunId) continue
+          expect(await readFile(join(h.fixture.storageRoot, version.contentStorageKey))).toEqual(
+            bytes
+          )
+          verified = true
+        }
+        expect(verified, `Resume package has no matching current producer for ${filename}`).toBe(
+          true
+        )
+      }
+    }
+  } finally {
+    await disposeCleanups(cleanupStart)
+  }
+}
+
 it.skipIf(process.platform !== 'darwin' || !packageOnly || !materialsRoot || !evidenceRoot)(
   'publishes reviewed materials and exports a package without starting engineering Runs or scientific trials',
   async () => {
@@ -337,6 +447,8 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
   async () => {
     const root = await realpath(materialsRoot!)
     const output = resolve(evidenceRoot!)
+    if (validateResumeOnly && !resumeRoot)
+      throw new Error('Resume validation requires explicit prior evidence.')
     await mkdir(output, { recursive: false })
     const acceptance = JSON.parse(
       await readFile(join(root, 'acceptance.json'), 'utf8')
@@ -358,7 +470,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
     if (
       acceptance.live &&
       (!budgetPath!.startsWith(root + '/') ||
-        process.env.OPEN_SCIENCE_MANAGED_RESEARCH_ALLOW_PAID !== '1')
+        (process.env.OPEN_SCIENCE_MANAGED_RESEARCH_ALLOW_PAID !== '1' && !validateResumeOnly))
     )
       throw new Error(
         'Live acceptance requires a sealed budget and an explicit operator start; no inference was dispatched.'
@@ -398,9 +510,43 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         trialIds.some((id) => !budget.trialIds.includes(id)))
     )
       throw new Error('The four acceptance entries must map exactly to the sealed trial IDs.')
-    let archive = await publishMaterials(root, output, acceptance)
-    const evidence: unknown[] = []
-    const sourcePackageSha256 = sha(await readFile(archive))
+    const descriptorSha256 = await verifyAcceptanceMaterialFiles(
+      root,
+      acceptance.descriptorFilename
+    )
+    if (resumeRoot && (!acceptance.live || !budget))
+      throw new Error(
+        'Resume requires the same reviewed live acceptance budget and four entry identities.'
+      )
+    const resumed = resumeRoot
+      ? await readAcceptanceResume(resumeRoot, {
+          title: acceptance.title,
+          planKey: acceptance.planKey,
+          planScope: expectedPlanScope,
+          budgetSha256: budget!.sha256,
+          usageReceiptFilename: usageReceiptFilename!,
+          trialIds: acceptance.live!.trialIds,
+          outputs: acceptance.outputs ?? [],
+          assertions: acceptance.expect.jsonAssertions
+        })
+      : undefined
+    let archive: string
+    if (resumed) {
+      await verifyAcceptanceResumeReservations(
+        resumed,
+        budgetPath!,
+        budget!,
+        acceptance.live!.trialIds,
+        usageReceiptFilename!
+      )
+      await copyAcceptanceResume(resumed, output)
+      // Import each saved archive through the native package validator and bind output bytes to
+      // the mapped completed Notebook producer before skipping any paid entry.
+      await verifyResumedNativeArchives(output, resumed, descriptorSha256)
+      archive = join(output, 'author-results.science')
+    } else archive = await publishMaterials(root, output, acceptance)
+    const evidence: unknown[] = [...(resumed?.report.entries ?? [])]
+    const sourcePackageSha256 = resumed?.report.sourcePackageSha256 ?? sha(await readFile(archive))
     const writeEvidence = async (status: 'passed' | 'in-progress'): Promise<void> => {
       await writeFile(
         join(output, 'acceptance-results.json'),
@@ -411,6 +557,8 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
             planKey: acceptance.planKey,
             planScope: expectedPlanScope,
             sourcePackageSha256,
+            descriptorSha256,
+            ...(resumed ? { resumedFrom: resumed.provenance } : {}),
             entries: evidence
           },
           null,
@@ -421,10 +569,33 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
     const entries = acceptance.live
       ? (['author', 'external', 'ordinary', 'fork'] as const)
       : (['external', 'ordinary', 'fork'] as const)
-    for (const entry of entries) {
+    await writeEvidence('in-progress')
+    const remainingEntries = entries.slice(resumed?.report.entries.length ?? 0)
+    if (validateResumeOnly) {
+      await writeFile(
+        join(output, 'resume-validation.json'),
+        JSON.stringify(
+          {
+            status: 'validated',
+            completedEntries: resumed!.report.entries.map((entry) => entry.entry),
+            remainingEntries,
+            nativeArchivesVerified: true,
+            credentialsRead: false,
+            executionEntriesInvoked: 0
+          },
+          null,
+          2
+        ),
+        { flag: 'wx' }
+      )
+      await disposeCleanups()
+      return
+    }
+    for (const entry of remainingEntries) {
       const cleanupStart = cleanups.length
       let reservedTrialId: string | undefined
       let dispatchAttempted = false
+      let pendingPrepare: Pick<AcceptanceAdmissionFailure, 'source' | 'request'> | undefined
       try {
         console.info(
           JSON.stringify({ event: 'research-acceptance-entry', entry, phase: 'prepare' })
@@ -528,11 +699,16 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         const target = entry === 'fork' ? await packages.fork(imported) : scope
         expect((await h.read(target))?.packageOrigin).toBeUndefined()
         if (entry === 'fork') expect((await h.read(target))?.forkOrigin).toBeDefined()
+        await h.mutate(target, (session) => ({
+          ...session,
+          title: `${acceptance.title} — ${entry}`
+        }))
         const inspected = (await api.execution.inspectMaterials({
           ...target,
           sourceSessionId: imported.sessionId
         })) as ResearchMaterialInspection
         expect(inspected.status).toBe('ready')
+        expect(inspected.descriptor?.sha256).toBe(descriptorSha256)
         const plan = inspected.description!.plans.find((item) => item.key === acceptance.planKey)!
         expect(plan.scope).toBe(expectedPlanScope)
         let profileId: string | undefined
@@ -590,7 +766,17 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           reservedTrialId = acceptance.live.trialIds[entry]
         }
         const available = await api.execution.runtimes()
-        const prepared = await api.execution.prepare({
+        const materialVersions = Object.fromEntries(
+          plan.materialKeys.map((key) => {
+            const material = inspected.materials?.find((item) => item.key === key)
+            if (material?.status !== 'available' || !material.versionIds?.length)
+              throw new Error('Reviewed plan material has no verified immutable version.')
+            // Equal-content versions can have distinct lineage (for example an author's config output).
+            // The harness explicitly selects the stable first matching source-closure ID.
+            return [key, [...material.versionIds].sort()[0]]
+          })
+        )
+        const prepareRequest = {
           ...target,
           requestId: 'prepare-research',
           sourceSessionId: imported.sessionId,
@@ -598,9 +784,39 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           runtimeId: available.runtimes[0].runtimeId,
           materials: {
             descriptorVersionId: inspected.descriptor!.versionId,
-            materialKeys: plan.materialKeys
+            materialKeys: plan.materialKeys,
+            materialVersions
           }
-        })
+        }
+        pendingPrepare = {
+          source: {
+            inputPackageSha256,
+            descriptorSha256,
+            sourceIdentity: inspected.source.identity,
+            ...target
+          },
+          request: {
+            method: 'execution.prepare',
+            requestId: prepareRequest.requestId,
+            sha256: sha(JSON.stringify(prepareRequest))
+          }
+        }
+        await writeFile(
+          join(output, `${entry}-material-selection.json`),
+          JSON.stringify(
+            {
+              sourceIdentity: inspected.source.identity,
+              descriptorSha256,
+              materialVersions,
+              choice: 'lexicographically-first-verified-source-version'
+            },
+            null,
+            2
+          ),
+          { flag: 'wx' }
+        )
+        const prepared = await api.execution.prepare(prepareRequest)
+        pendingPrepare = undefined
         const request = {
           ...target,
           requestId: 'run-research',
@@ -815,6 +1031,35 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
             requestsWithUsage: 0,
             requestsWithoutUsage: 0
           })
+          if (pendingPrepare) {
+            await recordAcceptanceAdmissionFailure(
+              join(output, `${entry}-before-execution-entry-failure.json`),
+              {
+                schemaVersion: 1,
+                kind: 'acceptance-before-execution-entry-failure',
+                status: 'failed',
+                evidenceBasis: 'harness-catch',
+                recordedAt: new Date().toISOString(),
+                trialId: reservedTrialId,
+                budgetDocumentSha256: budget.sha256,
+                phase: 'prepare',
+                dispatchAttempted: false,
+                usage: {
+                  unit: 'tokens',
+                  state: 'complete',
+                  knownUnits: 0,
+                  requestCount: 0,
+                  requestsWithUsage: 0,
+                  requestsWithoutUsage: 0
+                },
+                errorCode: 'PREPARE_FAILED',
+                ...pendingPrepare,
+                nativeOperationId: null,
+                notebookRunIds: [],
+                basisFiles: []
+              }
+            )
+          }
         }
         throw error
       } finally {

@@ -327,7 +327,9 @@
     "src/main/notebook/dependency-analysis.r-variant-annotation.test.ts",
     "src/main/notebook/notebook-path-utils.test.ts",
     "src/main/notebook/research-acceptance.test-support.ts",
-    "src/main/notebook/research-acceptance.test.ts"
+    "src/main/notebook/research-acceptance.test.ts",
+    "src/main/notebook/research-acceptance-resume.test-support.ts",
+    "src/main/notebook/research-acceptance-resume.test.ts"
   ],
   "interfacePaths": [
     "src/main/managed-execution-external-port.ts",
@@ -421,7 +423,8 @@
     "src/main/notebook/dependency-analysis.rdkit.test.ts",
     "src/main/notebook/dependency-analysis.scipy-sparse-composition.test.ts",
     "src/main/notebook/dependency-analysis.scipy-sparse.test.ts",
-    "src/main/notebook/research-acceptance.test-support.ts"
+    "src/main/notebook/research-acceptance.test-support.ts",
+    "src/main/notebook/research-acceptance-resume.test-support.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -633,7 +636,8 @@
       "src/main/notebook/managed-execution-output.test.ts",
       "src/main/notebook/dependency-analysis.r-deseq2.test.ts",
       "src/main/notebook/notebook-path-utils.test.ts",
-      "src/main/notebook/research-acceptance.test.ts"
+      "src/main/notebook/research-acceptance.test.ts",
+      "src/main/notebook/research-acceptance-resume.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",

@@ -106,6 +106,73 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u)
 const evidenceFileSchema = z
   .object({ path: z.string().min(1).max(4096), sha256: sha256Schema })
   .strict()
+const admissionFailureSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    kind: z.literal('acceptance-before-execution-entry-failure'),
+    status: z.literal('failed'),
+    evidenceBasis: z.enum(['harness-catch', 'operator-attestation']),
+    recordedAt: z.string().datetime(),
+    trialId,
+    budgetDocumentSha256: sha256Schema,
+    phase: z.literal('prepare'),
+    dispatchAttempted: z.literal(false),
+    usage: zeroUsageSchema,
+    errorCode: z.literal('PREPARE_FAILED'),
+    source: z
+      .object({
+        inputPackageSha256: sha256Schema,
+        descriptorSha256: sha256Schema,
+        sourceIdentity: z.string().min(1).max(200).nullable(),
+        projectId: z.string().min(1).max(200).nullable(),
+        sessionId: z.string().min(1).max(200).nullable()
+      })
+      .strict(),
+    request: z
+      .object({
+        method: z.literal('execution.prepare'),
+        requestId: z.string().min(1).max(200),
+        sha256: sha256Schema.nullable()
+      })
+      .strict(),
+    nativeOperationId: z.null(),
+    notebookRunIds: z.array(z.never()).length(0),
+    basisFiles: z
+      .array(
+        evidenceFileSchema
+          .extend({
+            role: z.enum(['harness-log', 'harness-source', 'ledger-snapshot', 'native-diagnostics'])
+          })
+          .strict()
+      )
+      .max(4)
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const roles = new Set<string>(value.basisFiles.map((file) => file.role))
+    if (
+      roles.size !== value.basisFiles.length ||
+      (value.evidenceBasis === 'operator-attestation' &&
+        !['harness-log', 'harness-source', 'ledger-snapshot'].every((role) => roles.has(role))) ||
+      (value.evidenceBasis === 'harness-catch' &&
+        (!value.source.sourceIdentity ||
+          !value.source.projectId ||
+          !value.source.sessionId ||
+          !value.request.sha256))
+    )
+      ctx.addIssue({ code: 'custom', message: 'Admission failure evidence is incomplete.' })
+  })
+export type AcceptanceAdmissionFailure = z.infer<typeof admissionFailureSchema>
+const admissionAuditSchema = z
+  .object({
+    armedAt: z.string().datetime(),
+    consumedAt: z.string().datetime().optional(),
+    previousUsage: zeroUsageSchema,
+    previousUsageRecordedAt: z.string(),
+    receipt: evidenceFileSchema,
+    attestation: admissionFailureSchema
+  })
+  .strict()
 const zeroDispatchAuditSchema = z
   .object({
     armedAt: z.string().datetime(),
@@ -143,9 +210,11 @@ const ledgerSchema = z
             reservedAt: z.string(),
             usage: usageSchema,
             usageRecordedAt: z.string().optional(),
-            zeroDispatchReconciliation: zeroDispatchAuditSchema.optional()
+            zeroDispatchReconciliation: zeroDispatchAuditSchema.optional(),
+            admissionFailureReconciliation: admissionAuditSchema.optional()
           })
           .strict()
+          .refine((row) => !(row.zeroDispatchReconciliation && row.admissionFailureReconciliation))
       )
       .max(4)
   })
@@ -224,7 +293,8 @@ export async function reserveAcceptanceTrial(
     throw new Error('Trial is not in the sealed acceptance budget.')
   await withAcceptanceLedger(budgetPath, seal, (ledger) => {
     const existing = ledger.reservations.find((row) => row.trialId === requestedTrial)
-    const reconciliation = existing?.zeroDispatchReconciliation
+    const reconciliation =
+      existing?.zeroDispatchReconciliation ?? existing?.admissionFailureReconciliation
     if (existing && (!reconciliation || reconciliation.consumedAt))
       throw new Error(
         'This acceptance trial is already reserved; automatic paid retries are forbidden.'
@@ -280,7 +350,7 @@ export async function reconcileAcceptanceZeroDispatchFailure(
     const row = ledger.reservations.find((entry) => entry.trialId === requestedTrial)
     if (!row || !row.usageRecordedAt || !zeroUsageSchema.safeParse(row.usage).success)
       throw new Error('Zero-dispatch reconciliation requires recorded complete zero usage.')
-    if (row.zeroDispatchReconciliation)
+    if (row.zeroDispatchReconciliation || row.admissionFailureReconciliation)
       throw new Error('This trial already has its one explicit zero-dispatch reconciliation.')
     row.zeroDispatchReconciliation = {
       armedAt: new Date().toISOString(),
@@ -289,6 +359,101 @@ export async function reconcileAcceptanceZeroDispatchFailure(
       ...evidence
     }
   })
+}
+
+/** Writes an honest caller attestation, not native proof. Never arms or executes a retry. */
+export async function recordAcceptanceAdmissionFailure(
+  path: string,
+  value: AcceptanceAdmissionFailure
+): Promise<void> {
+  const receipt = admissionFailureSchema.parse(value)
+  if (!isAbsolute(path)) throw new Error('Admission failure evidence requires an absolute path.')
+  const handle = await open(path, 'wx', 0o600)
+  try {
+    await handle.writeFile(JSON.stringify(receipt, null, 2))
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Explicit operator review of a pre-execution failure. Zero reported usage alone is insufficient. */
+export async function reconcileAcceptanceAdmissionFailure(
+  budgetPath: string,
+  seal: AcceptanceBudgetSeal,
+  requestedTrial: string,
+  receiptPath: string
+): Promise<void> {
+  if (!seal.trialIds.includes(requestedTrial))
+    throw new Error('Trial is not in the sealed acceptance budget.')
+  let file: Awaited<ReturnType<typeof readAcceptanceEvidenceFile>>
+  let receipt: AcceptanceAdmissionFailure
+  let snapshot: AcceptanceLedger | undefined
+  try {
+    file = await readAcceptanceEvidenceFile(receiptPath)
+    receipt = admissionFailureSchema.parse(JSON.parse(file.bytes.toString('utf8')))
+    if (receipt.trialId !== requestedTrial || receipt.budgetDocumentSha256 !== seal.sha256)
+      throw new Error('Admission scope mismatch')
+    for (const basis of receipt.basisFiles) {
+      const read = await readAcceptanceEvidenceFile(basis.path)
+      if (read.sha256 !== basis.sha256 || read.path === file.path)
+        throw new Error('Evidence changed')
+      if (basis.role === 'ledger-snapshot')
+        snapshot = ledgerSchema.parse(JSON.parse(read.bytes.toString('utf8')))
+    }
+  } catch {
+    throw new Error(
+      'Admission reconciliation requires matching reviewed pre-execution failure evidence.'
+    )
+  }
+  await withAcceptanceLedger(budgetPath, seal, (ledger) => {
+    const row = ledger.reservations.find((entry) => entry.trialId === requestedTrial)
+    if (!row || !row.usageRecordedAt || !zeroUsageSchema.safeParse(row.usage).success)
+      throw new Error('Admission reconciliation requires recorded complete zero usage.')
+    if (row.zeroDispatchReconciliation || row.admissionFailureReconciliation)
+      throw new Error('This trial already has its one explicit zero-dispatch reconciliation.')
+    if (receipt.evidenceBasis === 'operator-attestation') {
+      const prior = snapshot?.reservations.find((entry) => entry.trialId === requestedTrial)
+      if (
+        snapshot?.studyId !== ledger.studyId ||
+        snapshot.sealSha256 !== ledger.sealSha256 ||
+        snapshot.carriedReservedUnits !== ledger.carriedReservedUnits ||
+        !prior ||
+        prior.reservedAt !== row.reservedAt ||
+        prior.maximumUnits !== row.maximumUnits ||
+        prior.usageRecordedAt !== row.usageRecordedAt ||
+        !zeroUsageSchema.safeParse(prior.usage).success ||
+        prior.zeroDispatchReconciliation ||
+        prior.admissionFailureReconciliation
+      )
+        throw new Error(
+          'Reviewed ledger snapshot does not match the current zero-usage reservation.'
+        )
+    }
+    row.admissionFailureReconciliation = {
+      armedAt: new Date().toISOString(),
+      previousUsage: zeroUsageSchema.parse(row.usage),
+      previousUsageRecordedAt: row.usageRecordedAt,
+      receipt: { path: file.path, sha256: file.sha256 },
+      attestation: receipt
+    }
+  })
+}
+
+async function readAcceptanceEvidenceFile(
+  path: string
+): Promise<{ path: string; sha256: string; bytes: Buffer }> {
+  if (!isAbsolute(path) || path.length > 4096) throw new Error('Invalid evidence path')
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.size > 1024 * 1024) throw new Error('Invalid evidence file')
+    const bytes = await handle.readFile()
+    if (bytes.length > 1024 * 1024) throw new Error('Oversized evidence file')
+    return { path: await realpath(path), sha256: digest(bytes), bytes }
+  } finally {
+    await handle.close()
+  }
 }
 
 async function readZeroDispatchEvidence(
@@ -305,21 +470,12 @@ async function readZeroDispatchEvidence(
     const read = async (
       path: string
     ): Promise<{ path: string; sha256: string; sizeBytes: number; value: unknown }> => {
-      if (!isAbsolute(path) || path.length > 4096) throw new Error('Invalid evidence path')
-      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-      try {
-        const info = await handle.stat()
-        if (!info.isFile() || info.size > 1024 * 1024) throw new Error('Invalid evidence file')
-        const bytes = await handle.readFile()
-        if (bytes.length > 1024 * 1024) throw new Error('Oversized evidence file')
-        return {
-          path: await realpath(path),
-          sha256: digest(bytes),
-          sizeBytes: bytes.length,
-          value: JSON.parse(bytes.toString('utf8'))
-        }
-      } finally {
-        await handle.close()
+      const file = await readAcceptanceEvidenceFile(path)
+      return {
+        path: file.path,
+        sha256: file.sha256,
+        sizeBytes: file.bytes.length,
+        value: JSON.parse(file.bytes.toString('utf8'))
       }
     }
     const files = await Promise.all([
