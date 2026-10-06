@@ -6,6 +6,8 @@ import { basename, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { ResearchExecutionProfileStore } from '../research-execution-profiles/store'
+import { ManagedRuntimeViews } from '../managed-runtime-views'
+import { runtimeViewLaunchSchema, type RuntimeViewLaunch } from '../../shared/runtime-view'
 import {
   researchEnvironmentVariableSchema,
   researchNetworkHostSchema
@@ -85,6 +87,7 @@ type Acceptance = {
   planScope?: 'end-to-end' | 'downstream-only' | 'alternative-conditions' | 'engineering-check'
   command: string
   localServicePort?: number
+  projectView?: RuntimeViewLaunch
   timeoutMs: number
   outputs: ExecuteManagedEnvironmentRequest['outputs']
   live?: {
@@ -339,6 +342,12 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
       await readFile(join(root, 'acceptance.json'), 'utf8')
     ) as Acceptance
     const expectedPlanScope = acceptance.planScope ?? 'engineering-check'
+    const projectView =
+      acceptance.projectView === undefined
+        ? undefined
+        : runtimeViewLaunchSchema.parse(acceptance.projectView)
+    if (projectView && acceptance.localServicePort === undefined)
+      throw new Error('A declared project view requires an owned local service port.')
     expect([
       'end-to-end',
       'downstream-only',
@@ -457,7 +466,10 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           join(h.fixture.storageRoot, 'acceptance-profile-config'),
           cipher
         )
+        const views = new ManagedRuntimeViews()
+        cleanups.push(async () => views.close())
         const service = new ManagedExecutionService({
+          registerProjectService: (registration) => views.register(registration),
           profiles,
           artifacts: h.artifacts,
           dataRoot: h.fixture.storageRoot,
@@ -594,6 +606,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           command: acceptance.command,
           timeoutMs: acceptance.timeoutMs,
           localServicePort: acceptance.localServicePort,
+          ...(projectView ? { projectView } : {}),
           outputs: acceptance.outputs,
           description: `Execute the ${acceptance.title} plan in Open Science with scope ${expectedPlanScope}.`
         }

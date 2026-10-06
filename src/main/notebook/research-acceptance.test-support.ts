@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { constants } from 'node:fs'
 import { lstat, open, readFile, realpath, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
@@ -90,6 +91,41 @@ const unknownUsage = (): AcceptanceTrialUsage => ({
   requestsWithUsage: 0,
   requestsWithoutUsage: null
 })
+const zeroUsageSchema = z
+  .object({
+    unit: z.literal('tokens'),
+    state: z.literal('complete'),
+    knownUnits: z.literal(0),
+    requestCount: z.literal(0),
+    requestsWithUsage: z.literal(0),
+    requestsWithoutUsage: z.literal(0)
+  })
+  .strict()
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u)
+const evidenceFileSchema = z
+  .object({ path: z.string().min(1).max(4096), sha256: sha256Schema })
+  .strict()
+const zeroDispatchAuditSchema = z
+  .object({
+    armedAt: z.string().datetime(),
+    consumedAt: z.string().datetime().optional(),
+    previousUsage: zeroUsageSchema,
+    previousUsageRecordedAt: z.string(),
+    executionId: z.string().min(1).max(200),
+    receiptKind: z.string().min(1).max(200),
+    operationId: z.string().min(1).max(200),
+    notebookRunId: z.string().min(1).max(200),
+    errorCode: z.string().min(1).max(200),
+    evidence: z
+      .object({
+        receipt: evidenceFileSchema,
+        result: evidenceFileSchema,
+        operation: evidenceFileSchema,
+        notebookRuns: evidenceFileSchema
+      })
+      .strict()
+  })
+  .strict()
 const ledgerSchema = z
   .object({
     version: z.literal(2),
@@ -104,7 +140,8 @@ const ledgerSchema = z
             maximumUnits: count.positive(),
             reservedAt: z.string(),
             usage: usageSchema,
-            usageRecordedAt: z.string().optional()
+            usageRecordedAt: z.string().optional(),
+            zeroDispatchReconciliation: zeroDispatchAuditSchema.optional()
           })
           .strict()
       )
@@ -140,7 +177,7 @@ async function withAcceptanceLedger(
       ledgerPath,
       (text) => ledgerSchema.parse(JSON.parse(text)),
       {},
-      { maxBytes: 16384 }
+      { maxBytes: 128 * 1024 }
     )
     const ledger: AcceptanceLedger =
       read.status === 'found'
@@ -181,7 +218,9 @@ export async function reserveAcceptanceTrial(
   if (!seal.trialIds.includes(requestedTrial))
     throw new Error('Trial is not in the sealed acceptance budget.')
   await withAcceptanceLedger(budgetPath, seal, (ledger) => {
-    if (ledger.reservations.some((row) => row.trialId === requestedTrial))
+    const existing = ledger.reservations.find((row) => row.trialId === requestedTrial)
+    const reconciliation = existing?.zeroDispatchReconciliation
+    if (existing && (!reconciliation || reconciliation.consumedAt))
       throw new Error(
         'This acceptance trial is already reserved; automatic paid retries are forbidden.'
       )
@@ -193,6 +232,14 @@ export async function reserveAcceptanceTrial(
       )
     )
       throw new Error('Observed usage exceeded its reviewed bound; further trials are blocked.')
+    if (existing && reconciliation) {
+      if (!zeroUsageSchema.safeParse(existing.usage).success || !existing.usageRecordedAt)
+        throw new Error('Reconciled zero-dispatch evidence no longer matches the reservation.')
+      reconciliation.consumedAt = new Date().toISOString()
+      existing.usage = unknownUsage()
+      delete existing.usageRecordedAt
+      return
+    }
     if (
       ledger.reservations.reduce((total, row) => total + row.maximumUnits, 0) +
         seal.maximumUnitsPerTrial >
@@ -206,6 +253,168 @@ export async function reserveAcceptanceTrial(
       usage: unknownUsage()
     })
   })
+}
+
+/** Explicit operator action only. This is never called by the acceptance runner. */
+export async function reconcileAcceptanceZeroDispatchFailure(
+  budgetPath: string,
+  seal: AcceptanceBudgetSeal,
+  requestedTrial: string,
+  paths: {
+    receiptPath: string
+    resultPath: string
+    operationPath: string
+    notebookRunsPath: string
+  }
+): Promise<void> {
+  if (!seal.trialIds.includes(requestedTrial))
+    throw new Error('Trial is not in the sealed acceptance budget.')
+  const evidence = await readZeroDispatchEvidence(paths, seal, requestedTrial)
+  await withAcceptanceLedger(budgetPath, seal, (ledger) => {
+    const row = ledger.reservations.find((entry) => entry.trialId === requestedTrial)
+    if (!row || !row.usageRecordedAt || !zeroUsageSchema.safeParse(row.usage).success)
+      throw new Error('Zero-dispatch reconciliation requires recorded complete zero usage.')
+    if (row.zeroDispatchReconciliation)
+      throw new Error('This trial already has its one explicit zero-dispatch reconciliation.')
+    row.zeroDispatchReconciliation = {
+      armedAt: new Date().toISOString(),
+      previousUsage: zeroUsageSchema.parse(row.usage),
+      previousUsageRecordedAt: row.usageRecordedAt,
+      ...evidence
+    }
+  })
+}
+
+async function readZeroDispatchEvidence(
+  paths: Parameters<typeof reconcileAcceptanceZeroDispatchFailure>[3],
+  seal: AcceptanceBudgetSeal,
+  requestedTrial: string
+): Promise<
+  Omit<
+    z.infer<typeof zeroDispatchAuditSchema>,
+    'armedAt' | 'previousUsage' | 'previousUsageRecordedAt'
+  >
+> {
+  try {
+    const read = async (
+      path: string
+    ): Promise<{ path: string; sha256: string; sizeBytes: number; value: unknown }> => {
+      if (!isAbsolute(path) || path.length > 4096) throw new Error('Invalid evidence path')
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const info = await handle.stat()
+        if (!info.isFile() || info.size > 1024 * 1024) throw new Error('Invalid evidence file')
+        const bytes = await handle.readFile()
+        if (bytes.length > 1024 * 1024) throw new Error('Oversized evidence file')
+        return {
+          path: await realpath(path),
+          sha256: digest(bytes),
+          sizeBytes: bytes.length,
+          value: JSON.parse(bytes.toString('utf8'))
+        }
+      } finally {
+        await handle.close()
+      }
+    }
+    const files = await Promise.all([
+      read(paths.receiptPath),
+      read(paths.resultPath),
+      read(paths.operationPath),
+      read(paths.notebookRunsPath)
+    ])
+    if (new Set(files.map((file) => file.path)).size !== 4)
+      throw new Error('Duplicate evidence files')
+    const errorSchema = z.object({ code: z.string().min(1).max(200), phase: z.string().min(1) })
+    const receipt = z
+      .object({
+        schemaVersion: z.literal(1),
+        kind: z.string().min(1).max(200),
+        executionId: z.string().min(1).max(200),
+        status: z.literal('failed'),
+        phase: z.literal('finished'),
+        trialId: z.literal(requestedTrial),
+        budgetDocumentSha256: z.literal(seal.sha256),
+        serviceSpawnAttempted: z.literal(false),
+        childExit: z.null(),
+        liveTrialsStarted: z.literal(0),
+        scientificTrialsStarted: z.literal(0),
+        requestReservedUnits: z.literal(0),
+        providerCalls: z.union([z.literal(0), z.null()]),
+        usage: zeroUsageSchema,
+        error: errorSchema,
+        outputs: z.array(z.object({ path: z.string(), sizeBytes: count, sha256: sha256Schema }))
+      })
+      .parse(files[0].value)
+    const result = z
+      .object({
+        schemaVersion: z.literal(1),
+        status: z.literal('failed'),
+        runId: z.null(),
+        providerCalls: z.union([z.literal(0), z.null()]),
+        usage: zeroUsageSchema,
+        liveTrialsStarted: z.literal(0),
+        scientificTrialsStarted: z.literal(0),
+        validationPassed: z.literal(false),
+        error: errorSchema
+      })
+      .parse(files[1].value)
+    const operation = z
+      .object({
+        schemaVersion: z.literal(1),
+        status: z.literal('failed'),
+        operationId: z.string().min(1).max(200),
+        recoveryPending: z.literal(false).optional(),
+        provenance: z.object({ promptMessageId: z.string().min(1) }),
+        notebookRunIds: z.array(z.string().min(1).max(200)).length(1)
+      })
+      .parse(files[2].value)
+    const [run] = z
+      .array(
+        z.object({
+          runId: z.string().min(1).max(200),
+          status: z.literal('failed'),
+          exitCode: z
+            .number()
+            .int()
+            .refine((value) => value !== 0),
+          promptMessageId: z.string().min(1)
+        })
+      )
+      .length(1)
+      .parse(files[3].value)
+    const resultOutputs = receipt.outputs.filter((output) => output.path === 'result.json')
+    if (
+      resultOutputs.length !== 1 ||
+      resultOutputs[0].sha256 !== files[1].sha256 ||
+      resultOutputs[0].sizeBytes !== files[1].sizeBytes ||
+      receipt.error.code !== result.error.code ||
+      receipt.error.phase !== result.error.phase ||
+      operation.notebookRunIds[0] !== run.runId ||
+      operation.provenance.promptMessageId !== run.promptMessageId
+    )
+      throw new Error('Mismatched failure evidence')
+    const reference = (file: (typeof files)[number]): z.infer<typeof evidenceFileSchema> => ({
+      path: file.path,
+      sha256: file.sha256
+    })
+    return {
+      executionId: receipt.executionId,
+      receiptKind: receipt.kind,
+      operationId: operation.operationId,
+      notebookRunId: run.runId,
+      errorCode: receipt.error.code,
+      evidence: {
+        receipt: reference(files[0]),
+        result: reference(files[1]),
+        operation: reference(files[2]),
+        notebookRuns: reference(files[3])
+      }
+    }
+  } catch {
+    throw new Error(
+      'Zero-dispatch reconciliation requires matching verified local failure evidence.'
+    )
+  }
 }
 
 /** Actual reported usage is evidence only. Partial, zero or missing usage never refunds a slot. */

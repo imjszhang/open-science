@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -7,6 +8,7 @@ import {
   ephemeralAcceptanceCipher,
   readAcceptanceBudgetSeal,
   readAcceptanceCredentials,
+  reconcileAcceptanceZeroDispatchFailure,
   recordAcceptanceTrialUsage,
   reserveAcceptanceTrial
 } from './research-acceptance.test-support'
@@ -34,6 +36,242 @@ async function fixture(): Promise<{ root: string; budgetPath: string }> {
   await writeFile(budgetPath, JSON.stringify(sealed))
   return { root, budgetPath }
 }
+const zeroUsage = {
+  unit: 'tokens' as const,
+  state: 'complete' as const,
+  knownUnits: 0,
+  requestCount: 0,
+  requestsWithUsage: 0,
+  requestsWithoutUsage: 0
+}
+const digest = (bytes: string): string => createHash('sha256').update(bytes).digest('hex')
+async function zeroDispatchFixture(): Promise<{
+  root: string
+  budgetPath: string
+  seal: Awaited<ReturnType<typeof readAcceptanceBudgetSeal>>
+  paths: Parameters<typeof reconcileAcceptanceZeroDispatchFailure>[3]
+  receipt: Record<string, unknown>
+  result: Record<string, unknown>
+  operation: Record<string, unknown>
+  runs: Record<string, unknown>[]
+  save(): Promise<void>
+}> {
+  const f = await fixture(),
+    seal = await readAcceptanceBudgetSeal(f.budgetPath)
+  await reserveAcceptanceTrial(f.budgetPath, seal, 'author')
+  await recordAcceptanceTrialUsage(f.budgetPath, seal, 'author', zeroUsage)
+  const error = { code: 'MAIN_SERVICE_ADAPTER_REQUIRED', phase: 'verify-materials' }
+  const receipt: Record<string, unknown> = {
+    schemaVersion: 1,
+    kind: 'tuanzi-managed-real-provider-small-trial',
+    executionId: 'failed-driver',
+    status: 'failed',
+    phase: 'finished',
+    trialId: 'author',
+    budgetDocumentSha256: seal.sha256,
+    serviceSpawnAttempted: false,
+    childExit: null,
+    liveTrialsStarted: 0,
+    scientificTrialsStarted: 0,
+    requestReservedUnits: 0,
+    providerCalls: null,
+    usage: zeroUsage,
+    error
+  }
+  const result: Record<string, unknown> = {
+    schemaVersion: 1,
+    status: 'failed',
+    runId: null,
+    providerCalls: null,
+    usage: zeroUsage,
+    liveTrialsStarted: 0,
+    scientificTrialsStarted: 0,
+    validationPassed: false,
+    error
+  }
+  const operation: Record<string, unknown> = {
+    schemaVersion: 1,
+    operationId: 'failed-operation',
+    status: 'failed',
+    provenance: { promptMessageId: 'failed-prompt' },
+    notebookRunIds: ['failed-notebook-run']
+  }
+  const runs: Record<string, unknown>[] = [
+    {
+      runId: 'failed-notebook-run',
+      status: 'failed',
+      exitCode: 1,
+      promptMessageId: 'failed-prompt'
+    }
+  ]
+  const paths = {
+    receiptPath: join(f.root, 'execution-receipt.json'),
+    resultPath: join(f.root, 'result.json'),
+    operationPath: join(f.root, 'operation.json'),
+    notebookRunsPath: join(f.root, 'notebook-runs.json')
+  }
+  const save = async (): Promise<void> => {
+    const resultBytes = JSON.stringify(result)
+    receipt.outputs = [
+      {
+        path: 'result.json',
+        sizeBytes: Buffer.byteLength(resultBytes),
+        sha256: digest(resultBytes)
+      }
+    ]
+    await Promise.all([
+      writeFile(paths.receiptPath, JSON.stringify(receipt)),
+      writeFile(paths.resultPath, resultBytes),
+      writeFile(paths.operationPath, JSON.stringify(operation)),
+      writeFile(paths.notebookRunsPath, JSON.stringify(runs))
+    ])
+  }
+  await save()
+  return { ...f, seal, paths, receipt, result, operation, runs, save }
+}
+it('admits one explicitly reconciled zero-dispatch retry while preserving its reservation and failed audit', async () => {
+  const f = await zeroDispatchFixture()
+  const ledgerPath = join(f.root, 'live-acceptance-budget-ledger.json')
+  const before = JSON.parse(await readFile(ledgerPath, 'utf8')).reservations[0]
+  await expect(reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')).rejects.toThrow(
+    'already reserved'
+  )
+  await reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  const armed = JSON.parse(await readFile(ledgerPath, 'utf8')).reservations[0]
+  expect(armed.usage).toEqual(zeroUsage)
+  expect(armed.zeroDispatchReconciliation).toMatchObject({
+    previousUsage: zeroUsage,
+    previousUsageRecordedAt: before.usageRecordedAt,
+    executionId: 'failed-driver',
+    receiptKind: 'tuanzi-managed-real-provider-small-trial',
+    operationId: 'failed-operation',
+    notebookRunId: 'failed-notebook-run',
+    errorCode: 'MAIN_SERVICE_ADAPTER_REQUIRED'
+  })
+  expect(armed.zeroDispatchReconciliation.consumedAt).toBeUndefined()
+  for (const [key, path] of Object.entries(f.paths)) {
+    const name = key.replace(/Path$/u, '')
+    expect(armed.zeroDispatchReconciliation.evidence[name]).toEqual({
+      path: await realpath(path),
+      sha256: digest(await readFile(path, 'utf8'))
+    })
+  }
+  await expect(
+    reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  ).rejects.toThrow('one explicit')
+  await reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')
+  const consumed = JSON.parse(await readFile(ledgerPath, 'utf8'))
+  expect(consumed.reservations).toHaveLength(1)
+  expect(consumed.reservations[0]).toMatchObject({
+    maximumUnits: before.maximumUnits,
+    reservedAt: before.reservedAt,
+    usage: { state: 'unknown', knownUnits: null, requestCount: null }
+  })
+  expect(consumed.reservations[0].usageRecordedAt).toBeUndefined()
+  expect(consumed.reservations[0].zeroDispatchReconciliation).toEqual({
+    ...armed.zeroDispatchReconciliation,
+    consumedAt: expect.any(String)
+  })
+  await expect(reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')).rejects.toThrow(
+    'already reserved'
+  )
+  await recordAcceptanceTrialUsage(f.budgetPath, f.seal, 'author', zeroUsage)
+  await expect(
+    reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  ).rejects.toThrow('one explicit')
+})
+it.each([
+  ['receipt', 'status', 'completed'],
+  ['receipt', 'trialId', 'external'],
+  ['receipt', 'budgetDocumentSha256', '0'.repeat(64)],
+  ['receipt', 'serviceSpawnAttempted', true],
+  ['receipt', 'serviceSpawnAttempted', undefined],
+  ['receipt', 'childExit', 1],
+  ['receipt', 'liveTrialsStarted', 1],
+  ['receipt', 'scientificTrialsStarted', 1],
+  ['receipt', 'requestReservedUnits', 1],
+  ['receipt', 'providerCalls', 1],
+  ['receipt', 'usage', { ...zeroUsage, state: 'unknown', knownUnits: null }],
+  ['result', 'status', 'completed'],
+  ['result', 'usage', { ...zeroUsage, requestCount: 1 }],
+  ['result', 'validationPassed', true],
+  ['result', 'runId', 'started-run'],
+  ['result', 'error', { code: 'OTHER_FAILURE', phase: 'verify-materials' }],
+  ['operation', 'status', 'completed'],
+  ['operation', 'recoveryPending', true],
+  ['operation', 'notebookRunIds', ['another-run']],
+  ['operation', 'notebookRunIds', ['failed-notebook-run', 'another-run']],
+  ['operation', 'provenance', { promptMessageId: 'another-prompt' }]
+] as const)(
+  'refuses unsafe or mismatched zero-dispatch evidence: %s.%s',
+  async (file, key, value) => {
+    const f = await zeroDispatchFixture()
+    f[file][key] = value
+    await f.save()
+    const ledgerPath = join(f.root, 'live-acceptance-budget-ledger.json'),
+      before = await readFile(ledgerPath, 'utf8')
+    await expect(
+      reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+    ).rejects.toThrow('verified local failure')
+    expect(await readFile(ledgerPath, 'utf8')).toBe(before)
+  }
+)
+it.each([
+  'multiple-runs',
+  'successful-run',
+  'wrong-run',
+  'wrong-prompt',
+  'changed-result',
+  'symlink'
+])('refuses unbound or ambiguous selected failure evidence: %s', async (mode) => {
+  const f = await zeroDispatchFixture()
+  if (mode === 'multiple-runs') f.runs.push({ ...f.runs[0], runId: 'another' })
+  if (mode === 'successful-run') f.runs[0].status = 'completed'
+  if (mode === 'wrong-run') f.runs[0].runId = 'another'
+  if (mode === 'wrong-prompt') f.runs[0].promptMessageId = 'another'
+  await f.save()
+  if (mode === 'changed-result')
+    await writeFile(f.paths.resultPath, JSON.stringify({ ...f.result, extra: 'changed' }))
+  if (mode === 'symlink') {
+    const linked = join(f.root, 'linked.json')
+    await symlink(f.paths.receiptPath, linked)
+    f.paths.receiptPath = linked
+  }
+  await expect(
+    reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  ).rejects.toThrow('verified local failure')
+})
+it('does not reconcile an unknown or unreserved trial even with matching failure files', async () => {
+  const f = await zeroDispatchFixture()
+  const ledgerPath = join(f.root, 'live-acceptance-budget-ledger.json')
+  const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'))
+  ledger.reservations[0].usage = {
+    unit: 'tokens',
+    state: 'unknown',
+    knownUnits: null,
+    requestCount: null,
+    requestsWithUsage: 0,
+    requestsWithoutUsage: null
+  }
+  await writeFile(ledgerPath, JSON.stringify(ledger))
+  await expect(
+    reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  ).rejects.toThrow('recorded complete zero')
+  ledger.reservations = []
+  await writeFile(ledgerPath, JSON.stringify(ledger))
+  await expect(
+    reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  ).rejects.toThrow('recorded complete zero')
+})
+it('serializes explicit admission so concurrent duplicate starts consume an arm at most once', async () => {
+  const f = await zeroDispatchFixture()
+  await reconcileAcceptanceZeroDispatchFailure(f.budgetPath, f.seal, 'author', f.paths)
+  const outcomes = await Promise.allSettled([
+    reserveAcceptanceTrial(f.budgetPath, f.seal, 'author'),
+    reserveAcceptanceTrial(f.budgetPath, f.seal, 'author')
+  ])
+  expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+})
 it.each([
   { status: 'pending' },
   { unit: 'CNY' },
