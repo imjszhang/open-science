@@ -291,6 +291,94 @@ it.each([
     code: 'ENOENT'
   })
 })
+it('defaults omitted carry-over to zero for reviewed seals and existing v2 ledgers', async () => {
+  const f = await fixture(),
+    seal = await readAcceptanceBudgetSeal(f.budgetPath)
+  expect(seal.carriedReservedUnits).toBe(0)
+  await reserveAcceptanceTrial(f.budgetPath, seal, 'author')
+  const path = join(f.root, 'live-acceptance-budget-ledger.json')
+  const original = JSON.parse(await readFile(path, 'utf8'))
+  expect(original.carriedReservedUnits).toBe(0)
+  delete original.carriedReservedUnits
+  await writeFile(path, JSON.stringify(original))
+  await reserveAcceptanceTrial(f.budgetPath, seal, 'external')
+  const resumed = JSON.parse(await readFile(path, 'utf8'))
+  expect(resumed.carriedReservedUnits).toBe(0)
+  expect(resumed.reservations).toHaveLength(2)
+  expect(resumed.reservations[0]).toEqual(original.reservations[0])
+})
+it('counts an unknown prior-study reservation alongside all four amended-trial bounds', async () => {
+  const f = await fixture()
+  const amended = {
+    ...sealed,
+    carriedReservedUnits: 12_582_912,
+    allocationPerTrialCeiling: 246_854_272,
+    maximumUnitsPerTrial: 12_582_912
+  }
+  await writeFile(f.budgetPath, JSON.stringify(amended))
+  const seal = await readAcceptanceBudgetSeal(f.budgetPath)
+  expect(seal.carriedReservedUnits + seal.allocationPerTrialCeiling * 4).toBe(1_000_000_000)
+  for (const id of sealed.trialIds) await reserveAcceptanceTrial(f.budgetPath, seal, id)
+  const ledger = JSON.parse(
+    await readFile(join(f.root, 'live-acceptance-budget-ledger.json'), 'utf8')
+  )
+  expect(ledger.carriedReservedUnits).toBe(12_582_912)
+  expect(
+    ledger.carriedReservedUnits +
+      ledger.reservations.reduce(
+        (total: number, row: { maximumUnits: number }) => total + row.maximumUnits,
+        0
+      )
+  ).toBe(62_914_560)
+  expect(
+    ledger.reservations.every(
+      (row: { usage: { knownUnits: number | null } }) => row.usage.knownUnits === null
+    )
+  ).toBe(true)
+  await expect(reserveAcceptanceTrial(f.budgetPath, seal, 'author')).rejects.toThrow(
+    'already reserved'
+  )
+})
+it.each([-1, 0.5, 1_000_000_001, null, '12582912'])(
+  'rejects an invalid carry-over value: %j',
+  async (carriedReservedUnits) => {
+    const f = await fixture()
+    await writeFile(f.budgetPath, JSON.stringify({ ...sealed, carriedReservedUnits }))
+    await expect(readAcceptanceBudgetSeal(f.budgetPath)).rejects.toThrow('not sealed')
+  }
+)
+it('rejects allocation ceilings that omit the prior-study carry-over', async () => {
+  const f = await fixture()
+  await writeFile(f.budgetPath, JSON.stringify({ ...sealed, carriedReservedUnits: 12_582_912 }))
+  await expect(readAcceptanceBudgetSeal(f.budgetPath)).rejects.toThrow('not sealed')
+})
+it.each([0, 12_582_911, -1, '12582912', null, undefined])(
+  'refuses a corrupt or mismatched ledger carry-over without mutating evidence: %j',
+  async (carry) => {
+    const f = await fixture()
+    await writeFile(
+      f.budgetPath,
+      JSON.stringify({
+        ...sealed,
+        carriedReservedUnits: 12_582_912,
+        allocationPerTrialCeiling: 246_854_272,
+        maximumUnitsPerTrial: 12_582_912
+      })
+    )
+    const seal = await readAcceptanceBudgetSeal(f.budgetPath)
+    await reserveAcceptanceTrial(f.budgetPath, seal, 'author')
+    const path = join(f.root, 'live-acceptance-budget-ledger.json')
+    const ledger = JSON.parse(await readFile(path, 'utf8'))
+    ledger.carriedReservedUnits = carry
+    const bytes = JSON.stringify(ledger)
+    await writeFile(path, bytes)
+    await expect(reserveAcceptanceTrial(f.budgetPath, seal, 'external')).rejects.toThrow()
+    await expect(
+      recordAcceptanceTrialUsage(f.budgetPath, seal, 'author', zeroUsage)
+    ).rejects.toThrow()
+    expect(await readFile(path, 'utf8')).toBe(bytes)
+  }
+)
 it('reserves each of four trials once, across reruns, with failures never freeing spend', async () => {
   const f = await fixture(),
     seal = await readAcceptanceBudgetSeal(f.budgetPath)

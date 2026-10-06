@@ -18,6 +18,7 @@ const sealSchema = z
     status: z.literal('sealed'),
     unit: z.literal('tokens'),
     totalCeiling: count.positive().max(1_000_000_000),
+    carriedReservedUnits: count.max(1_000_000_000).default(0),
     allocationPerTrialCeiling: count.positive().max(250_000_000),
     maximumUnitsPerTrial: count.positive().max(250_000_000),
     maxRequestsPerTrial: count.positive().max(6),
@@ -35,7 +36,7 @@ export async function readAcceptanceBudgetSeal(path: string): Promise<Acceptance
     if (
       new Set(seal.trialIds).size !== 4 ||
       seal.maximumUnitsPerTrial > seal.allocationPerTrialCeiling ||
-      seal.allocationPerTrialCeiling * 4 > seal.totalCeiling
+      seal.carriedReservedUnits + seal.allocationPerTrialCeiling * 4 > seal.totalCeiling
     )
       throw new Error('invalid allocation')
     return { ...seal, sha256: digest(bytes) }
@@ -132,6 +133,7 @@ const ledgerSchema = z
     unit: z.literal('tokens'),
     studyId: trialId,
     sealSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    carriedReservedUnits: count.max(1_000_000_000).default(0),
     reservations: z
       .array(
         z
@@ -187,12 +189,15 @@ async function withAcceptanceLedger(
             unit: 'tokens',
             studyId: seal.studyId,
             sealSha256: seal.sha256,
+            carriedReservedUnits: seal.carriedReservedUnits,
             reservations: []
           }
     if (ledger.studyId !== seal.studyId || ledger.sealSha256 !== seal.sha256)
       throw new Error(
         'Existing budget ledger belongs to another sealed study; operator reconciliation is required.'
       )
+    if (ledger.carriedReservedUnits !== seal.carriedReservedUnits)
+      throw new Error('Carried reservations do not match the sealed budget.')
     if (
       new Set(ledger.reservations.map((row) => row.trialId)).size !== ledger.reservations.length ||
       ledger.reservations.some(
@@ -241,7 +246,8 @@ export async function reserveAcceptanceTrial(
       return
     }
     if (
-      ledger.reservations.reduce((total, row) => total + row.maximumUnits, 0) +
+      ledger.carriedReservedUnits +
+        ledger.reservations.reduce((total, row) => total + row.maximumUnits, 0) +
         seal.maximumUnitsPerTrial >
       seal.totalCeiling
     )

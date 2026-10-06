@@ -426,6 +426,9 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
       let reservedTrialId: string | undefined
       let dispatchAttempted = false
       try {
+        console.info(
+          JSON.stringify({ event: 'research-acceptance-entry', entry, phase: 'prepare' })
+        )
         const h = await createSessionOperationTestHarness(cleanups, {
           canonicalStorageRoot: true,
           nativeSandbox: true,
@@ -618,6 +621,9 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         let nativeRunId: string | undefined
         // Once an execution entry has been invoked, any lost reply remains uncertain.
         dispatchAttempted = true
+        console.info(
+          JSON.stringify({ event: 'research-acceptance-entry', entry, phase: 'execute' })
+        )
         if (entry === 'external' || entry === 'author') {
           await api.execution.execute(request)
         } else {
@@ -794,6 +800,9 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         })
         if (entry === 'author') archive = resultArchive
         await writeEvidence('in-progress')
+        console.info(
+          JSON.stringify({ event: 'research-acceptance-entry', entry, phase: 'verified' })
+        )
       } catch (error) {
         if (reservedTrialId && budget && !dispatchAttempted) {
           // Admission/prepare failed before any execution entry. Record explicit zero requests,
@@ -817,5 +826,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
     await disposeCleanups()
     await writeEvidence('passed')
   },
-  1_500_000
+  // Four explicit entries may each use the existing 600-second managed-execution ceiling.
+  // Keep publication, collection and cleanup within a separate bounded harness allowance.
+  2_700_000
 )
