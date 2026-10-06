@@ -548,6 +548,9 @@ test('keeps ordinary and two research drafts independent, persists research owne
       research(source).getByRole('button', { name: 'Original record · Read-only', exact: true })
     ).toHaveCount(0)
     await expect(
+      research(source).getByRole('button', { name: 'New discussion', exact: true })
+    ).toBeVisible()
+    await expect(
       research(source).locator('[data-slot="session-open-button"]').first()
     ).toHaveAttribute('aria-current', 'page')
     if (retainedSource) {
@@ -680,6 +683,26 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
     'Draft question for study A.'
   )
+
+  // Sidebar New discussion stays available beside saved children and reuses the unsent
+  // source draft. Opening it never creates an empty Session or hides the saved discussion.
+  const newDiscussionA = research(sourceA).getByRole('button', {
+    name: 'New discussion',
+    exact: true
+  })
+  await newDiscussionA.click()
+  await expect(header()).toContainText('Original record · Read-only')
+  await expect(editor()).toBeFocused()
+  await editor().fill('Unsent question from the sidebar.')
+  await newDiscussionA.click()
+  await expect(editor()).toBeFocused()
+  await expect(editor()).toContainText('Unsent question from the sidebar.')
+  expect((await savedSessions()).filter((session) => !session.packageOrigin)).toHaveLength(1)
+  await openDiscussion(sourceA, discussionA)
+  await newDiscussionA.click()
+  await expect(editor()).toContainText('Unsent question from the sidebar.')
+  await editor().fill('')
+  await openDiscussion(sourceA, discussionA)
 
   // Watching B from A does not change ownership; Ask explicitly enters B's pending draft.
   await replayTab(page, sourceB.id).click()

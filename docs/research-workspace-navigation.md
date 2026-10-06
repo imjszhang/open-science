@@ -10,13 +10,15 @@ ordinary conversations on their existing path.
 
 - Clicking a research name always opens its original imported Session, including when saved
   discussions exist. The header identifies the original record as read-only; there is no separate
-  original-record child or empty discussion landing page. Only saved discussions appear below it.
+  original-record child or empty discussion landing page. Saved discussions and a New discussion
+  action appear below it, including the action when no discussion has been saved yet.
 - The original transcript remains visible while a question is drafted. The source-specific draft
   is separate from the displayed Session: all mutating composer and execution controllers receive
   a new-conversation target, never the imported source. Only sending creates a research-owned
   discussion and selects it. Clicking the research name returns to the original record.
-- Saved discussion children remain exact Session destinations. New discussion from a discussion
-  returns to the research's unsent question. The original view's Ask action focuses that composer.
+- Saved discussion children remain exact Session destinations. New discussion in the sidebar or
+  discussion header returns to the research's unsent question; the sidebar action focuses the
+  composer without clearing that draft. The original view's Ask action focuses that composer.
 - Projects containing imported research remember the last explicitly opened Session, research
   or ordinary draft in a local preference. Ordinary projects keep their most-recent-Session
   behavior. Old research-workspace preferences resolve to the original research with its question

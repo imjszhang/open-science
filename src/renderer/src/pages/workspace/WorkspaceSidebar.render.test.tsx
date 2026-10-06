@@ -506,7 +506,7 @@ describe('WorkspaceSidebar accessible render', () => {
       await navigateSecond()
       expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('child-a')
       expect(group.textContent).not.toContain('Original record · Read-only')
-      expect(group.textContent).not.toContain('New discussion')
+      expect(group.textContent).toContain('New discussion')
       const childButton = group.querySelector(
         '[data-session-id="child-a"] [data-slot="session-open-button"]'
       )!
@@ -518,6 +518,7 @@ describe('WorkspaceSidebar accessible render', () => {
       const collapse = group.querySelector<HTMLButtonElement>('[aria-label="Collapse research"]')!
       await act(async () => collapse.click())
       expect(group.querySelector('[data-session-id="child-a"]')).toBeNull()
+      expect(group.textContent).not.toContain('New discussion')
       const ordinaryButton = sidebar.container.querySelector(
         '[data-session-id="ordinary"] [data-slot="session-open-button"]'
       )!
@@ -526,6 +527,7 @@ describe('WorkspaceSidebar accessible render', () => {
       expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('ordinary')
       await sidebar.selectSession('child-a')
       expect(group.querySelector('[data-session-id="child-a"]')).not.toBeNull()
+      expect(group.textContent).toContain('New discussion')
       expect(group.querySelector('[aria-label="Collapse research"]')).not.toBeNull()
       await act(async () =>
         group.querySelector<HTMLButtonElement>('[aria-label="Collapse research"]')!.click()
@@ -533,6 +535,36 @@ describe('WorkspaceSidebar accessible render', () => {
       expect(group.querySelector('[data-session-id="child-a"]')).toBeNull()
       await act(async () => useNavigationStore.getState().recordUserNavigation())
       expect(group.querySelector('[data-session-id="child-a"]')).not.toBeNull()
+    } finally {
+      sidebar.cleanup()
+    }
+  })
+
+  it('keeps the new discussion entry under research that has no saved discussions', async () => {
+    const source = createSession({
+      id: 'source-empty',
+      title: 'Research without discussions',
+      status: 'idle',
+      importedResearch: { importId: 'import-empty' }
+    })
+    const sidebar = await mountProjectSidebar([])
+    try {
+      await sidebar.rerenderSessions([source])
+      const group = sidebar.container.querySelector('[data-research-id="source-empty"]')!
+      const children = (): Element | null => group.querySelector('[data-research-discussions]')
+      expect(children()?.textContent).toBe('New discussion')
+      expect(children()?.querySelector('[data-session-id]')).toBeNull()
+      expect(group.textContent).not.toContain('Original record · Read-only')
+
+      await act(async () =>
+        group.querySelector<HTMLButtonElement>('[aria-label="Collapse research"]')!.click()
+      )
+      expect(children()).toBeNull()
+      await act(async () =>
+        group.querySelector<HTMLButtonElement>('[aria-label="Expand research"]')!.click()
+      )
+      expect(children()?.textContent).toBe('New discussion')
+      expect(children()?.querySelector('button')?.disabled).toBe(false)
     } finally {
       sidebar.cleanup()
     }
@@ -568,8 +600,10 @@ describe('WorkspaceSidebar accessible render', () => {
       expect(
         imported?.querySelector('[data-slot="session-open-button"]')?.getAttribute('title')
       ).toBe('Original record · Read-only')
-      expect(imported?.querySelector('[aria-label="Collapse research"]')).toBeNull()
-      expect(container.querySelector('[data-research-discussions]')).toBeNull()
+      expect(imported?.querySelector('[aria-label="Collapse research"]')).not.toBeNull()
+      expect(container.querySelector('[data-research-discussions]')?.textContent).toBe(
+        'New discussion'
+      )
       expect(
         imported?.querySelector('[data-slot="session-open-button"]')?.getAttribute('aria-current')
       ).toBe('page')

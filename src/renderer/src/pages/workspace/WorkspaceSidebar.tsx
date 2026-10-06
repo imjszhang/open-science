@@ -4,6 +4,7 @@ import { openResearchDiscussion, openResearchWorkspace } from './workspace-discu
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { useSessionStore } from '@/stores/session-store'
 import { sameResearch } from './research-draft-identity'
+import { requestComposerFocus } from './composer-focus-events'
 import {
   buildResearchNavigation,
   importedResearchSource,
@@ -916,10 +917,7 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
           group
             ? {
                 expanded: !collapsedResearch.has(group.key),
-                onToggle:
-                  group.discussions.length > 0
-                    ? () => props.onToggleResearch?.(group.key)
-                    : undefined,
+                onToggle: () => props.onToggleResearch?.(group.key),
                 activityStatus: researchActivity
               }
             : undefined
@@ -1419,12 +1417,21 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
                     {researchGroups.map((group) => (
                       <div key={group.key} data-research-id={group.session.id} className="mb-1">
                         {renderSession(group.session, 'Research', group)}
-                        {group.discussions.length > 0 && !collapsedResearch.has(group.key) ? (
+                        {!collapsedResearch.has(group.key) ? (
                           <div
                             className="ml-5 border-l border-border-300/30 pl-1"
                             data-research-discussions={group.session.id}
                           >
                             {group.discussions.map((session) => renderSession(session, 'Research'))}
+                            <button
+                              type="button"
+                              className="mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-bg-300 hover:text-text-000 disabled:opacity-50"
+                              disabled={!canCreateConversation}
+                              onClick={() => props.onOpenResearch?.(group.source, true)}
+                            >
+                              <Plus className="size-3.5" aria-hidden="true" />
+                              {t('New discussion')}
+                            </button>
                           </div>
                         ) : null}
                       </div>
@@ -1655,7 +1662,11 @@ const WorkspaceSidebar = (props: WorkspaceSidebarProps): React.JSX.Element => {
       navigationAbort.current = controller
       setResearchNavigationFailed(false)
       const navigationRevision = useNavigationStore.getState().explicitNavigationRevision
-      void openResearchWorkspace(source, { newDiscussion, signal: controller.signal })
+      void openResearchWorkspace(source, {
+        newDiscussion,
+        signal: controller.signal,
+        afterNavigate: newDiscussion ? requestComposerFocus : undefined
+      })
         .then((opened) => {
           if (
             !opened &&
