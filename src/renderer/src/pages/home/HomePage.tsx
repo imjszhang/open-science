@@ -1,3 +1,4 @@
+import { openProjectWorkspace } from '../workspace/project-workspace-entry'
 import { ErrorNotice } from '@/components/error-notice'
 import {
   PackageExportProgressButton,
@@ -993,7 +994,12 @@ const HomePage = ({
                         <button
                           type="button"
                           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left after:absolute after:inset-0 after:rounded-[inherit]"
-                          onClick={() => openProject(project.id, 'user')}
+                          onClick={() => {
+                            setProjectActionError(undefined)
+                            void openProjectWorkspace(project.id).catch(() => {
+                              setProjectActionError(t('Could not open this project. Please retry.'))
+                            })
+                          }}
                         >
                           <span className="min-w-0 truncate font-semibold text-text-000">
                             {project.name}

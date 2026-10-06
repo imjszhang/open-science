@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { openProjectWorkspace } from './project-workspace-entry'
 import { useShallow } from 'zustand/react/shallow'
 
 import {
   hydratePersistedSessionIfPresent,
   loadPersistedSession
 } from '@/lib/session-persistence/session-persistence'
-import { useNavigationStore } from '@/stores/navigation-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useSessionStore } from '@/stores/session-store'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -53,12 +53,15 @@ const WorkspaceSidebarContainer = ({
       )
     )
   )
-  const openProject = useNavigationStore((state) => state.openProject)
+  const [projectEntryFailed, setProjectEntryFailed] = useState(false)
   const handleOpenProject = useCallback(
     (targetProjectId: string): void => {
-      openProject(targetProjectId, 'user', onMobileClose)
+      setProjectEntryFailed(false)
+      void openProjectWorkspace(targetProjectId, onMobileClose).catch(() =>
+        setProjectEntryFailed(true)
+      )
     },
-    [onMobileClose, openProject]
+    [onMobileClose]
   )
   const loadPreviewSession = useCallback(
     (sessionId: string): Promise<void> | void => {
@@ -95,6 +98,8 @@ const WorkspaceSidebarContainer = ({
       credentialPendingSessionIds={credentialPendingSessionIds}
       otherProjects={otherProjects}
       onOpenProject={handleOpenProject}
+      projectEntryFailed={projectEntryFailed}
+      onDismissProjectEntryError={() => setProjectEntryFailed(false)}
       onPreviewSession={loadPreviewSession}
     />
   )

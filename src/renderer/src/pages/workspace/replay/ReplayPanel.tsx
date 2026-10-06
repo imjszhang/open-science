@@ -687,6 +687,15 @@ const ReplayPanelContent = ({
         className="flex shrink-0 items-center gap-1 border-b border-border-200 bg-bg-000 px-2 py-1"
       >
         <div className="min-w-0 flex-1">
+          <p className="px-2 text-[11px] text-text-300" data-testid="replay-process-kind">
+            {live
+              ? live.recorded
+                ? t('Experiment run · Saved recording')
+                : isObservationTerminal(live.snapshot)
+                  ? t('Experiment run · Run history')
+                  : t('Experiment run · Live observation')
+              : t('Session process · Reconstructed from records')}
+          </p>
           <Popover
             onOpenChange={(open) => {
               if (open) pause()

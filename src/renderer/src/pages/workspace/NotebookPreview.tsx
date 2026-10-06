@@ -47,6 +47,8 @@ import { hasActiveRuntimeTarget, notebookGated } from './provisioning-view'
 import { NotebookCodeBlock } from './notebook-code'
 import { NotebookRunEvidence } from './NotebookRunEvidence'
 import { NotebookRunObservationActions } from './replay/NotebookRunObservationActions'
+import { showSessionReplay } from './workspace-session-actions'
+import { Button } from '@/components/ui/button'
 import type { RunObservationTarget } from '../../../../shared/run-observation'
 import { NotebookRunOutputs } from './NotebookRunOutputs'
 import { NotebookInputDataStrip } from './NotebookInputDataStrip'
@@ -1362,6 +1364,25 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
             ui={provisionUi}
             onRetry={() => void retryProvision()}
           />
+        ) : null}
+        {session && (session.packageOrigin || session.importedResearch) ? (
+          <div className="shrink-0 border-b border-border-100 px-3 py-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                showSessionReplay(
+                  session.projectId,
+                  session.id,
+                  session.title,
+                  item.projectId ?? session.projectId,
+                  'runs'
+                )
+              }
+            >
+              {t('View saved run recordings')}
+            </Button>
+          </div>
         ) : null}
         {frameOptions.length > 0 ? (
           <div className="flex max-w-full shrink-0 items-center gap-2 overflow-hidden border-b border-border-100 px-2 py-1.5">

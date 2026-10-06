@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { createI18nTestStub } from '../../../../../test/i18n-test-stub'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useSessionStore, type ChatSession } from '@/stores/session-store'
@@ -25,9 +26,11 @@ vi.mock('@/lib/session-fork', () => ({ sessionForkAvailable: () => false, forkSe
 vi.mock('./replay/ReplayPanel', () => ({
   ReplayPanel: (props: ReplayPanelProps) => {
     mocks.panel(props)
+    const [timeMs, setTimeMs] = useState(props.initialView?.timeMs ?? 0)
     return (
-      <div data-testid="replay-panel" data-active={String(props.active)}>
+      <div data-testid="replay-panel" data-active={String(props.active)} data-time-ms={timeMs}>
         {props.document.source.title}
+        <button onClick={() => setTimeMs(500)}>Play</button>
         <button data-replay-browse-steps>Browse steps</button>
       </div>
     )
@@ -116,6 +119,229 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('SessionReplayPreview lifecycle', () => {
+  it('discovers each saved recording version and opens its receiving identity without changing the conversation', async () => {
+    mocks.load.mockResolvedValue({
+      ...doc(),
+      resources: [1, 2].map((number) => ({
+        id: `v${number}`,
+        projectId: 'project',
+        sessionId: 'source',
+        artifactId: 'archive',
+        versionId: `v${number}`,
+        versionNumber: number,
+        name: 'renamed.json',
+        mimeType: 'application/json',
+        availability: 'recorded'
+      }))
+    })
+    Object.assign(window.api, {
+      artifacts: {
+        readPreview: vi.fn().mockResolvedValue({
+          content: '{"format":"open-science-run-observation","version":1}',
+          encoding: 'utf8',
+          truncated: false,
+          size: 58
+        })
+      },
+      observations: { openRecorded: vi.fn() }
+    })
+    const selected = useSessionStore.getState().selectedSessionId
+    render(<SessionReplayPreview item={item()} />)
+    const open = await screen.findAllByRole('button', { name: 'View saved run recording' })
+    expect(open).toHaveLength(2)
+    expect(
+      screen.getByRole('button', { name: 'Run recordings' }).getAttribute('aria-pressed')
+    ).toBe('true')
+    expect(props().active).toBe(false)
+    fireEvent.click(open[0])
+    expect(
+      usePreviewWorkbenchStore
+        .getState()
+        .items.find((entry) => entry.id === 'tool:source:replay-recording:archive:v1')
+    ).toMatchObject({
+      replayRecordingTarget: {
+        projectId: 'project',
+        sessionId: 'source',
+        artifactId: 'archive',
+        versionId: 'v1'
+      }
+    })
+    expect(window.api.observations.openRecorded).not.toHaveBeenCalled()
+    expect(useSessionStore.getState().selectedSessionId).toBe(selected)
+  })
+
+  it('keeps the user-selected materials view when recording discovery arrives later', async () => {
+    let resolve!: (value: unknown) => void
+    mocks.load.mockResolvedValue({
+      ...doc(),
+      resources: [
+        {
+          id: 'v',
+          projectId: 'project',
+          sessionId: 'source',
+          artifactId: 'archive',
+          versionId: 'v',
+          name: 'saved.json',
+          availability: 'recorded'
+        }
+      ]
+    })
+    Object.assign(window.api, {
+      artifacts: {
+        readPreview: vi.fn().mockImplementation(
+          () =>
+            new Promise((done) => {
+              resolve = done
+            })
+        )
+      },
+      observations: { openRecorded: vi.fn() }
+    })
+    render(<SessionReplayPreview item={item()} />)
+    await screen.findByTestId('replay-panel')
+    fireEvent.click(screen.getByRole('button', { name: 'Source files' }))
+    await act(async () =>
+      resolve({
+        content: '{"format":"open-science-run-observation","version":1}',
+        encoding: 'utf8',
+        truncated: false,
+        size: 58
+      })
+    )
+    expect(screen.getByRole('button', { name: 'Source files' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    expect(screen.queryByRole('button', { name: 'View saved run recording' })).toBeNull()
+  })
+
+  it.each(['play', 'pointer-seek', 'seek-key', 'wheel'] as const)(
+    'retains the session process and playhead after %s while archive discovery is pending',
+    async (interaction) => {
+      let resolve!: (value: unknown) => void
+      mocks.load.mockResolvedValue({
+        ...doc(),
+        resources: [
+          {
+            id: 'v',
+            projectId: 'project',
+            sessionId: 'source',
+            artifactId: 'archive',
+            versionId: 'v',
+            name: 'saved.json',
+            availability: 'recorded'
+          }
+        ]
+      })
+      Object.assign(window.api, {
+        artifacts: {
+          readPreview: vi.fn().mockImplementation(
+            () =>
+              new Promise((done) => {
+                resolve = done
+              })
+          )
+        },
+        observations: { openRecorded: vi.fn() }
+      })
+      render(<SessionReplayPreview item={item()} />)
+      const player = await screen.findByTestId('replay-panel')
+      // Exercise each input path independently so a click cannot mask a missing keyboard,
+      // pointer-seek or wheel capture handler. The player remains mounted at its own position.
+      if (interaction === 'play') {
+        fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+      } else if (interaction === 'pointer-seek') {
+        fireEvent.pointerDown(player)
+      } else if (interaction === 'seek-key') {
+        fireEvent.keyDown(player, { key: 'ArrowRight' })
+      } else {
+        fireEvent.wheel(player, { deltaY: 80 })
+      }
+      const playhead = player.getAttribute('data-time-ms')
+      await act(async () =>
+        resolve({
+          content: '{"format":"open-science-run-observation","version":1}',
+          encoding: 'utf8',
+          truncated: false,
+          size: 58
+        })
+      )
+      expect(
+        screen.getByRole('button', { name: 'Session process' }).getAttribute('aria-pressed')
+      ).toBe('true')
+      expect(props().active).toBe(true)
+      expect(screen.getByTestId('replay-panel')).toBe(player)
+      expect(player.getAttribute('data-time-ms')).toBe(playhead)
+      if (interaction === 'play') expect(playhead).toBe('500')
+      expect(screen.queryByRole('button', { name: 'View saved run recording' })).toBeNull()
+    }
+  )
+
+  it('honors an explicit Notebook reveal of the saved-recordings tab', async () => {
+    const mounted = render(<SessionReplayPreview item={item()} />)
+    await screen.findByTestId('replay-panel')
+    mounted.rerender(
+      <SessionReplayPreview
+        item={{ ...item(), replayRevealMode: 'runs', replayRevealRequest: 10 }}
+      />
+    )
+    expect(
+      screen.getByRole('button', { name: 'Run recordings' }).getAttribute('aria-pressed')
+    ).toBe('true')
+    expect(props().active).toBe(false)
+    expect(mocks.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('never displays a late recording candidate from the previously selected import', async () => {
+    let resolve!: (value: unknown) => void
+    mocks.load.mockImplementation(async (_api, request) => ({
+      ...doc(request.sessionId),
+      resources:
+        request.sessionId === 'source'
+          ? [
+              {
+                id: 'v',
+                projectId: 'project',
+                sessionId: 'source',
+                artifactId: 'archive',
+                versionId: 'v',
+                name: 'prior-import.json',
+                availability: 'recorded'
+              }
+            ]
+          : []
+    }))
+    Object.assign(window.api, {
+      artifacts: {
+        readPreview: vi.fn().mockImplementation(
+          () =>
+            new Promise((done) => {
+              resolve = done
+            })
+        )
+      },
+      observations: { openRecorded: vi.fn() }
+    })
+    const mounted = render(<SessionReplayPreview item={item()} />)
+    await screen.findByTestId('replay-panel')
+    mounted.rerender(<SessionReplayPreview item={item('other')} />)
+    await waitFor(() => expect(props().document.source.sessionId).toBe('other'))
+    await act(async () =>
+      resolve({
+        content: '{"format":"open-science-run-observation","version":1}',
+        encoding: 'utf8',
+        truncated: false,
+        size: 58
+      })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run recordings' }))
+    expect(screen.queryByText('prior-import.json')).toBeNull()
+    expect(
+      await screen.findByText(
+        'No saved run recordings were found. The session process is available in the other tab.'
+      )
+    ).toBeTruthy()
+  })
+
   it.each(['Source files', 'Original records', 'evidence'])(
     'reveals the existing player from %s without reloading or stealing focus',
     async (mode) => {
@@ -139,7 +365,7 @@ describe('SessionReplayPreview lifecycle', () => {
       mounted.rerender(<SessionReplayPreview item={item()} isActive />)
       expect(props().active).toBe(false)
       // The invoking control remains focused when explicit navigation exits evidence.
-      const invokingControl = screen.getByRole('button', { name: 'Replay' })
+      const invokingControl = screen.getByRole('button', { name: 'Session process' })
       invokingControl.focus()
       mounted.rerender(
         <SessionReplayPreview item={{ ...item(), replayRevealRequest: 1 }} isActive />
@@ -179,7 +405,7 @@ describe('SessionReplayPreview lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to original records' }))
     fireEvent.click(screen.getByRole('button', { name: 'Source files' }))
     expect(screen.getByText('No source files are available.')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Replay' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Session process' }))
     expect(props().active).toBe(true)
     expect(mocks.load).toHaveBeenCalledTimes(1)
     expect(useSessionStore.getState().selectedSessionId).toBe(selected)

@@ -82,8 +82,15 @@ import {
 import { ConversationPanel } from './ConversationPanel'
 import { useWorkspaceSessionDiscussion } from './workspace-session-discussion'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
-import { ordinaryDraftKey, researchDraftKey, researchIdentity } from './research-draft-identity'
-import { createSessionReplayItem } from './workspace-session-actions'
+import { ordinaryDraftKey, researchDraftKey } from './research-draft-identity'
+import {
+  ensureResearchPreview,
+  releaseAutomaticResearchPreview
+} from './research-preview-navigation'
+import {
+  readResearchProjectDestination,
+  rememberResearchProjectDestination
+} from '@/lib/research-project-entry'
 import { useConversationSubmissions } from './use-conversation-submissions'
 import type { LibraryMentionScopeRequest } from './WorkspaceMessageItem'
 import { ConversationExportDialog } from './ConversationExportDialog'
@@ -215,30 +222,64 @@ const WorkspacePage = ({
     (state) =>
       state.sessions.find((session) => session.id === selectedSessionId)?.researchMembership
   )
-  const researchVisit = useRef<string | undefined>(undefined)
+  const previousDestination = useRef<
+    | {
+        projectId: string
+        sessionId?: string
+        researchDraft: boolean
+      }
+    | undefined
+  >(undefined)
   useEffect(() => {
-    const visit =
-      selectedSessionId && selectedResearchMembership
-        ? JSON.stringify([selectedSessionId, researchIdentity(selectedResearchMembership)])
-        : undefined
-    if (researchVisit.current === visit) return
-    researchVisit.current = visit
-    if (!selectedSessionId || !selectedResearchMembership) return
-    useResearchWorkspaceStore
-      .getState()
-      .rememberDiscussion(selectedResearchMembership, selectedSessionId)
-    usePreviewWorkbenchStore
-      .getState()
-      .upsertAndActivateItem(
-        createSessionReplayItem(
-          selectedResearchMembership.sourceProjectId,
-          selectedResearchMembership.sourceSessionId,
-          selectedResearchMembership.sourceTitle,
-          scopedProjectId
-        )
+    const previous = previousDestination.current
+    previousDestination.current = {
+      projectId: scopedProjectId,
+      sessionId: selectedSessionId,
+      researchDraft: Boolean(activeDraftResearch)
+    }
+    // First send materializes an ordinary draft without invoking openSession. Advance only
+    // that preference, never overwrite an explicit research entry or a navigation elsewhere.
+    if (
+      selectedSessionId &&
+      previous?.projectId === scopedProjectId &&
+      !previous.sessionId &&
+      !previous.researchDraft &&
+      readResearchProjectDestination(scopedProjectId)?.kind === 'draft'
+    ) {
+      const sessions = useSessionStore.getState().sessions
+      const selected = sessions.find(
+        (session) => session.id === selectedSessionId && session.projectId === scopedProjectId
       )
-    usePreviewWorkbenchStore.getState().setToolItemExpanded(null)
-  }, [selectedSessionId, selectedResearchMembership, scopedProjectId])
+      if (
+        selected &&
+        !selected.packageOrigin &&
+        !selected.importedResearch &&
+        !selected.researchMembership
+      )
+        rememberResearchProjectDestination(
+          scopedProjectId,
+          { kind: 'session', sessionId: selectedSessionId },
+          sessions
+        )
+    }
+  }, [scopedProjectId, selectedSessionId, activeDraftResearch])
+  useEffect(() => {
+    const source = selectedResearchMembership ?? activeDraftResearch
+    if (!source) {
+      releaseAutomaticResearchPreview(scopedProjectId)
+      return
+    }
+    if (selectedSessionId && selectedResearchMembership)
+      useResearchWorkspaceStore.getState().rememberDiscussion(source, selectedSessionId)
+    ensureResearchPreview(
+      {
+        projectId: source.sourceProjectId,
+        sourceSessionId: source.sourceSessionId,
+        sourceTitle: source.sourceTitle
+      },
+      scopedProjectId
+    )
+  }, [selectedSessionId, selectedResearchMembership, activeDraftResearch, scopedProjectId])
   const clearSelection = useSessionStore((state) => state.clearSelection)
   const setAutoReviewEnabled = useSessionStore((state) => state.setAutoReviewEnabled)
   const setFixLoopActive = useSessionStore((state) => state.setFixLoopActive)
@@ -596,8 +637,7 @@ const WorkspacePage = ({
     sessionId: activeSession?.id,
     draftKey: currentDraftKey,
     editable: canEditDraft,
-    doc: draftDoc,
-    changeDoc: changeComposerDraftDoc
+    appendText: composer.actions.appendText
   })
   useWorkspaceSessionDiscussion({ composer, draftKey: currentDraftKey, editable: canEditDraft })
   const delegationControl = useWorkspaceSessionDelegationControlOwner({
@@ -1143,6 +1183,11 @@ const WorkspacePage = ({
     useResearchWorkspaceStore.getState().leaveDraft(scopedProjectId)
     sessionController.actions.resetNewConversationSpecialist()
     clearSelection()
+    rememberResearchProjectDestination(
+      scopedProjectId,
+      { kind: 'draft' },
+      useSessionStore.getState().sessions
+    )
   }, [
     clearSelection,
     defaultPermissionProfile,

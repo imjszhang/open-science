@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
 import type { RunObservationSelection } from '../../../../shared/run-observation'
 import { useRunObservationQuestion } from './use-run-observation-question'
 import { observationQuestionText } from './replay/observation-question'
 import type { ComposerDoc } from './composer/composer-doc'
+import { useWorkspaceComposerController } from './workspace-composer-controller'
+import { WorkspaceComposerDraftsProvider } from './workspace-composer-drafts'
+import type { UploadStagingApi } from './composer-upload-transfer'
 
 const selection = (): RunObservationSelection => ({
   selectionId: 'selection',
@@ -37,25 +41,38 @@ const selection = (): RunObservationSelection => ({
 const Harness = ({
   changeDoc,
   editable = true,
-  sessionId = 'session'
+  sessionId = 'session',
+  draftKey = sessionId ?? 'new-research-draft'
 }: {
   changeDoc: (doc: ComposerDoc) => void
   editable?: boolean
-  sessionId?: string
+  sessionId?: string | null
+  draftKey?: string
 }): null => {
   useRunObservationQuestion({
     projectId: 'project',
-    sessionId,
-    draftKey: sessionId,
+    sessionId: sessionId ?? undefined,
+    draftKey,
     editable,
-    doc: { nodes: [{ type: 'text', text: 'My existing question' }] },
-    changeDoc
+    appendText: (_draftKey, text) => {
+      changeDoc({
+        nodes: [
+          { type: 'text', text: 'My existing question' },
+          { type: 'text', text }
+        ]
+      })
+      return true
+    }
   })
   return null
 }
 afterEach(() => {
   cleanup()
-  useRunObservationQuestionStore.setState({ destination: undefined, pending: undefined })
+  useRunObservationQuestionStore.setState({
+    destination: undefined,
+    pending: undefined,
+    lastAdded: undefined
+  })
 })
 
 it('adds a frozen cutoff to the existing draft without changing its conversation or earlier text', () => {
@@ -158,4 +175,160 @@ it('does not add a recorded question to a locked, foreign-Project or stale draft
   view.unmount()
   expect(useRunObservationQuestionStore.getState().askRecorded(recordedSelection())).toBe(false)
   expect(changeDoc).not.toHaveBeenCalled()
+})
+
+it('accepts recorded evidence in a new draft before a Session exists but retains live Session admission', () => {
+  const changeDoc = vi.fn()
+  render(<Harness changeDoc={changeDoc} sessionId={null} />)
+  act(() => {
+    expect(useRunObservationQuestionStore.getState().ask(selection())).toBe(false)
+    expect(useRunObservationQuestionStore.getState().askRecorded(recordedSelection())).toBe(true)
+  })
+  expect(changeDoc).toHaveBeenCalledOnce()
+  expect(changeDoc.mock.calls[0][0].nodes[0].text).toBe('My existing question')
+  expect(changeDoc.mock.calls[0][0].nodes[1].text).toContain('archive-version')
+  expect(useRunObservationQuestionStore.getState().destination).toEqual({
+    projectId: 'project',
+    sessionId: undefined,
+    draftKey: 'new-research-draft'
+  })
+})
+
+it('hands off one frozen recovery to the admitted new draft after the old composer leaves', () => {
+  const changeDoc = vi.fn(),
+    view = render(<Harness changeDoc={changeDoc} editable={false} sessionId="imported-locked" />)
+  const captured = recordedSelection()
+  const destination = { projectId: 'project', draftKey: 'new-research-draft' }
+  act(() => {
+    expect(
+      useRunObservationQuestionStore.getState().recover(captured, destination, () => true)
+    ).toBe(true)
+    ;(captured.mediaKeys as string[]).push('changed-after-ask')
+  })
+  expect(changeDoc).not.toHaveBeenCalled()
+  view.rerender(<Harness changeDoc={changeDoc} sessionId={null} />)
+  expect(changeDoc).toHaveBeenCalledOnce()
+  expect(changeDoc.mock.calls[0][0].nodes[1].text).not.toContain('changed-after-ask')
+  act(() => {
+    expect(
+      useRunObservationQuestionStore.getState().recover(captured, destination, () => true)
+    ).toBe(true)
+  })
+  expect(changeDoc).toHaveBeenCalledOnce()
+})
+
+it('discards recovery if navigation is cancelled or superseded, without broadening live admission', () => {
+  const changeDoc = vi.fn(),
+    view = render(<Harness changeDoc={changeDoc} editable={false} />)
+  const destination = { projectId: 'project', draftKey: 'new-research-draft' }
+  expect(
+    useRunObservationQuestionStore.getState().recover(selection(), destination, () => true)
+  ).toBe(false)
+  expect(
+    useRunObservationQuestionStore.getState().recover(recordedSelection(), destination, () => false)
+  ).toBe(false)
+  let current = true
+  act(() => {
+    useRunObservationQuestionStore
+      .getState()
+      .recover(recordedSelection(), destination, () => current)
+    current = false
+  })
+  view.rerender(<Harness changeDoc={changeDoc} sessionId={null} />)
+  expect(changeDoc).not.toHaveBeenCalled()
+  expect(useRunObservationQuestionStore.getState().pending).toBeUndefined()
+})
+
+it('does not deliver recovered evidence to another new draft in the same Project', () => {
+  const changeDoc = vi.fn(),
+    view = render(<Harness changeDoc={changeDoc} editable={false} />)
+  act(() => {
+    useRunObservationQuestionStore
+      .getState()
+      .recover(
+        recordedSelection(),
+        { projectId: 'project', draftKey: 'new-research-draft' },
+        () => true
+      )
+  })
+  view.rerender(<Harness changeDoc={changeDoc} sessionId={null} draftKey="different-draft" />)
+  expect(changeDoc).not.toHaveBeenCalled()
+  expect(useRunObservationQuestionStore.getState().pending).toBeUndefined()
+})
+
+it('appends recovery to the restored destination composer rather than the outgoing draft', () => {
+  let composer!: ReturnType<typeof useWorkspaceComposerController>
+  const uploads: UploadStagingApi = {
+    stageLocalFile: vi.fn(),
+    beginTransfer: vi.fn(),
+    appendTransfer: vi.fn(),
+    getTransferStatus: vi.fn(),
+    finishTransfer: vi.fn(),
+    abortTransfer: vi.fn(),
+    deleteUpload: vi.fn(),
+    onTransferProgress: vi.fn(() => () => undefined)
+  }
+  const ComposedHarness = ({ draftKey }: { draftKey: string }): null => {
+    const sessionId = draftKey === 'source-session' ? draftKey : undefined
+    const controller = useWorkspaceComposerController({
+      currentDraftKey: draftKey,
+      newConversationDraftKey: 'new:project',
+      activeProjectId: 'project',
+      pendingCustomizePrefill: undefined,
+      onCustomizePrefillApplied: vi.fn(),
+      historyEntries: [],
+      activeSession: sessionId ? { id: sessionId, projectId: 'project' } : undefined,
+      historyPolicy: {
+        catalogSkillIds: new Set(),
+        allowedSkillIds: undefined,
+        skillCatalogReady: true,
+        refreshSkillCatalog: false,
+        specialistCatalogReady: true,
+        specialistId: undefined,
+        loadSkills: vi.fn(),
+        loadSpecialists: vi.fn()
+      },
+      canStageAttachments: true,
+      supportsImageInput: false,
+      uploads
+    })
+    useLayoutEffect(() => {
+      composer = controller
+    })
+    useRunObservationQuestion({
+      projectId: 'project',
+      sessionId,
+      draftKey,
+      editable: !sessionId,
+      appendText: controller.actions.appendText
+    })
+    return null
+  }
+  const tree = (draftKey: string): React.JSX.Element => (
+    <WorkspaceComposerDraftsProvider>
+      <ComposedHarness draftKey={draftKey} />
+    </WorkspaceComposerDraftsProvider>
+  )
+  const view = render(tree('new-research-draft'))
+  act(() => {
+    composer.actions.changeDoc({ nodes: [{ type: 'text', text: 'Restored research draft' }] })
+  })
+  view.rerender(tree('source-session'))
+  act(() => {
+    composer.actions.changeDoc({ nodes: [{ type: 'text', text: 'Outgoing source draft' }] })
+    useRunObservationQuestionStore
+      .getState()
+      .recover(
+        recordedSelection(),
+        { projectId: 'project', draftKey: 'new-research-draft' },
+        () => true
+      )
+  })
+  view.rerender(tree('new-research-draft'))
+  expect(JSON.stringify(composer.view.doc)).toContain('Restored research draft')
+  expect(JSON.stringify(composer.view.doc)).toContain('archive-version')
+  expect(JSON.stringify(composer.view.doc)).not.toContain('Outgoing source draft')
+  view.rerender(tree('source-session'))
+  expect(JSON.stringify(composer.view.doc)).toContain('Outgoing source draft')
+  expect(JSON.stringify(composer.view.doc)).not.toContain('archive-version')
 })

@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect } from 'react'
-import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
-import type { ComposerDoc } from './composer/composer-doc'
+import {
+  sameObservationQuestionDestination,
+  useRunObservationQuestionStore
+} from '@/stores/run-observation-question-store'
 import { observationQuestionText } from './replay/observation-question'
 import { requestComposerFocus } from './composer-focus-events'
 
@@ -9,33 +11,44 @@ export const useRunObservationQuestion = ({
   sessionId,
   draftKey,
   editable,
-  doc,
-  changeDoc
+  appendText
 }: {
   projectId?: string
   sessionId?: string
   draftKey: string
   editable: boolean
-  doc: ComposerDoc
-  changeDoc(doc: ComposerDoc): void
+  appendText(draftKey: string, text: string): boolean
 }): void => {
   const pending = useRunObservationQuestionStore((state) => state.pending)
   useLayoutEffect(() => {
-    const destination =
-      editable && projectId && sessionId ? { projectId, sessionId, draftKey } : undefined
-    useRunObservationQuestionStore.setState({ destination, lastAdded: undefined })
+    const destination = editable && projectId ? { projectId, sessionId, draftKey } : undefined
+    const pending = useRunObservationQuestionStore.getState().pending
+    useRunObservationQuestionStore.setState({
+      destination,
+      lastAdded: undefined,
+      pending:
+        sameObservationQuestionDestination(pending?.destination, destination) &&
+        pending?.isCurrent?.() !== false
+          ? pending
+          : undefined
+    })
     return () => {
-      if (useRunObservationQuestionStore.getState().destination === destination)
+      const state = useRunObservationQuestionStore.getState()
+      if (state.destination === destination)
         useRunObservationQuestionStore.setState({
           destination: undefined,
-          pending: undefined,
+          // A navigation continuation may already have staged the next draft's evidence.
+          pending:
+            sameObservationQuestionDestination(state.pending?.destination, destination) ||
+            state.pending?.isCurrent?.() === false
+              ? undefined
+              : state.pending,
           lastAdded: undefined
         })
     }
   }, [projectId, sessionId, draftKey, editable])
   useEffect(() => {
     if (!pending || useRunObservationQuestionStore.getState().pending !== pending) return
-    useRunObservationQuestionStore.setState({ pending: undefined })
     if (
       !editable ||
       pending.destination.projectId !== projectId ||
@@ -43,10 +56,10 @@ export const useRunObservationQuestion = ({
       pending.destination.draftKey !== draftKey
     )
       return
-    changeDoc({
-      nodes: [...doc.nodes, { type: 'text', text: observationQuestionText(pending.selection) }]
-    })
+    useRunObservationQuestionStore.setState({ pending: undefined })
+    if (pending.isCurrent?.() === false) return
+    if (!appendText(draftKey, observationQuestionText(pending.selection))) return
     useRunObservationQuestionStore.setState({ lastAdded: pending })
     requestComposerFocus()
-  }, [pending, projectId, sessionId, draftKey, editable, doc, changeDoc])
+  }, [pending, projectId, sessionId, draftKey, editable, appendText])
 }

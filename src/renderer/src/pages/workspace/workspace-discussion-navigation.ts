@@ -1,11 +1,12 @@
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useSessionStore, type ChatSession } from '@/stores/session-store'
-import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
+import { rememberResearchProjectDestination } from '@/lib/research-project-entry'
+import { ensureResearchPreview } from './research-preview-navigation'
 import { useSessionReplayStore } from '@/stores/session-replay-store'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import type { ResearchMembership } from '../../../../shared/session-persistence'
-import { createSessionReplayItem, loadSessionDiscussionContext } from './workspace-session-actions'
+import { loadSessionDiscussionContext } from './workspace-session-actions'
 import {
   ordinaryDraftKey,
   researchDraftKey,
@@ -59,17 +60,7 @@ const openReplay = (
   source: { projectId: string; sourceSessionId: string; sourceTitle: string },
   projectId: string
 ): void => {
-  usePreviewWorkbenchStore
-    .getState()
-    .upsertAndActivateItem(
-      createSessionReplayItem(
-        source.projectId,
-        source.sourceSessionId,
-        source.sourceTitle,
-        projectId
-      )
-    )
-  usePreviewWorkbenchStore.getState().setToolItemExpanded(null)
+  ensureResearchPreview(source, projectId)
 }
 
 // An explicit chooser stages a reference without assigning ownership. Research navigation passes
@@ -81,6 +72,7 @@ export const stageSessionDiscussion = (
     sessionId?: string
     researchMembership?: ResearchMembership
     onlyIfUnlinked?: boolean
+    signal?: AbortSignal
   },
   onStaged?: () => void
 ): boolean => {
@@ -102,6 +94,7 @@ export const stageSessionDiscussion = (
   if (!available()) return false
   // Capture now: a dirty-preview guard can postpone navigation while replay continues playing.
   const captured = structuredClone(context)
+  const current = navigationGuard(target.signal)
   const stage = (): void => {
     if (!available()) return
     if (!sessionId) {
@@ -130,12 +123,22 @@ export const stageSessionDiscussion = (
       navigationRevision: useNavigationStore.getState().explicitNavigationRevision
     })
     openReplay(captured, projectId)
+    if (researchMembership)
+      rememberResearchProjectDestination(
+        projectId,
+        {
+          kind: 'research',
+          sourceSessionId: researchMembership.sourceSessionId,
+          sourceImportId: researchMembership.sourceImportId
+        },
+        useSessionStore.getState().sessions
+      )
     onStaged?.()
   }
   const navigation = useNavigationStore.getState()
   return sessionId
-    ? navigation.openSession(projectId, sessionId, 'user', stage)
-    : navigation.openProject(projectId, 'user', stage)
+    ? navigation.openSession(projectId, sessionId, 'user', stage, () => current() && available())
+    : navigation.openProject(projectId, 'user', stage, () => current() && available())
 }
 
 const discussionFor = async (source: ResearchMembership): Promise<string | undefined> => {
@@ -216,7 +219,8 @@ export const openResearchDiscussion = async (
         : undefined
     return stageSessionDiscussion(captured, {
       projectId: receiver?.projectId ?? captured.projectId,
-      sessionId: receiver?.id
+      sessionId: receiver?.id,
+      signal
     })
   }
   if (!availableSource(source)) return false
@@ -225,7 +229,8 @@ export const openResearchDiscussion = async (
   return stageSessionDiscussion(captured, {
     projectId: source.sourceProjectId,
     sessionId,
-    researchMembership: source
+    researchMembership: source,
+    signal
   })
 }
 
@@ -233,17 +238,49 @@ export const openResearchDiscussion = async (
 // whole-research reference; re-entering a discussion must not replace a user's selected step.
 export const openResearchWorkspace = async (
   source: ResearchMembership,
-  options: { newDiscussion?: boolean; signal?: AbortSignal } = {}
+  options: {
+    newDiscussion?: boolean
+    signal?: AbortSignal
+    preservePreview?: boolean
+    afterNavigate?: (destination: {
+      projectId: string
+      sessionId?: string
+      draftKey: string
+    }) => void
+  } = {}
 ): Promise<boolean> => {
   if (options.signal?.aborted) return true
   if (!availableSource(source)) return false
-  const current = navigationGuard(options.signal)
+  const stillAtEntry = navigationGuard(options.signal)
+  const current = (): boolean => stillAtEntry() && availableSource(source)
   const sessionId = options.newDiscussion ? undefined : await discussionFor(source)
   if (!current()) return true
+  const afterNavigate = (): void => {
+    rememberResearchProjectDestination(
+      source.sourceProjectId,
+      {
+        kind: 'research',
+        sourceSessionId: source.sourceSessionId,
+        sourceImportId: source.sourceImportId
+      },
+      useSessionStore.getState().sessions
+    )
+    options.afterNavigate?.({
+      projectId: source.sourceProjectId,
+      sessionId,
+      draftKey: sessionId ?? researchDraftKey(source)
+    })
+  }
   if (sessionId) {
-    return useNavigationStore
-      .getState()
-      .openSession(source.sourceProjectId, sessionId, 'user', () => {
+    const validDiscussion = (): boolean => {
+      const session = useSessionStore.getState().sessions.find((row) => row.id === sessionId)
+      return current() && writable(session) && sameResearch(session.researchMembership, source)
+    }
+    return useNavigationStore.getState().openSession(
+      source.sourceProjectId,
+      sessionId,
+      'user',
+      () => {
         const session = useSessionStore.getState().sessions.find((row) => row.id === sessionId)
         if (
           !availableSource(source) ||
@@ -252,43 +289,61 @@ export const openResearchWorkspace = async (
         )
           return
         useResearchWorkspaceStore.getState().rememberDiscussion(source, sessionId)
-        openReplay(
-          {
-            projectId: source.sourceProjectId,
-            sourceSessionId: source.sourceSessionId,
-            sourceTitle: source.sourceTitle
-          },
-          source.sourceProjectId
-        )
-      })
+        if (!options.preservePreview)
+          openReplay(
+            {
+              projectId: source.sourceProjectId,
+              sourceSessionId: source.sourceSessionId,
+              sourceTitle: source.sourceTitle
+            },
+            source.sourceProjectId
+          )
+        afterNavigate()
+      },
+      validDiscussion
+    )
   }
-  const context = await loadSessionDiscussionContext(
-    source.sourceProjectId,
-    source.sourceSessionId,
-    options.signal
-  )
+  const context = options.preservePreview
+    ? undefined
+    : await loadSessionDiscussionContext(
+        source.sourceProjectId,
+        source.sourceSessionId,
+        options.signal
+      )
   if (!current()) return true
   if (!context) {
     // An archive can validly contain metadata/files without replayable steps. Enter its draft
     // and the replay's existing empty state; never invent a selected step or evidence snapshot.
-    return useNavigationStore.getState().openProject(source.sourceProjectId, 'user', () => {
-      if (!availableSource(source)) return
-      useResearchWorkspaceStore.getState().openDraft(source)
-      useSessionStore.getState().clearSelection()
-      useSessionReplayStore.getState().ask(undefined)
-      openReplay(
-        {
-          projectId: source.sourceProjectId,
-          sourceSessionId: source.sourceSessionId,
-          sourceTitle: source.sourceTitle
-        },
-        source.sourceProjectId
-      )
-    })
+    return useNavigationStore.getState().openProject(
+      source.sourceProjectId,
+      'user',
+      () => {
+        if (!availableSource(source)) return
+        useResearchWorkspaceStore.getState().openDraft(source)
+        useSessionStore.getState().clearSelection()
+        if (!options.preservePreview) useSessionReplayStore.getState().ask(undefined)
+        if (!options.preservePreview)
+          openReplay(
+            {
+              projectId: source.sourceProjectId,
+              sourceSessionId: source.sourceSessionId,
+              sourceTitle: source.sourceTitle
+            },
+            source.sourceProjectId
+          )
+        afterNavigate()
+      },
+      current
+    )
   }
-  return stageSessionDiscussion(context, {
-    projectId: source.sourceProjectId,
-    researchMembership: source,
-    onlyIfUnlinked: true
-  })
+  return stageSessionDiscussion(
+    context,
+    {
+      projectId: source.sourceProjectId,
+      researchMembership: source,
+      onlyIfUnlinked: true,
+      signal: options.signal
+    },
+    afterNavigate
+  )
 }

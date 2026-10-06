@@ -59,7 +59,13 @@
     "src/renderer/src/pages/workspace/ResearchMaterialsPanel.tsx",
     "src/renderer/src/pages/workspace/research-draft-identity.ts",
     "src/renderer/src/pages/workspace/research-draft-identity.test.ts",
-    "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx"
+    "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx",
+    "src/renderer/src/pages/workspace/project-workspace-entry.ts",
+    "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
+    "src/renderer/src/pages/workspace/research-preview-navigation.ts",
+    "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
+    "src/renderer/src/pages/workspace/replay/ReplaySourceBar.tsx",
+    "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx"
   ],
   "interfacePaths": [
     "src/renderer/src/lib/replay/index.ts",
@@ -94,7 +100,10 @@
     "src/renderer/src/stores/research-workspace-store.ts",
     "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.tsx",
     "src/renderer/src/pages/workspace/ResearchMaterialsPanel.tsx",
-    "src/renderer/src/pages/workspace/research-draft-identity.ts"
+    "src/renderer/src/pages/workspace/research-draft-identity.ts",
+    "src/renderer/src/pages/workspace/project-workspace-entry.ts",
+    "src/renderer/src/pages/workspace/research-preview-navigation.ts",
+    "src/renderer/src/pages/workspace/replay/ReplaySourceBar.tsx"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -120,7 +129,10 @@
       "src/renderer/src/pages/workspace/discussion-send-context.test.ts",
       "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts",
       "src/renderer/src/pages/workspace/research-draft-identity.test.ts",
-      "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx"
+      "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx",
+      "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
+      "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
+      "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx"
     ],
     "contract": [],
     "consumer": [

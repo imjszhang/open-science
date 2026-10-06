@@ -1,8 +1,12 @@
 # Replay live viewing — stage three
 
-Status: implemented and accepted locally on 2026-10-06. The installed functional commit remains
-`134ca7841f96962abea7849eee15efdfdea1674b`. The subsequent upstream integration below is verified
-in source but has not been installed in Test. This ledger preserves final evidence and failed attempts.
+Status: implemented and accepted locally on 2026-10-06. Upstream integration commit
+`37e9abbfdd03618f53ff2909e4844982f6f499a3` was subsequently installed as Test
+`0.35.1-test.37e9abbfdd03.2`; startup and the existing receiving archive/images were verified without
+rerunning the experiment. Its release receipt is
+`20261006T090840Z-37e9abbfdd03/startup-validation.json` under the independent Test releases directory.
+The navigation and discovery follow-up is documented in [Research navigation](research-workspace-navigation.md).
+This ledger preserves earlier checkpoints and failed attempts as history.
 
 ## Upstream integration, 2026-10-06
 
@@ -26,8 +30,9 @@ The integration checks passed:
   `git diff --check` passed.
 
 This is scoped integration evidence, not a new complete repository sweep or installed Tuanzi run.
-No experiment was rerun. Test remains at `0.35.0-test.134ca7841f96.2`; no client replacement,
-remote branch push or PR creation accompanies this local merge.
+No experiment was rerun. At the merge checkpoint, Test was still at
+`0.35.0-test.134ca7841f96.2`; the later client upgrade is recorded above. No remote branch push or
+PR creation accompanied this local merge.
 
 ## Final installed acceptance, 2026-10-06
 
@@ -334,19 +339,19 @@ the shared action-menu integration.
 
 ## Delivery sequence and acceptance ledger
 
-| Gate | Required current-state evidence | Status |
-| --- | --- | --- |
-| Baseline | Separate branch, upstream merge, unaffected formal/stage-two checkouts and tests | Passed; local functional commit `134ca7841f96`, formal and Tuanzi source clean |
-| Feasibility | Actual sandboxed generic service and Tuanzi in both browser/Electron hosts; assets, POST and continuous updates | Passed; native fixtures plus actual installed live07 engineering journey |
-| Observation | External, ordinary Main and fork active Runs observable before completion, scope-safe snapshot/delta/resync | Passed; eight native entrypoint checks and installed live06/live07 observations |
-| Replay | Follow/inspect/history, stable position and focus, true state, explicit stop and missing content | Passed; actual Test/Codex live, source-history and receiving-history interaction |
-| Interactive surface | HTTP/POST/SSE/WS; generation proof, revocation, isolation, bounded lifetime, no arbitrary proxy | Passed; native/browser boundary checks, installed generic and Tuanzi surfaces |
-| Questions | Current-session selected evidence, frozen cutoff, no accidental new Session; usable Codex reference retrieval | Passed; actual same-draft acknowledgement and source/receiving Codex SDK reads |
-| Archives | Saved captures/results readable after release; actual `.science` export/import preserves bytes and correct identities | Passed; live07 native audit of 18 Versions; three PNG pairs verified after release/restart |
-| Generality | Tuanzi fixed offline scenario plus unrelated interactive Web fixture, no core project-specific logic | Passed; generic native fixtures and installed generic lifecycle case |
-| Host parity | Real interactions in independent Test and Codex browser, resizing, refresh, disconnect and recovery | Passed; live06 refresh/reconnect, live07 capture/resize and post-restart receiving UI |
-| Regressions | Existing Replay/discussion/Notebook/static previews, stage-two publication/recovery, i18n/owners/API/types/lint | Passed scoped checks and corrected 14-suite rerun; initial failures/skips disclosed above |
-| Delivery | Independent Test build/installation/startup, complete evidence ledger, source clean with local commits | Passed locally; exact installed binary verified, evidence recorded, no upstream push |
+| Gate                | Required current-state evidence                                                                                       | Status                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Baseline            | Separate branch, upstream merge, unaffected formal/stage-two checkouts and tests                                      | Passed; local functional commit `134ca7841f96`, formal and Tuanzi source clean             |
+| Feasibility         | Actual sandboxed generic service and Tuanzi in both browser/Electron hosts; assets, POST and continuous updates       | Passed; native fixtures plus actual installed live07 engineering journey                   |
+| Observation         | External, ordinary Main and fork active Runs observable before completion, scope-safe snapshot/delta/resync           | Passed; eight native entrypoint checks and installed live06/live07 observations            |
+| Replay              | Follow/inspect/history, stable position and focus, true state, explicit stop and missing content                      | Passed; actual Test/Codex live, source-history and receiving-history interaction           |
+| Interactive surface | HTTP/POST/SSE/WS; generation proof, revocation, isolation, bounded lifetime, no arbitrary proxy                       | Passed; native/browser boundary checks, installed generic and Tuanzi surfaces              |
+| Questions           | Current-session selected evidence, frozen cutoff, no accidental new Session; usable Codex reference retrieval         | Passed; actual same-draft acknowledgement and source/receiving Codex SDK reads             |
+| Archives            | Saved captures/results readable after release; actual `.science` export/import preserves bytes and correct identities | Passed; live07 native audit of 18 Versions; three PNG pairs verified after release/restart |
+| Generality          | Tuanzi fixed offline scenario plus unrelated interactive Web fixture, no core project-specific logic                  | Passed; generic native fixtures and installed generic lifecycle case                       |
+| Host parity         | Real interactions in independent Test and Codex browser, resizing, refresh, disconnect and recovery                   | Passed; live06 refresh/reconnect, live07 capture/resize and post-restart receiving UI      |
+| Regressions         | Existing Replay/discussion/Notebook/static previews, stage-two publication/recovery, i18n/owners/API/types/lint       | Passed scoped checks and corrected 14-suite rerun; initial failures/skips disclosed above  |
+| Delivery            | Independent Test build/installation/startup, complete evidence ledger, source clean with local commits                | Passed locally; exact installed binary verified, evidence recorded, no upstream push       |
 
 Run targeted tests for changed behavior and the required repository guards; broaden based on
 actual impact. Real native/browser acceptance must cover cancellation, timeout, application exit,
@@ -357,7 +362,6 @@ corrections rather than overwrite evidence.
 The stage is complete only when a person can observe an actual execution, operate its project Web
 page, select a step and inspect saved evidence from the current Codex conversation, with the same
 capabilities in Open Science. APIs returning success or screenshots alone do not satisfy this gate.
-
 
 ## Historical implementation checkpoint
 

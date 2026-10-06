@@ -233,10 +233,9 @@ test('View replay opens the player from materials or a collapsed pane without ch
 
   const expectUnchangedPlayer = async (): Promise<void> => {
     await expect(replay).toBeVisible()
-    await expect(materials.getByRole('button', { name: 'Replay', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
+    await expect(
+      materials.getByRole('button', { name: 'Session process', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
     await expect(progress).toHaveAttribute('aria-valuenow', position!)
     await expect(replay.getByRole('button', { name: 'Play replay', exact: true })).toBeVisible()
     await expect(editor).toContainText(draft)
@@ -327,14 +326,31 @@ test('replaces the discussion Session without replacing the draft or changing so
   const baseline = await app.readFakeAgentPrompts()
   for (const source of [sourceA, sourceB]) {
     await sessionRow(page, source.title).click()
+    const header = page.getByTestId('research-workspace-header')
+    await expect(header).toContainText(source.title)
+    if (source.id === sourceB.id) {
+      // Discussion navigation retains a reference deliberately opened for the previous study.
+      await expect(replayTab(page, sourceA.id)).toHaveAttribute('aria-selected', 'true')
+      await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+        `Source: ${sourceA.title}`
+      )
+      await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+        'Reference from another conversation'
+      )
+    }
+    await header.getByRole('button', { name: 'View replay', exact: true }).click()
     await expect(replay).toBeVisible()
-    await expect(replayTab(page, source.id)).toBeVisible()
+    await expect(replayTab(page, source.id)).toHaveAttribute('aria-selected', 'true')
     await page
       .getByRole('button', { name: `Close preview of ${source.title}`, exact: true })
       .click()
     await sessionRow(page, target.title).click()
     await sessionRow(page, source.title).click()
-    await expect(replayTab(page, source.id)).toBeVisible()
+    await expect(header).toContainText(source.title)
+    if (source.id === sourceB.id)
+      await expect(replayTab(page, sourceA.id)).toHaveAttribute('aria-selected', 'true')
+    await header.getByRole('button', { name: 'View replay', exact: true }).click()
+    await expect(replayTab(page, source.id)).toHaveAttribute('aria-selected', 'true')
     await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
     const chooser = page.getByRole('dialog', { name: 'Ask in a conversation' })
     if (source.id === sourceA.id) {
@@ -491,10 +507,32 @@ test('keeps ordinary and two research drafts independent, persists research owne
   const header = (): Locator => page.getByTestId('research-workspace-header')
   const research = (source: PersistedChatSession): Locator =>
     page.locator(`[data-research-id="${source.id}"]`)
-  const openResearch = async (source: PersistedChatSession): Promise<void> => {
+  const openResearch = async (
+    source: PersistedChatSession,
+    retainedSource?: PersistedChatSession
+  ): Promise<void> => {
     await research(source).locator('[data-slot="session-open-button"]').first().click()
     await expect(header()).toContainText(source.title)
+    if (retainedSource) {
+      await expect(replayTab(page, retainedSource.id)).toHaveAttribute('aria-selected', 'true')
+      await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+        `Source: ${retainedSource.title}`
+      )
+      await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+        'Reference from another conversation'
+      )
+    }
+    // Choosing a discussion does not replace a deliberate viewer selection. Viewing its own
+    // source is a separate, explicit action and must preserve this discussion and its draft.
+    await header().getByRole('button', { name: 'View replay', exact: true }).click()
+    await expect(header()).toContainText(source.title)
     await expect(replayTab(page, source.id)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+      `Source: ${source.title}`
+    )
+    await expect(page.locator('[data-testid="replay-source-bar"]:visible')).toContainText(
+      'Research referenced by this discussion'
+    )
   }
   const savedSessions = async (): Promise<PersistedChatSession[]> =>
     page.evaluate(
@@ -514,7 +552,7 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await openResearch(sourceA)
   await expect(page.getByTestId('session-discussion-draft')).toContainText(sourceA.title)
   await editor().fill('Draft question for study A.')
-  await openResearch(sourceB)
+  await openResearch(sourceB, sourceA)
   await expect(editor()).toBeEmpty()
   await expect(page.getByTestId('session-discussion-draft')).toContainText(sourceB.title)
   await editor().fill('Draft question for study B.')
@@ -561,7 +599,7 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await materials.getByRole('button', { name: 'Source files', exact: true }).click()
   await expect(page.getByRole('region', { name: 'Source files', exact: true })).toBeVisible()
   await expect(header()).toContainText(sourceA.title)
-  await materials.getByRole('button', { name: 'Replay', exact: true }).click()
+  await materials.getByRole('button', { name: 'Session process', exact: true }).click()
   await page.screenshot({ path: testInfo.outputPath('research-workspace-draft-isolation.png') })
 
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -579,9 +617,9 @@ test('keeps ordinary and two research drafts independent, persists research owne
     sourceTitle: sourceA.title
   })
   await expect(research(sourceA).locator(`[data-session-id="${discussionA.id}"]`)).toBeVisible()
-  await openResearch(sourceB)
+  await openResearch(sourceB, sourceA)
   await expect(editor()).toContainText('Draft question for study B.')
-  await openResearch(sourceA)
+  await openResearch(sourceA, sourceB)
   await expect(
     research(sourceA).locator(
       `[data-session-id="${discussionA.id}"] [data-slot="session-open-button"]`
@@ -624,7 +662,7 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toContainText(
     'Draft question for study A.'
   )
-  await openResearch(sourceB)
+  await openResearch(sourceB, sourceA)
   await expect(
     research(sourceB).locator(
       `[data-session-id="${discussionB.id}"] [data-slot="session-open-button"]`

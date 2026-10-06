@@ -20,6 +20,7 @@ import { type PreviewToolItem, usePreviewWorkbenchStore } from '@/stores/preview
 import { type ChatSession, type SessionStore, useSessionStore } from '@/stores/session-store'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
 import { useObservationQuestionRecovery } from '../replay/use-observation-question-recovery'
+import { ReplaySourceBar } from '../replay/ReplaySourceBar'
 
 import { NotebookPreview } from '../NotebookPreview'
 import type { NotebookPreviewItem } from '../NotebookPreview'
@@ -322,57 +323,75 @@ export const PreviewToolContent = ({
   const questionRecovery = useObservationQuestionRecovery(
     item.replayRecordingTarget ?? item.replayRunTarget
   )
+  const retainInteractedReplay = (): void => {
+    const store = usePreviewWorkbenchStore.getState()
+    if (store.activeItemId === item.id) store.activateItem(item.id)
+  }
 
   if (item.toolKind === 'replay')
     return (
-      <Suspense
-        fallback={
-          <div role="status" className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-            {t('Loading…')}
-          </div>
-        }
+      <div
+        className="flex h-full min-h-0 flex-col"
+        onPointerDownCapture={retainInteractedReplay}
+        onClickCapture={retainInteractedReplay}
+        onKeyDownCapture={retainInteractedReplay}
+        onWheelCapture={retainInteractedReplay}
       >
-        {item.replayRecordingTarget ? (
-          <RunObservationPreview
-            key={item.id}
-            mode="recorded"
-            target={item.replayRecordingTarget}
-            questionRecovery={questionRecovery}
-            title={item.title}
-            isActive={isActive}
-            onAskArchiveSelection={(selection) => {
-              if (!useRunObservationQuestionStore.getState().askRecorded(selection))
-                throw new Error(
-                  t(
-                    'Open an editable Session in this Project, or use Discuss from the imported research, to ask about this step.'
-                  )
-                )
-            }}
-          />
-        ) : item.replayRunTarget ? (
-          <RunObservationPreview
-            key={item.id}
-            target={item.replayRunTarget}
-            questionRecovery={questionRecovery}
-            title={item.title}
-            isActive={isActive}
-            allowInteraction
-            allowCancel
-            allowCapture
-            onAskSelection={(selection) => {
-              if (!useRunObservationQuestionStore.getState().ask(selection))
-                throw new Error(t('Open the recorded Session to ask about this step.'))
-            }}
-          />
-        ) : (
-          <SessionReplayPreview
-            key={`${item.projectId}:${item.sessionId}`}
-            item={item}
-            isActive={isActive}
-          />
-        )}
-      </Suspense>
+        <ReplaySourceBar item={item} />
+        <div className="min-h-0 flex-1">
+          <Suspense
+            fallback={
+              <div
+                role="status"
+                className="flex items-center gap-2 p-4 text-sm text-muted-foreground"
+              >
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                {t('Loading…')}
+              </div>
+            }
+          >
+            {item.replayRecordingTarget ? (
+              <RunObservationPreview
+                key={item.id}
+                mode="recorded"
+                target={item.replayRecordingTarget}
+                questionRecovery={questionRecovery}
+                title={item.title}
+                isActive={isActive}
+                onAskArchiveSelection={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                    throw new Error(
+                      t(
+                        'Open an editable Session in this Project, or use Discuss from the imported research, to ask about this step.'
+                      )
+                    )
+                }}
+              />
+            ) : item.replayRunTarget ? (
+              <RunObservationPreview
+                key={item.id}
+                target={item.replayRunTarget}
+                questionRecovery={questionRecovery}
+                title={item.title}
+                isActive={isActive}
+                allowInteraction
+                allowCancel
+                allowCapture
+                onAskSelection={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().ask(selection))
+                    throw new Error(t('Open the recorded Session to ask about this step.'))
+                }}
+              />
+            ) : (
+              <SessionReplayPreview
+                key={`${item.projectId}:${item.sessionId}`}
+                item={item}
+                isActive={isActive}
+              />
+            )}
+          </Suspense>
+        </div>
+      </div>
     )
 
   // Remount the Files tool per project so its transient dialog cannot outlive the project it opened.

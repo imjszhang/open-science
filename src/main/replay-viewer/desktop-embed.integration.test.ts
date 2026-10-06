@@ -78,7 +78,15 @@ import {SessionPersistenceAlert} from './src/renderer/src/components/SessionPers
 import {useSettingsUndoPortal} from './src/renderer/src/components/use-settings-undo-portal'
 import {useArchiveUndoStore} from './src/renderer/src/stores/archive-undo-store'
 import {ResizablePanelGroup,ResizablePanel,ResizableHandle} from './src/renderer/src/components/ui/resizable'
+import {ReplaySourceBar} from './src/renderer/src/pages/workspace/replay/ReplaySourceBar'
+import {useSessionStore} from './src/renderer/src/stores/session-store'
+import {useNavigationStore} from './src/renderer/src/stores/navigation-store'
+import {useProjectStore} from './src/renderer/src/stores/project-store'
 window.api={platform:'darwin'}
+const fixtureReplayItem={id:'fixture-live-replay',type:'tool',toolKind:'replay',projectId:'desktop-project',sessionId:'desktop-session',title:'Bound experiment',replayRunTarget:{projectId:'desktop-project',sessionId:'desktop-session',runId:'run'}}
+useSessionStore.setState({sessions:[{id:'desktop-session',projectId:'desktop-project',title:'Bound experiment source',status:'idle',messages:[],cwd:'',createdAt:1,updatedAt:1},{id:'another-session',projectId:'desktop-project',title:'Current discussion',status:'idle',messages:[],cwd:'',createdAt:1,updatedAt:1}],selectedSessionId:'another-session'})
+useNavigationStore.setState({activeProjectId:'desktop-project'})
+useProjectStore.setState({projects:[{id:'desktop-project',name:'Fixture project',cwd:'',createdAt:1,updatedAt:1}]})
 function Empty(){return null}
 function Notices(){
  const [mode,setMode]=useState('empty'),[settings,setSettings]=useState(false)
@@ -86,7 +94,7 @@ function Notices(){
  globalThis.fixtureNotices={setMode,setSettings,setUndo:active=>useArchiveUndoStore.setState({notices:active?[{key:'project:fixture:1',kind:'project',projectId:'fixture',archivedAt:1,revision:0,expiresAt:Date.now()+60000,messageKey:'Archived project “{{name}}”.',messageParams:{name:'Fixture archive receipt'}}]:[]})}
  return <><ActionToastStack>{null}{[false,null]}<Empty/>{mode==='normal'||mode==='compact'?<ActionToast title="A real visible notice" detail={mode==='normal'?'This notice must block a screenshot of the area it covers.':undefined} dismissLabel="Close" onDismiss={()=>setMode('empty')}/>:null}{mode==='alert'?<SessionPersistenceAlert title="Saved conversations could not be loaded" message="Fixture recovery notice"/>:null}{portal.background}</ActionToastStack>{settings?<ActionToastStack ref={portal.settingsHostRef}/>:null}<BottomNoticeStack><div style={{display:'contents'}}><EnvStatusBanner ui={{kind:'ready'}}/></div></BottomNoticeStack></>
 }
-function Workspace(){return <main style={{boxSizing:'border-box',height:'100vh',overflow:'hidden',padding:10}}><div style={{position:'relative',display:'flex',height:'100%'}}><ResizablePanelGroup orientation="horizontal" resizeTargetMinimumSize={{coarse:20,fine:20}} className="-mr-[10px] min-w-0 flex-1"><ResizablePanel id="left-panel" defaultSize="0%" minSize="0%" collapsible collapsedSize="0%"><div>Sidebar</div></ResizablePanel><ResizableHandle disabled aria-hidden className={${JSON.stringify(handleClass + ' pointer-events-none opacity-0')}}/><ResizablePanel defaultSize="60%" minSize="20%">Conversation</ResizablePanel><ResizableHandle aria-label="Resize right panel" className={${JSON.stringify(handleClass + ' bg-border shadow-[1px_0_3px_rgba(30,28,24,0.08)] opacity-100')}}/><ResizablePanel defaultSize="40%" minSize="30%"><aside id="right-panel" style={{position:'relative',boxSizing:'border-box',display:'flex',flexDirection:'column',height:'100%',minWidth:0,width:'100%',overflow:'hidden',padding:'.7px 0'}}><div style={{display:'flex',flexShrink:0,height:40}}>Notebook / Replay</div><div style={{minHeight:0,minWidth:0,flex:1}}><section hidden><div style={{height:'100%'}}>Inactive Notebook content</div></section><section role="tabpanel" style={{height:'100%',minHeight:0,width:'100%',overflowY:'auto'}}><div id="viewer-container" className={${JSON.stringify(previewContainerClass)}}><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style={{border:0,minHeight:0,width:'100%',flex:1}}/></div></section></div></aside></ResizablePanel></ResizablePanelGroup><button style={{position:'absolute',right:8,top:0,width:28,height:28}}>×</button></div></main>}
+function Workspace(){return <main style={{boxSizing:'border-box',height:'100vh',overflow:'hidden',padding:10}}><div style={{position:'relative',display:'flex',height:'100%'}}><ResizablePanelGroup orientation="horizontal" resizeTargetMinimumSize={{coarse:20,fine:20}} className="-mr-[10px] min-w-0 flex-1"><ResizablePanel id="left-panel" defaultSize="0%" minSize="0%" collapsible collapsedSize="0%"><div>Sidebar</div></ResizablePanel><ResizableHandle disabled aria-hidden className={${JSON.stringify(handleClass + ' pointer-events-none opacity-0')}}/><ResizablePanel defaultSize="60%" minSize="20%">Conversation</ResizablePanel><ResizableHandle aria-label="Resize right panel" className={${JSON.stringify(handleClass + ' bg-border shadow-[1px_0_3px_rgba(30,28,24,0.08)] opacity-100')}}/><ResizablePanel defaultSize="40%" minSize="30%"><aside id="right-panel" style={{position:'relative',boxSizing:'border-box',display:'flex',flexDirection:'column',height:'100%',minWidth:0,width:'100%',overflow:'hidden',padding:'.7px 0'}}><div style={{display:'flex',flexShrink:0,height:40}}>Notebook / Replay</div><div style={{minHeight:0,minWidth:0,flex:1}}><section hidden><div style={{height:'100%'}}>Inactive Notebook content</div></section><section role="tabpanel" style={{height:'100%',minHeight:0,width:'100%',overflowY:'auto'}}><div data-testid="preview-replay-wrapper" className="flex h-full min-h-0 flex-col"><ReplaySourceBar item={fixtureReplayItem}/><div className="min-h-0 flex-1"><div id="viewer-container" className={${JSON.stringify(previewContainerClass)}}><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style={{border:0,minHeight:0,width:'100%',flex:1}}/></div></div></div></section></div></aside></ResizablePanel></ResizablePanelGroup><button style={{position:'absolute',right:8,top:0,width:28,height:28}}>×</button></div></main>}
 createRoot(document.getElementById('workspace')).render(<Workspace/>)
 createRoot(document.getElementById('notices')).render(<Notices/>)
 `
@@ -338,6 +346,31 @@ app.on('window-all-closed',()=>app.quit())
           (frame) => frame.getBoundingClientRect().height
         )
         expect(initialHeight).toBeGreaterThan(100)
+        if (workspaceCapture) {
+          const sourceBar = page.getByTestId('replay-source-bar')
+          await sourceBar.getByText('Source: Bound experiment source', { exact: true }).waitFor()
+          expect(await sourceBar.textContent()).toContain('Run observation')
+          expect(await sourceBar.textContent()).toContain('Reference from another conversation')
+          expect(
+            await sourceBar.getByRole('button', { name: 'Open source record' }).isEnabled()
+          ).toBe(true)
+          const sourceGeometry = await page.evaluate(() => {
+            const wrapper = document
+              .querySelector('[data-testid="preview-replay-wrapper"]')!
+              .getBoundingClientRect()
+            const bar = document
+              .querySelector('[data-testid="replay-source-bar"]')!
+              .getBoundingClientRect()
+            const viewer = document.getElementById('viewer')!.getBoundingClientRect()
+            return { wrapper: wrapper.toJSON(), bar: bar.toJSON(), viewer: viewer.toJSON() }
+          })
+          expect(sourceGeometry.bar.height).toBeGreaterThan(30)
+          expect(sourceGeometry.viewer.top).toBeGreaterThanOrEqual(sourceGeometry.bar.bottom)
+          expect(sourceGeometry.viewer.height).toBeLessThan(sourceGeometry.wrapper.height - 30)
+          expect(sourceGeometry.viewer.bottom).toBeLessThanOrEqual(
+            sourceGeometry.wrapper.bottom + 1
+          )
+        }
         await expect
           .poll(() =>
             electron!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused())
@@ -627,6 +660,27 @@ app.on('window-all-closed',()=>app.quit())
               document.querySelector('[data-action-toast-stack]')!.contains(element)
             )
           ).toBe(true)
+          // The source bar moves the viewer below this short Undo receipt. Its visible box
+          // must not block unrelated pixels; then move the fixture host into the project area
+          // to keep exercising denial for an actual occluding notice after the portal round trip.
+          expect(
+            await page.evaluate(() => {
+              const notice = document
+                .querySelector('[data-action-toast-stack]')!
+                .getBoundingClientRect()
+              const frame = document.getElementById('viewer')!.getBoundingClientRect()
+              return notice.bottom <= frame.top
+            })
+          ).toBe(true)
+          const unobstructed = page.waitForResponse(
+            (response) => new URL(response.url()).pathname === '/api/capture'
+          )
+          await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+          expect((await unobstructed).status()).toBe(200)
+          await page.locator('[data-action-toast-stack]').evaluate((element) => {
+            const frame = document.getElementById('viewer')!.getBoundingClientRect()
+            ;(element as HTMLElement).style.top = `${frame.top + frame.height / 2}px`
+          })
           await assertDeniedAndRecover(() =>
             page.evaluate(() =>
               (globalThis as unknown as { fixtureNotices: NoticesFixture }).fixtureNotices.setUndo(
@@ -673,8 +727,11 @@ app.on('window-all-closed',()=>app.quit())
                     actualResizableComponents: true,
                     realDividerEdgeDragAndCapture: true,
                     actualNoticeComponents: true,
+                    actualReplaySourceBar: true,
+                    viewerFitsBelowSourceBar: true,
                     emptyNoticeHostsHaveNoBox: true,
                     visibleNoticesRejected: true,
+                    nonOverlappingUndoAllowed: true,
                     undoPortalIdentityPreserved: true
                   }
                 : {}),
@@ -747,7 +804,14 @@ app.on('window-all-closed',()=>app.quit())
       await electron.evaluate(() =>
         (globalThis as unknown as { fixture: Fixture }).fixture.zoom(1.25)
       )
+      // Zoom changes the viewer's responsive layout and the containing frame independently.
+      // Stabilize both frame boxes before resolving the project's native click coordinates.
+      await (await page.locator('#viewer').elementHandle())!.waitForElementState('stable')
+      await (await viewer
+        .locator('iframe[title="Bound project"]')
+        .elementHandle())!.waitForElementState('stable')
       await project.locator('#project-ready').click({ button: 'right' })
+      await expect.poll(async () => (await menus()).native.length).toBe(1)
       await viewer.getByTestId('open-project-interface').click({ button: 'right' })
       await expect.poll(async () => (await menus()).native.length).toBe(2)
       expect((await menus()).native.map((item) => new URL(item.url).origin)).toEqual([

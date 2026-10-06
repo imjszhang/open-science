@@ -65,6 +65,11 @@ const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } =>
 }
 afterEach(() => {
   cleanup()
+  useRunObservationQuestionStore.setState({
+    destination: undefined,
+    pending: undefined,
+    lastAdded: undefined
+  })
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
@@ -125,8 +130,10 @@ describe('desktop scoped Run observation preview', () => {
         sessionId: 's',
         draftKey: 'transition-draft',
         editable: true,
-        doc,
-        changeDoc: setDoc
+        appendText: (_draftKey, text) => {
+          setDoc((current) => ({ nodes: [...current.nodes, { type: 'text', text }] }))
+          return true
+        }
       })
       const item = usePreviewWorkbenchStore((state) =>
         state.items.find((entry) => entry.id === state.activeItemId)
@@ -182,8 +189,10 @@ describe('desktop scoped Run observation preview', () => {
         sessionId: 's',
         draftKey: 'draft',
         editable: true,
-        doc,
-        changeDoc: setDoc
+        appendText: (_draftKey, text) => {
+          setDoc((current) => ({ nodes: [...current.nodes, { type: 'text', text }] }))
+          return true
+        }
       })
       return (
         <>
@@ -227,6 +236,108 @@ describe('desktop scoped Run observation preview', () => {
     ).toBeNull()
     fireEvent.click(button)
     await waitFor(() => expect(openSource).toHaveBeenCalledOnce())
+    expect(openSource.mock.calls[0][0]).toEqual(selected())
+    expect(openSource.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
+  })
+  it('recovers the frozen archived step into a new discussion draft without reopening its viewer', async () => {
+    const live = install()
+    const receiving = { projectId: 'p', sessionId: 'imported', artifactId: 'a', versionId: 'v' }
+    const captured = {
+      kind: 'recorded-run-observation' as const,
+      selectionId: 'recover-ask',
+      receiving,
+      recordingId: 'recording',
+      stepKey: 'recorded-step',
+      mediaKeys: ['original-image'],
+      record: {
+        stepKey: 'recorded-step',
+        observedAt: 500,
+        phase: 'completed' as const,
+        sourceEvidence: {
+          identity: { projectId: 'author', sessionId: 'author-session', runId: 'author-run' },
+          cursor: { epoch: 'e', sequence: 1 },
+          stepId: 'author-step'
+        },
+        run: null,
+        artifactEvidence: [],
+        artifactsTruncated: false
+      }
+    }
+    const openRecorded = vi
+      .fn()
+      .mockResolvedValue({ ...access('recorded'), mode: 'recorded', target: receiving })
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        observations: {
+          ...live,
+          openRecorded,
+          recordingSelection: vi.fn().mockResolvedValue(captured)
+        }
+      }
+    })
+    const recover = vi.fn()
+    const Harness = (): React.JSX.Element => {
+      const [editable, setEditable] = useState(false)
+      const [doc, changeDoc] = useState<ComposerDoc>({
+        nodes: [{ type: 'text', text: 'Unsent draft text' }]
+      })
+      useRunObservationQuestion({
+        projectId: 'p',
+        sessionId: editable ? undefined : 'imported',
+        draftKey: editable ? 'new-research' : 'imported',
+        editable,
+        appendText: (_draftKey, text) => {
+          changeDoc((current) => ({ nodes: [...current.nodes, { type: 'text', text }] }))
+          return true
+        }
+      })
+      return (
+        <>
+          <div data-testid="recovered-draft">{JSON.stringify(doc)}</div>
+          <RunObservationPreview
+            mode="recorded"
+            target={receiving}
+            title="Exact archived step"
+            isActive
+            onAskArchiveSelection={(selection) => {
+              if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                throw new Error('Locked')
+            }}
+            questionRecovery={{
+              label: 'Discuss',
+              onClick: (selection, signal) => {
+                recover(selection)
+                setEditable(true)
+                useRunObservationQuestionStore
+                  .getState()
+                  .recover(
+                    selection,
+                    { projectId: 'p', draftKey: 'new-research' },
+                    () => !signal?.aborted
+                  )
+              }
+            }}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+    const button = await screen.findByRole('button', { name: 'Discuss' })
+    const frame = screen.getByTitle('Exact archived step')
+    expect(recover).not.toHaveBeenCalled()
+    captured.mediaKeys.push('later-image')
+    fireEvent.click(button)
+    await screen.findByText('Selected step added to the current draft. Review it before sending.')
+    expect(screen.getByTestId('recovered-draft').textContent).toContain('Unsent draft text')
+    expect(screen.getByTestId('recovered-draft').textContent).toContain('original-image')
+    expect(screen.getByTestId('recovered-draft').textContent).not.toContain('later-image')
+    expect(screen.getByTitle('Exact archived step')).toBe(frame)
+    expect(openRecorded).toHaveBeenCalledOnce()
+    expect(live.revoke).not.toHaveBeenCalled()
+    expect(recover).toHaveBeenCalledOnce()
+    expect(useRunObservationQuestionStore.getState().destination?.sessionId).toBeUndefined()
+    expect(screen.queryByText('Could not reference this recorded step.')).toBeNull()
   })
   it('keeps its one-use iframe across equivalent target, title and active changes, then revokes on close', async () => {
     const api = install()

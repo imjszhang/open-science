@@ -18,6 +18,8 @@ import { SessionDiscussionDialog } from './SessionDiscussionDialog'
 import { openResearchDiscussion } from './workspace-discussion-navigation'
 import { ResearchMaterialsPanel } from './ResearchMaterialsPanel'
 import { Button } from '@/components/ui/button'
+import { RunRecordingsPanel } from './replay/RunRecordingsPanel'
+import { useRecordingDiscovery } from './replay/use-recording-discovery'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -46,7 +48,16 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const [saveError, setSaveError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const [evidenceStep, setEvidenceStep] = useState<ReplayStep>()
-  const [materialsMode, setMaterialsMode] = useState<'replay' | 'records' | 'files'>('replay')
+  const [materialsMode, setMaterialsMode] = useState<'replay' | 'runs' | 'records' | 'files'>(
+    item.replayRevealMode ?? 'replay'
+  )
+  const materialsChosen = useRef(item.replayRevealRequest !== undefined)
+  // Discovery may finish after the viewer starts playing, seeking, reading or opening evidence.
+  // Any deliberate interaction owns the current view; timer checkpoints and programmatic
+  // focus/scroll updates do not. Capture also covers controls inside evidence and player rows.
+  const keepCurrentMaterials = (): void => {
+    materialsChosen.current = true
+  }
   const surface = useRef<HTMLDivElement>(null)
   const lastRecordId = useRef<string | undefined>(undefined)
   const returningFromEvidence = useRef(false)
@@ -61,7 +72,8 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       // focus into the evidence pane or resetting the playhead, speed, or discussion draft.
       returningFromEvidence.current = false
       setEvidenceStep(undefined)
-      setMaterialsMode('replay')
+      materialsChosen.current = true
+      setMaterialsMode(item.replayRevealMode ?? 'replay')
       return
     }
     if (!isActive || (!evidenceStep && !returningFromEvidence.current)) return
@@ -77,7 +89,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       target?.focus({ preventScroll: true })
     })
     return () => cancelAnimationFrame(frame)
-  }, [evidenceStep, isActive, materialsMode, item.replayRevealRequest])
+  }, [evidenceStep, isActive, materialsMode, item.replayRevealRequest, item.replayRevealMode])
   const loadAbort = useRef<AbortController | undefined>(undefined)
   const activeWriter = useRef<SessionReplayProgressWriter | undefined>(undefined)
   const sourceStatus = useSessionReplayStore(
@@ -94,6 +106,10 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     (sourceObserved && !sourcePresent) ||
     sourceStatus === 'missing' ||
     sourceStatus === 'unreadable'
+  const discovery = useRecordingDiscovery(sourceUnavailable ? undefined : loaded?.document)
+  useEffect(() => {
+    if (!materialsChosen.current && discovery.recordings.length) setMaterialsMode('runs')
+  }, [discovery.recordings.length])
 
   useEffect(() => {
     if (!activated) return
@@ -267,7 +283,14 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     (issue) => issue.code === 'notebook-unavailable'
   )
   return (
-    <div ref={surface} className="flex h-full min-h-0 flex-col">
+    <div
+      ref={surface}
+      className="flex h-full min-h-0 flex-col"
+      onPointerDownCapture={keepCurrentMaterials}
+      onClickCapture={keepCurrentMaterials}
+      onKeyDownCapture={keepCurrentMaterials}
+      onWheelCapture={keepCurrentMaterials}
+    >
       <div className="shrink-0 border-b border-border-200 px-3 py-2">
         {materialsMode !== 'replay' ? (
           <p
@@ -278,7 +301,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           </p>
         ) : null}
         <div role="group" aria-label={t('Research materials')} className="flex flex-wrap gap-1">
-          {(['replay', 'records', 'files'] as const).map((mode) => (
+          {(['replay', 'runs', 'records', 'files'] as const).map((mode) => (
             <Button
               key={mode}
               variant={materialsMode === mode ? 'secondary' : 'ghost'}
@@ -286,15 +309,18 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
               className="h-7 px-2 text-xs"
               aria-pressed={materialsMode === mode}
               onClick={() => {
+                materialsChosen.current = true
                 setEvidenceStep(undefined)
                 setMaterialsMode(mode)
               }}
             >
               {mode === 'replay'
-                ? t('Replay')
-                : mode === 'records'
-                  ? t('Original records')
-                  : t('Source files')}
+                ? t('Session process')
+                : mode === 'runs'
+                  ? t('Run recordings')
+                  : mode === 'records'
+                    ? t('Original records')
+                    : t('Source files')}
             </Button>
           ))}
         </div>
@@ -339,7 +365,8 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           onOpenEvidence={openEvidence}
         />
       </div>
-      {materialsMode !== 'replay' ? (
+      {materialsMode === 'runs' ? <RunRecordingsPanel discovery={discovery} /> : null}
+      {materialsMode === 'records' || materialsMode === 'files' ? (
         <div className={evidenceStep ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
           <ResearchMaterialsPanel
             key={materialsMode}

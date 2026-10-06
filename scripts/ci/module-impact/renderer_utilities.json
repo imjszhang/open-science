@@ -40,7 +40,9 @@
     "src/renderer/src/lib/wsl-support-handoff.ts",
     "src/renderer/src/lib/session-fork.test.ts",
     "src/renderer/src/lib/session-fork.ts",
-    "src/renderer/src/lib/storage-error.ts"
+    "src/renderer/src/lib/storage-error.ts",
+    "src/renderer/src/lib/research-project-entry.ts",
+    "src/renderer/src/lib/research-project-entry.test.ts"
   ],
   "interfacePaths": [
     "src/renderer/src/lib/interface-scale.ts",
@@ -66,7 +68,8 @@
     "src/renderer/src/lib/theme.ts",
     "src/renderer/src/lib/utils.ts",
     "src/renderer/src/lib/wsl-support-handoff.ts",
-    "src/renderer/src/lib/session-fork.ts"
+    "src/renderer/src/lib/session-fork.ts",
+    "src/renderer/src/lib/research-project-entry.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -86,7 +89,8 @@
       "src/renderer/src/lib/session-package-import.test.ts",
       "src/renderer/src/lib/specialist-diagnostics.test.ts",
       "src/renderer/src/lib/startup-issue.test.ts",
-      "src/renderer/src/lib/session-fork.test.ts"
+      "src/renderer/src/lib/session-fork.test.ts",
+      "src/renderer/src/lib/research-project-entry.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -538,7 +542,11 @@
       "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx",
       "src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx",
       "src/renderer/replay-viewer/ObservationCaptureControls.test.tsx",
-      "src/main/replay-viewer/desktop-embed.integration.test.ts"
+      "src/main/replay-viewer/desktop-embed.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx",
+      "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
+      "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
     ]
   },
   "capabilityOverlays": [],

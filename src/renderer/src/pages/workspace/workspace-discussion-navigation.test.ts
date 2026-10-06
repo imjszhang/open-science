@@ -4,6 +4,7 @@ import type { ChatSession } from '@/stores/session-store'
 import type { SessionDiscussionCapture } from './replay/replay-context'
 import { useResearchWorkspaceStore } from '@/stores/research-workspace-store'
 import { researchDraftKey } from './research-draft-identity'
+import { readResearchProjectDestination } from '@/lib/research-project-entry'
 import {
   openResearchDiscussion,
   openResearchWorkspace,
@@ -56,7 +57,12 @@ vi.mock('@/stores/session-replay-store', () => ({
 }))
 vi.mock('@/stores/preview-workbench-store', () => ({
   usePreviewWorkbenchStore: {
-    getState: () => ({ upsertAndActivateItem: mocks.preview, setToolItemExpanded: mocks.expand })
+    getState: () => ({
+      activeProjectId: mocks.navigation.activeProjectId,
+      items: [],
+      upsertAndActivateItem: mocks.preview,
+      setToolItemExpanded: mocks.expand
+    })
   }
 }))
 vi.mock('./workspace-session-actions', () => ({
@@ -66,7 +72,13 @@ vi.mock('./workspace-session-actions', () => ({
     sourceSessionId: string,
     sourceTitle: string,
     workspaceProjectId: string
-  ) => ({ projectId, sourceSessionId, sourceTitle, workspaceProjectId })
+  ) => ({
+    id: `replay:${sourceSessionId}`,
+    projectId,
+    sourceSessionId,
+    sourceTitle,
+    workspaceProjectId
+  })
 }))
 
 const capture: SessionDiscussionCapture = {
@@ -161,6 +173,7 @@ const expectNoHandoff = (): void => {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   vi.resetAllMocks()
   mocks.navigation = { activeProjectId: 'source-project', explicitNavigationRevision: 1 }
   mocks.selectedSessionId = 'source'
@@ -170,12 +183,12 @@ beforeEach(() => {
   useResearchWorkspaceStore.setState({ draftResearchByProject: {}, lastDiscussionByResearch: {} })
   mocks.context.mockResolvedValue({ ...capture, scope: 'session' })
   mocks.find.mockResolvedValue(null)
-  mocks.openSession.mockImplementation((projectId, sessionId, _origin, callback) =>
-    navigate(projectId, sessionId, callback)
+  mocks.openSession.mockImplementation((projectId, sessionId, _origin, callback, canNavigate) =>
+    canNavigate?.() === false ? false : navigate(projectId, sessionId, callback)
   )
-  mocks.openProject.mockImplementation((projectId, _origin, callback) =>
+  mocks.openProject.mockImplementation((projectId, _origin, callback, canNavigate) =>
     // openProject normally selects a recent Session; staging a new draft must clear it afterward.
-    navigate(projectId, 'most-recent-unrelated', callback)
+    canNavigate?.() === false ? false : navigate(projectId, 'most-recent-unrelated', callback)
   )
   mocks.clearSelection.mockImplementation(() => {
     mocks.selectedSessionId = undefined
@@ -185,6 +198,64 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('direct research discussion navigation', () => {
+  it.each([true, false])(
+    'preserves the recorded viewer and reports the exact admitted destination (existing: %s)',
+    async (existing) => {
+      if (existing) mocks.find.mockResolvedValue({ sessionId: 'discussion' })
+      const afterNavigate = vi.fn()
+      await openResearchWorkspace(sourceMembership, { preservePreview: true, afterNavigate })
+      expect(mocks.preview).not.toHaveBeenCalled()
+      expect(mocks.context).not.toHaveBeenCalled()
+      expect(mocks.ask).not.toHaveBeenCalled()
+      expect(afterNavigate).toHaveBeenCalledWith({
+        projectId: 'source-project',
+        sessionId: existing ? 'discussion' : undefined,
+        draftKey: existing ? 'discussion' : researchDraftKey(sourceMembership)
+      })
+      expect(readResearchProjectDestination('source-project')).toEqual({
+        kind: 'research',
+        sourceSessionId: 'source',
+        sourceImportId: 'import'
+      })
+    }
+  )
+
+  it('cancels an admitted research-entry continuation when a later project request aborts it', async () => {
+    const controller = new AbortController()
+    const afterNavigate = vi.fn()
+    let resume!: () => boolean
+    mocks.openProject.mockImplementation((projectId, _origin, callback, canNavigate) => {
+      resume = () => (canNavigate?.() === false ? false : navigate(projectId, 'recent', callback))
+      return false
+    })
+    await openResearchWorkspace(sourceMembership, { signal: controller.signal, afterNavigate })
+    controller.abort()
+    expect(resume()).toBe(false)
+    expect(afterNavigate).not.toHaveBeenCalled()
+    expect(readResearchProjectDestination('source-project')).toBeUndefined()
+    expectNoHandoff()
+  })
+
+  it('does not remember a research destination or hand off before deferred navigation is admitted', async () => {
+    mocks.find.mockResolvedValue({ sessionId: 'discussion' })
+    let resume!: () => void
+    mocks.openSession.mockImplementation((projectId, sessionId, _origin, callback) => {
+      resume = () => {
+        navigate(projectId, sessionId, callback)
+      }
+      return false
+    })
+    const afterNavigate = vi.fn()
+    expect(
+      await openResearchWorkspace(sourceMembership, { preservePreview: true, afterNavigate })
+    ).toBe(false)
+    expect(readResearchProjectDestination('source-project')).toBeUndefined()
+    expect(afterNavigate).not.toHaveBeenCalled()
+    resume()
+    expect(afterNavigate).toHaveBeenCalledOnce()
+    expect(readResearchProjectDestination('source-project')?.kind).toBe('research')
+  })
+
   it('preserves ordinary Session discussion without assigning research membership', async () => {
     mocks.sessions = [{ ...sourceSession(), packageOrigin: undefined }]
     useResearchWorkspaceStore.getState().openDraft(sourceMembership)
@@ -210,6 +281,7 @@ describe('direct research discussion navigation', () => {
       'source-project',
       'discussion',
       'user',
+      expect.any(Function),
       expect.any(Function)
     )
     expect(mocks.ask).toHaveBeenCalledWith(
@@ -221,10 +293,12 @@ describe('direct research discussion navigation', () => {
       })
     )
     expect(mocks.preview).toHaveBeenCalledWith({
+      id: 'replay:source',
       projectId: 'source-project',
       sourceSessionId: 'source',
       sourceTitle: 'Original research',
-      workspaceProjectId: 'source-project'
+      workspaceProjectId: 'source-project',
+      replayAutomatic: true
     })
     expect(mocks.clearSelection).not.toHaveBeenCalled()
   })
@@ -256,6 +330,7 @@ describe('direct research discussion navigation', () => {
       'source-project',
       'discussion',
       'user',
+      expect.any(Function),
       expect.any(Function)
     )
   })
@@ -337,6 +412,7 @@ describe('direct research discussion navigation', () => {
       'source-project',
       'discussion',
       'user',
+      expect.any(Function),
       expect.any(Function)
     )
     expect(mocks.context).not.toHaveBeenCalled()
@@ -351,7 +427,12 @@ describe('direct research discussion navigation', () => {
       sourceMembership
     )
     expect(mocks.selectedSessionId).toBeUndefined()
-    expect(mocks.openProject).toHaveBeenCalledWith('source-project', 'user', expect.any(Function))
+    expect(mocks.openProject).toHaveBeenCalledWith(
+      'source-project',
+      'user',
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(mocks.preview).toHaveBeenCalledWith(
       expect.objectContaining({ sourceSessionId: 'source' })
     )

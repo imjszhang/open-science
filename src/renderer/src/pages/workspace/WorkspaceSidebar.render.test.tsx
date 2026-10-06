@@ -504,7 +504,13 @@ describe('WorkspaceSidebar accessible render', () => {
         )
       }
       await navigateSecond()
-      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('child-a')
+      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('source-a')
+      const original = [...group.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+        button.textContent?.includes('Original record · Read-only')
+      )!
+      expect(original.getAttribute('aria-keyshortcuts')).toContain('+2')
+      await act(async () => original.click())
+      expect(sidebar.onOpenSession).toHaveBeenLastCalledWith('source-a')
       const collapse = group.querySelector<HTMLButtonElement>('[aria-label="Collapse research"]')!
       await act(async () => collapse.click())
       expect(group.querySelector('[data-session-id="child-a"]')).toBeNull()
@@ -557,7 +563,7 @@ describe('WorkspaceSidebar accessible render', () => {
       expect(icon).toBeNull()
       expect(
         imported?.querySelector('[data-slot="session-open-button"]')?.getAttribute('title')
-      ).toBe('Imported research')
+      ).toBe('Continue discussion')
       expect(container.querySelector('[data-session-id="local"] [role="img"]')).toBeNull()
     }
   )

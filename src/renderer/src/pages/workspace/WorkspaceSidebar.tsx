@@ -140,6 +140,8 @@ type WorkspaceSidebarProps = {
   mobileMode?: boolean
   isMobileOpen?: boolean
   onMobileClose?: () => void
+  projectEntryFailed?: boolean
+  onDismissProjectEntryError?: () => void
 }
 
 type WorkspaceSidebarViewProps = WorkspaceSidebarProps & {
@@ -611,9 +613,12 @@ const SessionRow = memo(function SessionRow({
     <button
       type="button"
       data-slot="session-open-button"
-      title={researchToggle ? t('Imported research') : imported ? t('Read-only') : undefined}
+      title={researchToggle ? t('Continue discussion') : imported ? t('Read-only') : undefined}
       className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left after:absolute after:inset-0 after:rounded-[inherit]"
       aria-current={isActive ? 'page' : undefined}
+      aria-label={
+        onOpenResearch ? t('Continue discussing {{title}}', { title: session.title }) : undefined
+      }
       aria-keyshortcuts={
         [
           shortcutNumber ? `${isMac ? 'Meta' : 'Control'}+${shortcutNumber}` : undefined,
@@ -849,8 +854,8 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
       sections.flatMap((section) => section.items),
       collapsedResearch
     )
-  const shortcutNumberBySessionId = new Map(
-    visibleRows.slice(0, 9).map((row, index) => [row.session.id, index + 1])
+  const shortcutNumberByRow = new Map(
+    visibleRows.slice(0, 9).map((row, index) => [`${row.kind}:${row.session.id}`, index + 1])
   )
   const isMac = window.api?.platform === 'darwin'
   const projectMatches = providedProjectMatches ?? matchProjects(otherProjects, projectQuery)
@@ -882,9 +887,9 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
         t={t}
         session={session}
         sectionLabel={sectionLabel}
-        isActive={session.id === activeSessionId || sourceActive}
+        isActive={group ? sourceActive : session.id === activeSessionId}
         imported={Boolean(importedResearchSource(session))}
-        shortcutNumber={shortcutNumberBySessionId.get(session.id)}
+        shortcutNumber={shortcutNumberByRow.get(`${group ? 'research' : 'session'}:${session.id}`)}
         presentedStatus={presentedStatus}
         archiveAvailable={canArchiveSession?.(session) ?? false}
         mobileMode={mobileMode}
@@ -1360,6 +1365,17 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
 
           <div className="mx-2 my-1 h-px bg-border-300/15" />
 
+          {props.projectEntryFailed ? (
+            <ErrorNotice
+              className="mx-2 mb-2"
+              title={t('Could not open this project. Please retry.')}
+              secondaryButton={{
+                label: t('Dismiss'),
+                onClick: () => props.onDismissProjectEntryError?.()
+              }}
+            />
+          ) : null}
+
           {props.researchNavigationFailed ? (
             <ErrorNotice
               className="mx-2 mb-2"
@@ -1403,6 +1419,34 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
                             className="ml-5 border-l border-border-300/30 pl-1"
                             data-research-discussions={group.session.id}
                           >
+                            <button
+                              type="button"
+                              className={cn(
+                                'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-bg-300 hover:text-text-000',
+                                activeSessionId === group.session.id && 'bg-bg-300 text-text-000'
+                              )}
+                              aria-current={
+                                activeSessionId === group.session.id ? 'page' : undefined
+                              }
+                              aria-keyshortcuts={
+                                shortcutNumberByRow.has(`original:${group.session.id}`)
+                                  ? `${isMac ? 'Meta' : 'Control'}+${shortcutNumberByRow.get(`original:${group.session.id}`)}`
+                                  : undefined
+                              }
+                              onClick={() => props.onOpenSession(group.session.id)}
+                            >
+                              <Lock className="size-3.5 shrink-0" aria-hidden="true" />
+                              <span className="min-w-0 flex-1 truncate">
+                                {t('Original record · Read-only')}
+                              </span>
+                              {showSessionShortcuts &&
+                              shortcutNumberByRow.has(`original:${group.session.id}`) ? (
+                                <kbd aria-hidden="true" className="shrink-0 font-sans text-[11px]">
+                                  {isMac ? '⌘' : 'Ctrl+'}
+                                  {shortcutNumberByRow.get(`original:${group.session.id}`)}
+                                </kbd>
+                              ) : null}
+                            </button>
                             {group.discussions.map((session) => renderSession(session, 'Research'))}
                             <button
                               type="button"

@@ -180,7 +180,8 @@
       "src/renderer/replay-viewer/recorded-viewer.test.tsx",
       "src/renderer/src/pages/workspace/RecordedRunObservationPreview.test.tsx",
       "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
-      "src/main/replay-viewer/desktop-embed.integration.test.ts"
+      "src/main/replay-viewer/desktop-embed.integration.test.ts",
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
     ]
   },
   "capabilityOverlays": [],

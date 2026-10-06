@@ -149,7 +149,9 @@ test('opens imported research, asks about a recorded step and restores the ordin
     .getByRole('button', { name: 'Replay research', exact: true })
     .click()
   const replay = page.getByTestId('replay-panel')
-  await expect(replay).toHaveCount(0)
+  // The project entry already opens the source's writable research workspace. Re-entering
+  // the same research must focus its existing draft without duplicating its reference.
+  await expect(replay).toBeVisible()
   await page
     .locator(`[data-research-id="${source.id}"] [data-slot="session-open-button"]`)
     .first()

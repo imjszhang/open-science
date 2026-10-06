@@ -78,7 +78,7 @@ it('keeps a discussion visible with its saved title when the source is missing',
   expect(screen.getByRole('button', { name: 'New discussion' }).hasAttribute('disabled')).toBe(true)
 })
 
-it('labels original records as read-only and explicitly opens a fresh research draft', async () => {
+it('labels original records as read-only and resumes their discussion', async () => {
   render(
     <ResearchWorkspaceHeader source={source} historical>
       <span>Original title</span>
@@ -86,7 +86,7 @@ it('labels original records as read-only and explicitly opens a fresh research d
   )
   expect(screen.getByText('Original record · Read-only')).toBeTruthy()
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'New discussion' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue discussion' }))
   })
-  expect(openResearch).toHaveBeenCalledWith(source, { newDiscussion: true })
+  expect(openResearch).toHaveBeenCalledWith(source, { newDiscussion: false })
 })

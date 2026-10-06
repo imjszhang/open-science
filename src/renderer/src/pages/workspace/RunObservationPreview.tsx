@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
-import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
+import {
+  useRunObservationQuestionStore,
+  type ObservationQuestionSelection
+} from '@/stores/run-observation-question-store'
 import type { ObservationQuestionRecovery } from './replay/use-observation-question-recovery'
 import { useObservationRecordingStatus } from './replay/use-observation-recording-status'
 import { ObservationRecordingStatus } from './replay/ObservationRecordingStatus'
@@ -144,6 +147,8 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
   const delivered = useRef(new Set<string>())
   const [requestedSelectionId, setRequestedSelectionId] = useState<string>()
   const [recovering, setRecovering] = useState(false)
+  const failedSelection = useRef<ObservationQuestionSelection | undefined>(undefined)
+  const recoveryRequest = useRef<AbortController | undefined>(undefined)
   const added = useRunObservationQuestionStore((state) => state.lastAdded)
   const draftReceived = Boolean(
     requestedSelectionId && added?.selection.selectionId === requestedSelectionId
@@ -151,7 +156,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
   const current = useRef(props)
   useLayoutEffect(() => {
     current.current = props
+    if (!props.isActive) recoveryRequest.current?.abort()
   }, [props])
+  useEffect(() => () => recoveryRequest.current?.abort(), [])
   useEffect(() => {
     let disposed = false,
       opened: ViewerAccess | undefined
@@ -209,7 +216,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
       timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
       try {
-        let selectionId: string | undefined, deliver: (() => void | Promise<void>) | undefined
+        let selectionId: string | undefined,
+          selectedEvidence: ObservationQuestionSelection | undefined,
+          deliver: (() => void | Promise<void>) | undefined
         if (admission.mode === 'recorded') {
           const selected = await window.api.observations.recordingSelection({
             viewerId: access.viewerId
@@ -223,6 +232,7 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             )
               throw new Error('Recorded selection scope changed.')
             selectionId = selected.selectionId
+            selectedEvidence = selected
             deliver = destination.onAskArchiveSelection
               ? () => destination.onAskArchiveSelection!(selected, access.viewerId)
               : undefined
@@ -235,17 +245,25 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             if (!matchesSelection(selected, admission.target))
               throw new Error('Selection scope changed.')
             selectionId = selected.selectionId
+            selectedEvidence = selected
             deliver = destination.onAskSelection
               ? () => destination.onAskSelection!(selected, access.viewerId)
               : undefined
           }
         }
         if (selectionId && deliver && !delivered.current.has(selectionId)) {
+          recoveryRequest.current?.abort()
+          setRecovering(false)
           delivered.current.add(selectionId)
           setRequestedSelectionId(selectionId)
+          // Freeze this exact explicit Ask action before navigation or later observations.
+          failedSelection.current = selectedEvidence && structuredClone(selectedEvidence)
           try {
             await deliver()
-            if (!disposed) setSelectionFailed(undefined)
+            if (!disposed) {
+              failedSelection.current = undefined
+              setSelectionFailed(undefined)
+            }
           } catch {
             if (!disposed) setSelectionFailed('ask')
           }
@@ -296,7 +314,7 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
               {t('Selected step added to the current draft. Review it before sending.')}
             </p>
           ) : null}
-          {selectionFailed ? (
+          {selectionFailed && !draftReceived ? (
             <ErrorNotice
               inline
               title={t('Could not reference this recorded step.')}
@@ -315,12 +333,25 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
                       label: props.questionRecovery.label,
                       loading: recovering,
                       onClick: () => {
-                        if (recovering) return
+                        const selection = failedSelection.current
+                        if (recovering || !selection) return
+                        const abort = new AbortController()
+                        recoveryRequest.current?.abort()
+                        recoveryRequest.current = abort
                         setRecovering(true)
                         void Promise.resolve()
-                          .then(() => props.questionRecovery!.onClick())
-                          .catch(() => setSelectionFailed('ask'))
-                          .finally(() => setRecovering(false))
+                          .then(() =>
+                            props.questionRecovery!.onClick(
+                              structuredClone(selection),
+                              abort.signal
+                            )
+                          )
+                          .catch(() => {
+                            if (!abort.signal.aborted) setSelectionFailed('ask')
+                          })
+                          .finally(() => {
+                            if (recoveryRequest.current === abort) setRecovering(false)
+                          })
                       }
                     }
                   : undefined

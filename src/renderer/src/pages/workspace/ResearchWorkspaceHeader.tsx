@@ -37,11 +37,11 @@ export const ResearchWorkspaceHeader = ({
   const showReplay = (): void => {
     showSessionReplay(source.sourceProjectId, source.sourceSessionId, title)
   }
-  const newDiscussion = async (): Promise<void> => {
+  const enterDiscussion = async (newDiscussion: boolean): Promise<void> => {
     setPending(true)
     setError(false)
     try {
-      if (!(await openResearchWorkspace(source, { newDiscussion: true }))) setError(true)
+      if (!(await openResearchWorkspace(source, { newDiscussion }))) setError(true)
     } catch {
       setError(true)
     } finally {
@@ -71,10 +71,10 @@ export const ResearchWorkspaceHeader = ({
           size="sm"
           className="h-7 gap-1 px-2 text-xs"
           disabled={!available || pending}
-          onClick={() => void newDiscussion()}
+          onClick={() => void enterDiscussion(!historical)}
         >
           <MessageSquarePlus className="size-3" aria-hidden="true" />
-          {t('New discussion')}
+          {historical ? t('Continue discussion') : t('New discussion')}
         </Button>
       </div>
       {!available ? (

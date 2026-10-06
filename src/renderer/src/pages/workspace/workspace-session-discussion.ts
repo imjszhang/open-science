@@ -130,6 +130,9 @@ export const useWorkspaceSessionDiscussion = ({
       })
     ) {
       useSessionReplayStore.getState().ask(undefined)
+      // Re-entering an already linked draft still admits an explicit discussion action.
+      // Restore typing focus without replacing its chosen evidence or saving another snapshot.
+      requestComposerFocus()
       return
     }
     handled.current = pending

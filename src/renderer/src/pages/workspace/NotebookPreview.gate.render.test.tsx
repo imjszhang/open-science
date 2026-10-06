@@ -661,6 +661,42 @@ describe('NotebookPreview per-kernel tabs', () => {
     }
   )
 
+  it('opens saved recordings for an imported Notebook without treating author Run IDs as local execution', async () => {
+    const session = useSessionStore.getState().sessions[0]
+    useSessionStore.setState({
+      sessions: [
+        {
+          ...session,
+          projectId: 'proj',
+          title: 'Received study',
+          packageOrigin: {
+            importId: 'receiving-import',
+            importedAt: 1,
+            sourceProjectId: 'author-project',
+            sourceSessionId: 'author-session',
+            manifestChecksum: 'a'.repeat(64)
+          }
+        }
+      ]
+    })
+    usePreviewWorkbenchStore.setState(createInitialPreviewWorkbenchState())
+    await mountWithRuns([await publicObservationRun({ status: 'completed' })])
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'View saved run recordings' }))
+    )
+    const preview = usePreviewWorkbenchStore.getState()
+    const active = preview.items.find((entry) => entry.id === preview.activeItemId)
+    expect(active).toMatchObject({
+      toolKind: 'replay',
+      projectId: 'proj',
+      replaySourceProjectId: 'proj',
+      replaySourceSessionId: 'session-1',
+      replayRevealMode: 'runs'
+    })
+    expect(active).not.toHaveProperty('replayRunTarget')
+    expect(window.api.notebook.execute).not.toHaveBeenCalled()
+  })
+
   it('withholds folder recovery until the session content establishes a live local owner', async () => {
     const session = useSessionStore.getState().sessions[0]
     useSessionStore.setState({ sessions: [{ ...session, contentLoaded: false }] })
