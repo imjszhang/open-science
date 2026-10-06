@@ -80,6 +80,35 @@ All five real Electron embedding/capture scenarios passed, including notificatio
 original-position screen-reader announcements and resizing. The old wide-frame navigation check
 now waits for fonts and the parent iframe to settle before clicking inside the child frame.
 
+Installed release `0.35.0-test.14f0c743b57e.2` passed startup without another authorization
+interruption. Attempt `20261006-live-06` verified actual Codex refresh, temporary network failure
+with an unavailable indicator, automatic observation reconnection and reopening the same project.
+The Test View/Reload command reloaded its UI during execution; the original Session #79 returned
+with one Notebook Run, a completed outcome and 15 outputs. Both hosts showed the actual world
+progressing from version 1 to 5. API package round-trip, native provenance and runtime release
+passed, but the screenshot gate remains incomplete with zero image Artifacts.
+
+The installed capture now failed specifically at root hit testing. The remaining fixture omission
+was the actual resizable separator: its one-pixel layout box has a twenty-pixel transparent
+hit region, extending 9.5 pixels into the preview. All three left-edge sample points hit that
+handle. A real ResizablePanelGroup/Panel/Handle fixture reproduces the same rejection. The
+correction reserves the handle corridor only inside the observation preview, leaving Main
+capture checks and the existing global splitter behavior unchanged. Evidence:
+`installed-20261006-live-06/{acceptance,installed-ui-audit,provenance-audit}.json`.
+
+The actual installed application-exit gate also passed using a separate 120-second generic Node
+fixture. After the normal Test quit confirmation named that running Session, the old desktop
+process exited and the same binary restarted as a new process. The sole Run was cancelled,
+48 observation records and its original output remained readable, and both an old viewer and
+an unused old grant were rejected. No execution or recovery collection was repeated. Current
+Codex rendered the saved cancellation archive after restart. This is a terminal cancellation
+archive, not a claim of partial coverage. Evidence:
+`generic-lifecycle-20261006-exit-01/{lifecycle,installed-ui-audit}.json`.
+
+The real-divider correction passed all five native embedding scenarios, including pointer dragging
+from the handle's extended edge and saving another frame afterwards. Preview checks passed 9 tests;
+updated ownership/consumer checks passed 65, with Web/Node types and changed-file lint also passing.
+
 The existing generic entrypoint suite now passes eight real checks: the three original plain
 executions; external, ordinary Main and fork executions with observation and interactive project
 views; cancellation; and read-owner/operation-owner close and reconstruction. They use a real

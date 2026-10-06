@@ -265,9 +265,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     }
   }, [access, admission, props.isActive, props.onAskSelection, props.onAskArchiveSelection])
   return (
-    // Keep the admitted iframe wholly inside the workbench's fractional clipping edges and
-    // viewport edge. Workspace's negative right margin otherwise makes it flush with that edge.
-    <div className="flex h-full min-h-0 flex-col p-px" hidden={!props.isActive}>
+    // Keep the iframe inside fractional clipping/viewport edges and outside the workspace
+    // divider's 20px hit area, which extends 9.5px into this panel. Preserve that drag corridor.
+    <div className="flex h-full min-h-0 flex-col p-px pl-2.5" hidden={!props.isActive}>
       {openFailed ? (
         <ErrorNotice
           inline

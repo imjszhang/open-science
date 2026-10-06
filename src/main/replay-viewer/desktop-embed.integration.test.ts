@@ -42,6 +42,22 @@ it
       const stylesheet = pathToFileURL(
         resolve('out/replay-viewer', stylePath!.replace(/^\//, ''))
       ).href
+      const layoutSource = await readFile(
+        resolve('src/renderer/src/pages/workspace/workspace-panel-layout.tsx'),
+        'utf8'
+      )
+      const handleClass = layoutSource.match(
+        /const WORKSPACE_RESIZE_HANDLE_CLASS_NAME =\s*'([^']+)'/
+      )?.[1]
+      const previewSource = await readFile(
+        resolve('src/renderer/src/pages/workspace/RunObservationPreview.tsx'),
+        'utf8'
+      )
+      const previewContainerClass = previewSource.match(
+        /<div className="([^"]+)" hidden={!props.isActive}>/
+      )?.[1]
+      expect(handleClass).toBeDefined()
+      expect(previewContainerClass).toBeDefined()
       const noticesScript = join(directory, 'notices.js')
       if (workspaceCapture)
         await build({
@@ -61,6 +77,7 @@ import {PermissionUndoSnackbar} from './src/renderer/src/components/PermissionUn
 import {SessionPersistenceAlert} from './src/renderer/src/components/SessionPersistenceAlert'
 import {useSettingsUndoPortal} from './src/renderer/src/components/use-settings-undo-portal'
 import {useArchiveUndoStore} from './src/renderer/src/stores/archive-undo-store'
+import {ResizablePanelGroup,ResizablePanel,ResizableHandle} from './src/renderer/src/components/ui/resizable'
 window.api={platform:'darwin'}
 function Empty(){return null}
 function Notices(){
@@ -69,6 +86,8 @@ function Notices(){
  globalThis.fixtureNotices={setMode,setSettings,setUndo:active=>useArchiveUndoStore.setState({notices:active?[{key:'project:fixture:1',kind:'project',projectId:'fixture',archivedAt:1,revision:0,expiresAt:Date.now()+60000,messageKey:'Archived project “{{name}}”.',messageParams:{name:'Fixture archive receipt'}}]:[]})}
  return <><ActionToastStack>{null}{[false,null]}<Empty/>{mode==='normal'||mode==='compact'?<ActionToast title="A real visible notice" detail={mode==='normal'?'This notice must block a screenshot of the area it covers.':undefined} dismissLabel="Close" onDismiss={()=>setMode('empty')}/>:null}{mode==='alert'?<SessionPersistenceAlert title="Saved conversations could not be loaded" message="Fixture recovery notice"/>:null}{portal.background}</ActionToastStack>{settings?<ActionToastStack ref={portal.settingsHostRef}/>:null}<BottomNoticeStack><div style={{display:'contents'}}><EnvStatusBanner ui={{kind:'ready'}}/></div></BottomNoticeStack></>
 }
+function Workspace(){return <main style={{boxSizing:'border-box',height:'100vh',overflow:'hidden',padding:10}}><div style={{position:'relative',display:'flex',height:'100%'}}><ResizablePanelGroup orientation="horizontal" resizeTargetMinimumSize={{coarse:20,fine:20}} className="-mr-[10px] min-w-0 flex-1"><ResizablePanel id="left-panel" defaultSize="0%" minSize="0%" collapsible collapsedSize="0%"><div>Sidebar</div></ResizablePanel><ResizableHandle disabled aria-hidden className={${JSON.stringify(handleClass + ' pointer-events-none opacity-0')}}/><ResizablePanel defaultSize="60%" minSize="20%">Conversation</ResizablePanel><ResizableHandle aria-label="Resize right panel" className={${JSON.stringify(handleClass + ' bg-border shadow-[1px_0_3px_rgba(30,28,24,0.08)] opacity-100')}}/><ResizablePanel defaultSize="40%" minSize="30%"><aside id="right-panel" style={{position:'relative',boxSizing:'border-box',display:'flex',flexDirection:'column',height:'100%',minWidth:0,width:'100%',overflow:'hidden',padding:'.7px 0'}}><div style={{display:'flex',flexShrink:0,height:40}}>Notebook / Replay</div><div style={{minHeight:0,minWidth:0,flex:1}}><section hidden><div style={{height:'100%'}}>Inactive Notebook content</div></section><section role="tabpanel" style={{height:'100%',minHeight:0,width:'100%',overflowY:'auto'}}><div id="viewer-container" className={${JSON.stringify(previewContainerClass)}}><iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style={{border:0,minHeight:0,width:'100%',flex:1}}/></div></section></div></aside></ResizablePanel></ResizablePanelGroup><button style={{position:'absolute',right:8,top:0,width:28,height:28}}>×</button></div></main>}
+createRoot(document.getElementById('workspace')).render(<Workspace/>)
 createRoot(document.getElementById('notices')).render(<Notices/>)
 `
           },
@@ -81,13 +100,11 @@ createRoot(document.getElementById('notices')).render(<Notices/>)
           define: { 'process.env.NODE_ENV': '"production"' },
           logLevel: 'silent'
         })
-      // Mirror WorkspacePage's p10, workspace-panel-layout's compensating -mr10, the resizable
-      // panel overflow and PreviewPanel's fractional vertical padding. The old flat fixture's
-      // right inset did not represent the actual desktop iframe's ancestors.
+      // Mount the real resizable group and both separators: their 20px pseudo-element hit
+      // areas overlap adjacent panels, which plain flex divs cannot represent. Other ancestors
+      // retain WorkspacePage's p10, the compensating -mr10 and PreviewPanel's fractional padding.
       const frame = `<iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${workspaceCapture ? 'min-height:0;width:100%;flex:1' : policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:420px' : 'width:100vw;height:100vh'}"></iframe>`
-      const content = workspaceCapture
-        ? `<main style="box-sizing:border-box;height:100vh;overflow:hidden;padding:10px"><div style="position:relative;display:flex;height:100%"><div data-slot="resizable-panel-group" style="display:flex;height:100%;min-width:0;flex:1;margin-right:-10px"><section style="flex:60 1 0;overflow:hidden">Conversation</section><div data-slot="resizable-panel" style="flex:40 1 0;min-width:0;overflow:hidden"><aside id="right-panel" style="position:relative;box-sizing:border-box;display:flex;flex-direction:column;height:100%;min-width:0;width:100%;overflow:hidden;padding:.7px 0"><div style="display:flex;flex-shrink:0;height:40px">Notebook / Replay</div><div style="min-height:0;min-width:0;flex:1"><section hidden><div style="height:100%">Inactive Notebook content</div></section><section role="tabpanel" style="height:100%;min-height:0;width:100%;overflow-y:auto"><div style="box-sizing:border-box;display:flex;height:100%;min-height:0;flex-direction:column;padding:1px">${frame}</div></section></div></aside></div></div><button style="position:absolute;right:8px;top:0;width:28px;height:28px">×</button></div></main>`
-        : frame
+      const content = workspaceCapture ? '<div id="workspace"></div>' : frame
       await writeFile(
         html,
         `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">${workspaceCapture ? `<link rel="stylesheet" href="${stylesheet}">` : ''}</head><body style="margin:0">${content}${workspaceCapture ? `<div id="notices" style="display:contents"></div><script src="${pathToFileURL(noticesScript).href}"></script>` : ''}</body></html>`
@@ -170,6 +187,7 @@ app.whenReady().then(async () => {
     protocol.handle(scheme,()=>new Response('<!doctype html><p id="legacy-preview">Existing managed preview</p><p id="passthrough" data-preview-context-menu-passthrough>Native menu area</p><input id="editable" value="Editable area">',{headers:{'Content-Type':'text/html'}}))
   const owner = windowWithProductionNavigation()
   await owner.loadFile(entry)
+  await owner.webContents.executeJavaScript('new Promise((resolve,reject)=>{const deadline=Date.now()+5000;function check(){if(document.getElementById("viewer"))resolve();else if(Date.now()>deadline)reject(new Error("fixture viewer did not mount"));else requestAnimationFrame(check)}check()})')
   if(capturePane) {app.setActivationPolicy('regular');app.focus({steal:true});owner.show();owner.focus()}
   const caller = createCallerContext({clientId:String(owner.webContents.id),
     lifecycleClientId:'electron:'+owner.webContents.id,leaseId:'electron:'+owner.webContents.id,
@@ -360,6 +378,7 @@ app.on('window-all-closed',()=>app.quit())
                       x,
                       y,
                       hit: document.elementFromPoint(x, y)?.tagName,
+                      slot: document.elementFromPoint(x, y)?.getAttribute('data-slot'),
                       matches: document.elementFromPoint(x, y) === frame
                     })
                   )
@@ -414,6 +433,46 @@ app.on('window-all-closed',()=>app.quit())
         expect(await projectElement.evaluate((frame) => frame.getBoundingClientRect().height)).toBe(
           initialHeight
         )
+        if (workspaceCapture) {
+          const separator = page.getByRole('separator', { name: 'Resize right panel' })
+          const bounds = (await separator.boundingBox())!
+          const previousWidth = await page
+            .locator('#viewer')
+            .evaluate((element) => element.getBoundingClientRect().width)
+          // Start in the real 20px drag corridor, beyond the separator's 1px layout box.
+          // Reserving space for it must keep edge dragging usable without overlapping the iframe.
+          const dragX = bounds.x + bounds.width / 2 + 7
+          const dragY = bounds.y + bounds.height / 2
+          expect(
+            await page.evaluate(
+              ({ x, y }) => document.elementFromPoint(x, y)?.getAttribute('data-slot'),
+              { x: dragX, y: dragY }
+            )
+          ).toBe('resizable-handle')
+          await page.mouse.move(dragX, dragY)
+          await page.mouse.down()
+          await page.mouse.move(dragX - 70, dragY, { steps: 8 })
+          await page.mouse.up()
+          await expect
+            .poll(() =>
+              page.locator('#viewer').evaluate((element) => element.getBoundingClientRect().width)
+            )
+            .toBeGreaterThan(previousWidth + 40)
+          await (await page.locator('#viewer').elementHandle())!.waitForElementState('stable')
+          expect(
+            await page.locator('#viewer').evaluate((frame) => {
+              const bounds = frame.getBoundingClientRect()
+              return [bounds.top + 0.5, bounds.top + bounds.height / 2, bounds.bottom - 0.5].every(
+                (y) => document.elementFromPoint(bounds.left + 0.5, y) === frame
+              )
+            })
+          ).toBe(true)
+          const draggedResponse = page.waitForResponse(
+            (response) => new URL(response.url()).pathname === '/api/capture'
+          )
+          await viewer.getByRole('button', { name: 'Save project screenshot' }).click()
+          expect((await draggedResponse).status()).toBe(200)
+        }
         // Native project controls retain their own state while more evidence arrives and the
         // actual right pane changes height. Neither path reloads or scrolls the interactive page.
         const previousCursor = await actualViewer
@@ -597,7 +656,7 @@ app.on('window-all-closed',()=>app.quit())
                     workspaceRootPadding: 10,
                     groupRightMargin: -10,
                     previewPaddingY: 0.7,
-                    viewerInset: 1,
+                    viewerInset: { left: 10, top: 1, right: 1, bottom: 1 },
                     resizedWindow: { width: 1101, height: 801 }
                   }
                 : { width: '40%', initialHeight: 420, rightInset: 10 },
@@ -611,6 +670,8 @@ app.on('window-all-closed',()=>app.quit())
               internalScrollPreserved: true,
               ...(workspaceCapture
                 ? {
+                    actualResizableComponents: true,
+                    realDividerEdgeDragAndCapture: true,
                     actualNoticeComponents: true,
                     emptyNoticeHostsHaveNoBox: true,
                     visibleNoticesRejected: true,
