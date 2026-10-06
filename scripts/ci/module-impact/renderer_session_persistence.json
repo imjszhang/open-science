@@ -240,7 +240,8 @@
       "src/renderer/src/pages/workspace/RecordedRunObservationPreview.test.tsx",
       "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
-      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": [],

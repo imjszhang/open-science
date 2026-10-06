@@ -7,6 +7,7 @@ import type { ImmutableInputContentLease } from '../immutable-input-authority'
 import { inspectResearchMaterials } from './research-materials'
 import {
   createResearchMaterialAuthority,
+  createResearchMaterialInspectionAuthority,
   resolvePreparedResearchMaterialInput,
   type ResearchMaterialAuthorityDependencies,
   type ResearchPackageMaterialOrigin
@@ -543,5 +544,90 @@ describe('frozen research material snapshots and bounded reads', () => {
     ).rejects.toThrow(/abort/i)
     expect(f.leases[0].close).toHaveBeenCalledOnce()
     expect(f.leases[0].read).toHaveBeenCalledOnce()
+  })
+})
+
+describe('read-only imported research inspection authority', () => {
+  const inspectionRequest = {
+    projectId: 'project',
+    sourceSessionId: 'research',
+    sourceImportId: 'import-1'
+  }
+
+  it('admits the same verified closure without requiring or creating a writable Session', async () => {
+    const f = fixture()
+    f.useOrigin()
+    f.add('retained-input', { sessionId: 'retained-source', latest: false })
+    f.add('unrelated-head', { sessionId: 'retained-source' })
+    f.add('unproven-own-file')
+    f.include('retained-input')
+    const writable = await createResearchMaterialAuthority(f.dependencies, request)
+    f.sessions.delete('discussion')
+    const inspected = await createResearchMaterialInspectionAuthority(
+      f.dependencies,
+      inspectionRequest
+    )
+    expect(inspected.source.identity).toBe(writable.source.identity)
+    expect(inspected.versions).toEqual(writable.versions)
+    expect(inspected.versions.map((row) => row.versionId)).toEqual(['retained-input'])
+    expect(await inspected.readVersion('retained-input', { maxBytes: 100 })).toEqual(
+      f.versions.get('retained-input')!.content
+    )
+    await expect(createResearchMaterialAuthority(f.dependencies, request)).rejects.toThrow(
+      'receiving Session'
+    )
+    await expect(
+      createResearchMaterialAuthority(f.dependencies, { ...request, targetSessionId: 'research' })
+    ).rejects.toThrow('read-only')
+  })
+
+  it.each(['ordinary', 'fork', 'archived', 'reimport', 'wrong-project'])(
+    'rejects %s sources',
+    async (mode) => {
+      const f = fixture()
+      if (mode !== 'ordinary') f.useOrigin(mode === 'fork' ? 'fork' : 'import')
+      const source = f.sessions.get('research')!
+      if (mode === 'archived') source.archivedAt = 3
+      if (mode === 'reimport') source.packageOrigin!.importId = 'import-2'
+      if (mode === 'wrong-project') source.projectId = 'another-project'
+      await expect(
+        createResearchMaterialInspectionAuthority(f.dependencies, inspectionRequest)
+      ).rejects.toThrow('unavailable or changed')
+    }
+  )
+
+  it('revalidates import identity while reading and refuses altered frozen material sets', async () => {
+    const f = fixture()
+    f.useOrigin()
+    f.add('data')
+    f.include('data')
+    const inspected = await createResearchMaterialInspectionAuthority(
+      f.dependencies,
+      inspectionRequest
+    )
+    f.add('new')
+    f.include('new')
+    await expect(
+      createResearchMaterialInspectionAuthority(f.dependencies, {
+        ...inspectionRequest,
+        expectedSourceIdentity: inspected.source.identity
+      })
+    ).rejects.toThrow('snapshot changed')
+    f.controls.onRead = () => {
+      f.sessions.get('research')!.packageOrigin!.importId = 'import-2'
+    }
+    await expect(inspected.readVersion('data', { maxBytes: 100 })).rejects.toThrow(
+      'unavailable or changed'
+    )
+    expect(f.leases[0].close).toHaveBeenCalledOnce()
+  })
+
+  it('does not trust an unverified or mismatched retained receipt', async () => {
+    const f = fixture()
+    f.useOrigin()
+    f.origin.receiptIdentity.manifestChecksum = 'b'.repeat(64)
+    await expect(
+      createResearchMaterialInspectionAuthority(f.dependencies, inspectionRequest)
+    ).rejects.toThrow('closure does not belong')
   })
 })

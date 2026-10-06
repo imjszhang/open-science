@@ -48,7 +48,9 @@
     "src/renderer/src/pages/workspace/replay/RunRecordingsPanel.tsx",
     "src/renderer/src/pages/workspace/replay/use-recording-discovery.ts",
     "src/renderer/src/pages/workspace/replay/recording-discovery.ts",
-    "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts"
+    "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
+    "src/renderer/src/pages/workspace/use-research-run-observer.ts",
+    "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx"
   ],
   "interfacePaths": [
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
@@ -81,7 +83,8 @@
     "src/renderer/src/pages/workspace/replay/use-observation-recording-status.ts",
     "src/renderer/src/pages/workspace/replay/RunRecordingsPanel.tsx",
     "src/renderer/src/pages/workspace/replay/use-recording-discovery.ts",
-    "src/renderer/src/pages/workspace/replay/recording-discovery.ts"
+    "src/renderer/src/pages/workspace/replay/recording-discovery.ts",
+    "src/renderer/src/pages/workspace/use-research-run-observer.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -102,7 +105,8 @@
       "src/renderer/replay-viewer/ObservationCaptureControls.test.tsx",
       "src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx",
       "src/renderer/src/pages/workspace/replay/use-observation-question-recovery.test.tsx",
-      "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts"
+      "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
+      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx"
     ],
     "contract": [],
     "consumer": [
@@ -155,7 +159,8 @@
       "src/renderer/web/bootstrap.test.ts",
       "src/renderer/web/renderer-argument-shape-characterization.test.ts",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
-      "src/renderer/src/pages/workspace/research-preview-navigation.test.ts"
+      "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": ["e2e_regressions"],

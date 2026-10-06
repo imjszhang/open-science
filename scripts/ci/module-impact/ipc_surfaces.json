@@ -26,7 +26,8 @@
     "src/main/ipc-surfaces/uploads.test.ts",
     "src/main/session-package/desktop-composition.test.ts",
     "src/main/window-find-ipc.test.ts",
-    "src/shared/renderer-contracts/run-observation.ts"
+    "src/shared/renderer-contracts/run-observation.ts",
+    "src/shared/renderer-contracts/research-runs.ts"
   ],
   "interfacePaths": [
     "src/main/ipc-surfaces/adapter.ts",
@@ -42,7 +43,8 @@
     "src/main/ipc-surfaces/session-persistence.ts",
     "src/main/ipc-surfaces/office-preview.ts",
     "src/main/session-package/desktop-composition.ts",
-    "src/shared/renderer-contracts/run-observation.ts"
+    "src/shared/renderer-contracts/run-observation.ts",
+    "src/shared/renderer-contracts/research-runs.ts"
   ],
   "consumerModules": [],
   "testFiles": {

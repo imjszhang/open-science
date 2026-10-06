@@ -16,6 +16,7 @@ import { composeHandoff, composeStorageHandoff } from './composition/handoff'
 import { composeManagedFiles } from './composition/managed-files'
 import { composeManagedExecution } from './composition/managed-execution'
 import { registerRunObservationIpc } from './run-observation/ipc'
+import { registerResearchRunInspectionIpc } from './research-runs/ipc'
 import { composeNotebookBridge } from './composition/notebook-bridge'
 import { composeNotebookRuntime } from './composition/notebook-runtime'
 import { composeNotebookSurfaces } from './composition/notebook-surfaces'
@@ -310,6 +311,9 @@ export const createApplicationModules = async (
     modules
   })
   notebookRuntime.notebookLifecycle = managedExecution.notebookLifecycle
+  declareElectronAdapter('research-runs', () =>
+    registerResearchRunInspectionIpc(managedExecution.researchRuns)
+  )
   declareElectronAdapter('run-observation', () => {
     if (managedExecution.external.observation)
       registerRunObservationIpc(managedExecution.external.observation)

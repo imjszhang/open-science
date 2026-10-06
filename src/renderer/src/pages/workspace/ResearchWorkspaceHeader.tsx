@@ -14,10 +14,12 @@ import { requestComposerFocus } from './composer-focus-events'
 export const ResearchWorkspaceHeader = ({
   source,
   historical,
+  runAction,
   children
 }: {
   source: ResearchMembership
   historical: boolean
+  runAction?: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element => {
   const { t } = useTranslation()
@@ -63,6 +65,7 @@ export const ResearchWorkspaceHeader = ({
           {historical ? t('Original record · Read-only') : t('Discussion')}
         </span>
         <div className="min-w-0 flex-1 text-xs">{children}</div>
+        {runAction}
         <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={showReplay}>
           <Play className="size-3" aria-hidden="true" />
           {t('View replay')}

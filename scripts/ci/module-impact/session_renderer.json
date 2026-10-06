@@ -407,7 +407,10 @@
       "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx",
       "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
       "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
-      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
+      "src/renderer/src/stores/research-run-store.test.ts",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": ["renderer_state"],

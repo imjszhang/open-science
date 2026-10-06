@@ -1,4 +1,8 @@
 import { realpath } from 'node:fs/promises'
+import {
+  createResearchRunInspectionPort,
+  type ResearchRunInspectionPort
+} from '../research-runs/inspection'
 import { tmpdir } from 'node:os'
 import { ArtifactTurnOwner } from '../acp/artifact-turn-owner'
 import type { createAcpRuntime } from '../acp/runtime-composition'
@@ -52,6 +56,7 @@ import type { composeSessionPackages } from './session-packages'
 
 export type ManagedExecutionComposition = {
   service: ManagedExecutionService
+  researchRuns: ResearchRunInspectionPort
   external: ManagedExecutionExternalPort
   internal: ManagedExecutionPort
   environments: ManagedResearchEnvironmentOwner
@@ -620,6 +625,17 @@ export async function composeManagedExecution({
       return turnPort.call(method, payload, context)
     }
   }
+  const researchRuns = createResearchRunInspectionPort({
+    materials: {
+      catalog: sessionAuthority.projectFilesRepository,
+      inputAuthority: managedFiles.immutableInputAuthority,
+      readSession: (projectId, sessionId) => sessions.readSessionSnapshot(projectId, sessionId),
+      readOrigin: (request) => sessionPackages.sessionPackageService.readOrigin(request)
+    },
+    runtimes: service,
+    assertOpen,
+    track
+  })
   const external = createManagedExecutionExternalPort({ service, assertOpen, withDataRootWrite })
   external.observation = createRunObservationExternalPort({
     viewers: observationViewers,
@@ -719,6 +735,7 @@ export async function composeManagedExecution({
   }))
   return {
     service,
+    researchRuns,
     external,
     internal,
     environments,

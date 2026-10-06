@@ -74,7 +74,9 @@
     "src/renderer/src/stores/theme-store.test.ts",
     "src/renderer/src/stores/theme-store.ts",
     "src/renderer/src/stores/update-store.test.ts",
-    "src/renderer/src/stores/update-store.ts"
+    "src/renderer/src/stores/update-store.ts",
+    "src/renderer/src/stores/research-run-store.ts",
+    "src/renderer/src/stores/research-run-store.test.ts"
   ],
   "interfacePaths": [
     "src/renderer/src/stores/interface-scale-store.ts",
@@ -105,7 +107,8 @@
     "src/renderer/src/stores/storage-info-store.ts",
     "src/renderer/src/stores/tag-store.ts",
     "src/renderer/src/stores/theme-store.ts",
-    "src/renderer/src/stores/update-store.ts"
+    "src/renderer/src/stores/update-store.ts",
+    "src/renderer/src/stores/research-run-store.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -146,7 +149,8 @@
       "src/renderer/src/stores/storage-info-store.test.ts",
       "src/renderer/src/stores/tag-store.test.ts",
       "src/renderer/src/stores/theme-store.test.ts",
-      "src/renderer/src/stores/update-store.test.ts"
+      "src/renderer/src/stores/update-store.test.ts",
+      "src/renderer/src/stores/research-run-store.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -550,7 +554,9 @@
       "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx",
       "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
       "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
-      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": [],

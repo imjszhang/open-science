@@ -95,3 +95,14 @@ it('keeps the original record open and focuses its inline question without navig
   expect(focus).toHaveBeenCalledOnce()
   window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
 })
+
+it('places run controls beside replay and discussion without replacing either action', () => {
+  render(
+    <ResearchWorkspaceHeader source={source} historical runAction={<button>Run research</button>}>
+      <span>Original title</span>
+    </ResearchWorkspaceHeader>
+  )
+  expect(screen.getByRole('button', { name: 'Run research' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'View replay' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Ask about this research' })).toBeTruthy()
+})

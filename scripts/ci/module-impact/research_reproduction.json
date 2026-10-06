@@ -9,13 +9,22 @@
     "src/main/notebook/research-material-archive.test.ts",
     "src/main/notebook/research-material-archive.ts",
     "src/main/notebook/research-materials.test.ts",
-    "src/main/notebook/research-materials.ts"
+    "src/main/notebook/research-materials.ts",
+    "src/shared/research-run-launcher.ts",
+    "src/main/research-runs/inspection.ts",
+    "src/main/research-runs/inspection.test.ts",
+    "src/main/research-runs/ipc.ts",
+    "src/main/research-runs/ipc.test.ts",
+    "src/shared/research-run-launcher.test.ts"
   ],
   "interfacePaths": [
     "src/shared/research-reproduction.ts",
     "scripts/research/prepare-git-snapshot.mjs",
     "src/main/notebook/research-material-archive.ts",
-    "src/main/notebook/research-materials.ts"
+    "src/main/notebook/research-materials.ts",
+    "src/shared/research-run-launcher.ts",
+    "src/main/research-runs/inspection.ts",
+    "src/main/research-runs/ipc.ts"
   ],
   "consumerModules": ["main_session_package"],
   "testFiles": {
@@ -23,7 +32,10 @@
       "src/shared/research-reproduction.test.ts",
       "scripts/research/prepare-git-snapshot.test.ts",
       "src/main/notebook/research-material-archive.test.ts",
-      "src/main/notebook/research-materials.test.ts"
+      "src/main/notebook/research-materials.test.ts",
+      "src/main/research-runs/inspection.test.ts",
+      "src/main/research-runs/ipc.test.ts",
+      "src/shared/research-run-launcher.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -67,7 +79,35 @@
       "src/main/runtime-view/tuanzi.macos.integration.test.ts",
       "src/renderer/replay-viewer/browser.integration.test.ts",
       "src/main/run-observation/capture-package.integration.test.ts",
-      "src/main/replay-viewer/desktop-embed.integration.test.ts"
+      "src/main/replay-viewer/desktop-embed.integration.test.ts",
+      "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
+      "src/main/compute/application-commands.test.ts",
+      "src/main/compute/compute-service.architecture.test.ts",
+      "src/main/notebook/runtime-application-commands.test.ts",
+      "src/main/permission-grants/application-commands.test.ts",
+      "src/main/reviewer/reviewer-orchestrator.architecture.test.ts",
+      "src/main/settings/application-commands.test.ts",
+      "src/main/settings/integration-application-commands.test.ts",
+      "src/main/settings/runtime-application-commands.test.ts",
+      "src/preload/index.test.ts",
+      "src/renderer/web/api-installer.test.ts",
+      "src/renderer/web/renderer-argument-shape-characterization.test.ts",
+      "src/shared/renderer-contract-catalog.test.ts",
+      "src/renderer/src/pages/workspace/handoff-lifecycle-source.test.ts",
+      "src/renderer/web/bootstrap.test.ts",
+      "src/preload/electron-renderer-contract-adapter.test.ts",
+      "src/renderer/src/App.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.customize-prefill.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.draft-preservation.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.edit-message.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.image-staging.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.notebook-hydration.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.pending-switch.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.preview-panel-resize.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.send-gate.test.tsx",
+      "src/renderer/src/pages/workspace/WorkspacePage.specialist-barrier.test.tsx",
+      "src/renderer/src/main.render.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": [],

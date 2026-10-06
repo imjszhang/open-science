@@ -39,6 +39,7 @@ vi.mock('electron', () => ({
 
 // The subset of the bridge these tests exercise. Args are unknown — forwarding, not shape, is asserted.
 type PreloadApi = {
+  researchRuns: { inspect: (request: unknown) => unknown }
   saveSessionArtifacts: (request: unknown) => unknown
   saveProjectArtifacts: (request: unknown) => unknown
   getRuntimeVersions: () => { electron: string; chrome: string; node: string }
@@ -532,6 +533,7 @@ describe('preload bridge — public surface inventory', () => {
       'remoteAccess.revokeBrowser',
       'remoteAccess.revokeBrowsers',
       'remoteAccess.setMode',
+      'researchRuns.inspect',
       'reviewer.abortFixLoop',
       'reviewer.getForSession',
       'reviewer.onFixLoopEnd',
@@ -968,6 +970,7 @@ describe('preload bridge — core renderer contract catalog', () => {
       'tags',
       'remote-access',
       'reviewer',
+      'research-runs',
       'sessions',
       'side-chat',
       'storage',
@@ -1877,5 +1880,19 @@ describe('preload bridge — sessions + agent-framework IPC channels', () => {
       transferId: request.transferId
     })
     expect(invokeMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('preload bridge — imported research run preflight', () => {
+  it('forwards only the read inspection request to its dedicated owner', async () => {
+    const request = {
+      projectId: 'project',
+      sourceSessionId: 'source',
+      sourceImportId: 'import',
+      descriptorVersionId: 'descriptor',
+      expectedSourceIdentity: 'frozen'
+    }
+    await api.researchRuns.inspect(request)
+    expect(invokeMock).toHaveBeenLastCalledWith('research-runs:inspect', request)
   })
 })

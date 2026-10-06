@@ -287,7 +287,10 @@
       "src/renderer/src/pages/workspace/previews/renderers/PlanJsonPreview.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
-      "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
+      "src/renderer/src/stores/research-run-store.test.ts",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": [],

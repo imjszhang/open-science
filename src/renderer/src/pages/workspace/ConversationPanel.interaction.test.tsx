@@ -711,6 +711,7 @@ const createPanelDefaults = (): PanelProps => ({
     planProjectionRecoveryError: false,
     availability: {
       submit: false,
+      researchRun: false,
       submitMode: undefined,
       revise: true,
       resume: true,
@@ -720,6 +721,7 @@ const createPanelDefaults = (): PanelProps => ({
     actions: {
       submit: {
         draft: vi.fn(),
+        researchRun: vi.fn().mockResolvedValue(undefined),
         restoredPlan: vi.fn().mockResolvedValue(undefined)
       },
       revise: vi.fn(),

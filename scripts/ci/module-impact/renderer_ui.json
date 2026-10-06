@@ -460,7 +460,9 @@
       "src/renderer/src/pages/workspace/replay/NotebookRunObservationActions.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/renderer/src/pages/workspace/replay/ReplaySourceBar.test.tsx",
-      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx"
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
+      "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
     ]
   },
   "capabilityOverlays": [],

@@ -13,6 +13,20 @@ const paths = (
 ): string[] => RENDERER_CONTRACT_CATALOG.filter(predicate).map(({ publicPath }) => publicPath)
 
 describe('renderer contract catalog', () => {
+  it('keeps research inspection Electron-only and outside the execution command router', () => {
+    expect(
+      RENDERER_CONTRACT_CATALOG.find(({ publicPath }) => publicPath === 'researchRuns.inspect')
+    ).toMatchObject({
+      channel: 'research-runs:inspect',
+      surfaceInstallation: {
+        electron: 'preload',
+        localWeb: 'unavailable',
+        remoteWeb: 'unavailable'
+      }
+    })
+    expect(ELECTRON_APPLICATION_COMMAND_CHANNELS).not.toContain('research-runs:inspect')
+    expect(Object.values(WEB_INVOKE_CHANNELS)).not.toContain('research-runs:inspect')
+  })
   it('installs bulk browser revocation on every renderer with caller authorization in the owner', () => {
     expect(
       RENDERER_CONTRACT_CATALOG.find(

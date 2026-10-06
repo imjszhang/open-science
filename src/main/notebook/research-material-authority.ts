@@ -31,6 +31,14 @@ export type ResearchMaterialAuthorityDependencies = {
     sessionId: string
   }): Promise<ResearchPackageMaterialOrigin>
 }
+export type InspectResearchMaterialAuthorityRequest = {
+  projectId: string
+  sourceSessionId: string
+  sourceImportId: string
+  expectedSourceIdentity?: string
+  signal?: AbortSignal
+}
+
 export type CreateResearchMaterialAuthorityRequest = {
   projectId: string
   sourceSessionId: string
@@ -100,14 +108,49 @@ export const createResearchMaterialAuthority = async (
   dependencies: ResearchMaterialAuthorityDependencies,
   options: CreateResearchMaterialAuthorityRequest
 ): Promise<ResearchMaterialAuthority> => {
+  sessionPackageRequestSchema.parse({
+    projectId: options.projectId,
+    sessionId: options.targetSessionId
+  })
   const request = { ...structuredClone({ ...options, signal: undefined }), signal: options.signal }
+  return buildResearchMaterialAuthority(dependencies, request, () =>
+    readSourceAndTarget(dependencies, request)
+  )
+}
+
+/** Source-only imported research discovery. It shares closure admission with execution without
+ * minting a writable Session or bypassing createResearchMaterialAuthority's target check. */
+export const createResearchMaterialInspectionAuthority = async (
+  dependencies: ResearchMaterialAuthorityDependencies,
+  options: InspectResearchMaterialAuthorityRequest
+): Promise<ResearchMaterialAuthority> => {
+  const request = { ...structuredClone({ ...options, signal: undefined }), signal: options.signal }
+  if (!request.sourceImportId || request.sourceImportId.length > 512)
+    reject('the selected import identity is invalid.')
+  return buildResearchMaterialAuthority(dependencies, request, async () => {
+    request.signal?.throwIfAborted()
+    const source = await dependencies.readSession(request.projectId, request.sourceSessionId)
+    if (
+      !source ||
+      source.projectId !== request.projectId ||
+      source.id !== request.sourceSessionId ||
+      source.archivedAt !== undefined ||
+      source.packageOrigin?.importId !== request.sourceImportId
+    )
+      return reject('the selected imported source is unavailable or changed.')
+    request.signal?.throwIfAborted()
+    return source
+  })
+}
+
+const buildResearchMaterialAuthority = async (
+  dependencies: ResearchMaterialAuthorityDependencies,
+  request: Omit<CreateResearchMaterialAuthorityRequest, 'targetSessionId'>,
+  readCurrentSource: () => Promise<PersistedChatSession>
+): Promise<ResearchMaterialAuthority> => {
   sessionPackageRequestSchema.parse({
     projectId: request.projectId,
     sessionId: request.sourceSessionId
-  })
-  sessionPackageRequestSchema.parse({
-    projectId: request.projectId,
-    sessionId: request.targetSessionId
   })
   if (
     request.versionIds &&
@@ -117,11 +160,11 @@ export const createResearchMaterialAuthority = async (
       new Set(request.versionIds).size !== request.versionIds.length)
   )
     reject('invalid or excessive explicit Version selection.')
-  const source = structuredClone(await readSourceAndTarget(dependencies, request))
+  const source = structuredClone(await readCurrentSource())
   const initialIdentity = sourceIdentity(source)
   const assertCurrent = async (signal?: AbortSignal): Promise<void> => {
     signal?.throwIfAborted()
-    if (sourceIdentity(await readSourceAndTarget(dependencies, request)) !== initialIdentity)
+    if (sourceIdentity(await readCurrentSource()) !== initialIdentity)
       reject('the selected source identity changed; select its materials again.')
     signal?.throwIfAborted()
   }

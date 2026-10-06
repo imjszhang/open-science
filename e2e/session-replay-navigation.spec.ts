@@ -751,3 +751,58 @@ test('keeps ordinary and two research drafts independent, persists research owne
   }
   await page.screenshot({ path: testInfo.outputPath('research-workspace-restored-membership.png') })
 })
+
+test('Run inspection never creates a discussion or consumes a research draft on unavailable evidence', async ({
+  app
+}) => {
+  await app.completeOnboarding()
+  let page = await app.configureFakeAgent()
+  const projectName = 'Read-only run inspection'
+  const projectId = await createProject(page, projectName)
+  // Deliberately no retained import receipt: this exercises the real Main authority failure,
+  // without replacing researchRuns.inspect or trusting a presentation-only packageOrigin.
+  const source = sourceFixture(projectId, 'a')
+  page = await app.restartWithSessionFixture(source)
+  await page
+    .getByRole('region', { name: 'Projects', exact: true })
+    .getByRole('button', { name: projectName, exact: true })
+    .click()
+  await sessionRow(page, source.title).click()
+  const draft = 'Keep this separate question while inspecting a run.'
+  const editor = page.getByRole('textbox', { name: 'Ask anything', exact: true })
+  await editor.fill(draft)
+  const before = await page.evaluate((request) => window.api.sessions.loadOne(request), {
+    projectId,
+    sessionId: source.id
+  })
+  const prompts = await app.readFakeAgentPrompts()
+  await page
+    .getByTestId('research-workspace-header')
+    .getByRole('button', { name: 'Run…', exact: true })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'Run this research', exact: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Results will be saved in a new discussion.')
+  await expect(dialog).toContainText('Could not inspect this research. Please retry.')
+  await expect(dialog.getByRole('button', { name: 'Start run', exact: true })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(dialog).toContainText('Could not inspect this research. Please retry.')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(editor).toContainText(draft)
+  expect(await app.readFakeAgentPrompts()).toEqual(prompts)
+  expect(
+    await page.evaluate((request) => window.api.sessions.loadOne(request), {
+      projectId,
+      sessionId: source.id
+    })
+  ).toEqual(before)
+  expect(
+    await page.evaluate(
+      async (projectId) =>
+        (await window.api.sessions.loadAll()).sessions
+          .filter((row) => row.projectId === projectId)
+          .map((row) => row.id),
+      projectId
+    )
+  ).toEqual([source.id])
+})

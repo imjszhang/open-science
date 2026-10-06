@@ -106,6 +106,7 @@ const GENERATED_SOURCE_OMISSIONS = [
   'remoteAccess.detect',
   'remoteAccess.disable',
   'remoteAccess.setMode',
+  'researchRuns.inspect',
   'sessions.sendFlushResponse',
   'settings.exportCustomServerTemplate',
   'settings.exportSkill',

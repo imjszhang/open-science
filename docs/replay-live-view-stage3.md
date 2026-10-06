@@ -582,3 +582,42 @@ authorization itself remains unchanged, and no stored Session metadata is rewrit
 These are implementation and partial acceptance checkpoints. Their remaining installed capture,
 draft delivery, Codex interaction and screenshot/result package gates were subsequently closed by
 live07 and its separate final audits at the top of this document.
+
+### Research Run entry point
+
+Imported research and its ordinary discussions expose **Run…** beside **View replay**.
+The dialog inspects the retained import receipt and its verified dependency closure without
+creating a Session, preparing an environment, or executing package instructions. A user selects
+an immutable run description and plan, reviews its scope, limitations, required materials,
+compatible managed Node runtimes, and destination. Required private/external/missing inputs,
+required secret injection, absent entrypoints and unavailable compatible runtimes prevent
+this initial automatic-launch path. Native project-service availability is advisory for
+headless plans. These checks do not claim scientific reproducibility.
+
+**Start run** rechecks the source import identity, description Version/hash, selected plan and
+exact material Versions, then submits a prepared request through normal Agent admission. From
+an original record it creates an ordinary research-owned discussion; from an existing discussion
+it uses that discussion. The request does not capture, clear, restore or attach the composer's
+separate draft, annotations or uploads. A shared admission guard prevents an overlapping ordinary
+send before prompt admission. Source records remain immutable. There is no new Session type or
+change to the `.science` format.
+
+The Agent reviews the declared material instructions and uses `host.managedExecution`; the
+renderer has no execution API. The request asks for `recordObservation` and a supported
+`projectView`, bounded execution of the chosen plan, publication of outputs and environment
+release. It explicitly does not authorize software installation, credential injection, host
+checkout execution or silent material substitution. This is Agent-assisted execution, not a
+claim that arbitrary package entrypoints can be automatically executed without review.
+
+The workspace observes the exact appended prompt in its same-import discussion. Notebook
+matching requires the prompt ID, main frame, managed execution invocation and native shell
+binding; it never selects the latest run in the Session. The first matching run opens once in
+the right Replay pane if the user is still at the originating destination. Navigation elsewhere
+or reopening the app does not reopen it automatically. **View run** can reopen the same target.
+The viewer retains its explicit **Open project interface** action and existing exact-run stop
+controls. Project UI is live only while the service runs; recorded evidence remains separate.
+
+Local launch receipts retain bounded stable source/prompt/run identities, without executable
+commands, host paths, credentials, viewer grants or URLs. Main continues to authorize every
+inspection and viewer activation. Unsupported or legacy runs lacking exact provenance remain
+unavailable instead of being inferred from nearby activity.
