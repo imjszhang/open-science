@@ -14,9 +14,12 @@ import { createCallerContext } from '../../main/caller-context'
 
 // Build with npm run build:replay-viewer, then run this opt-in real-browser acceptance:
 // RUN_REPLAY_VIEWER_BROWSER=1 npx vitest run src/renderer/replay-viewer/browser.integration.test.ts
-it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 'win32')(
-  'production Replay observes real projections, freezes selections and keeps one-use project frames stable',
-  async () => {
+it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 'win32').each([
+  { scenario: 'short log', longLogs: false },
+  { scenario: 'overflowing streamed log', longLogs: true }
+])(
+  'production Replay observes real projections and keeps project frames stable: $scenario',
+  async ({ longLogs }) => {
     const cleanups: Array<() => Promise<unknown> | void> = []
     const root = await realpath(await mkdtemp(join(tmpdir(), 'os-service-browser-run-')))
     await chmod(root, 0o700)
@@ -79,6 +82,15 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       logicalPort: 4173,
       signal: abort.signal
     })
+    let startupOutput = longLogs
+      ? [
+          'project started',
+          ...Array.from(
+            { length: 240 },
+            (_, index) => `log line ${index}: observing the current offline run`
+          )
+        ].join('\n')
+      : 'project started'
     let source: RunObservationSource = {
       identity: target,
       phase: 'running',
@@ -91,7 +103,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         script: '',
         status: 'running',
         startedAt: Date.now(),
-        text: { stdout: 'project started', stderr: '', traceback: '', plain: [] },
+        text: { stdout: startupOutput, stderr: '', traceback: '', plain: [] },
         outputs: [],
         workingFiles: []
       }
@@ -127,7 +139,9 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       const browser = await chromium.launch({ headless: true })
       cleanups.push(() => browser.close())
       const page = await browser.newPage()
-      const evidence = '/tmp/replay-viewer-production-browser-acceptance'
+      const evidence = longLogs
+        ? '/tmp/replay-viewer-overflow-browser-acceptance'
+        : '/tmp/replay-viewer-production-browser-acceptance'
       await mkdir(evidence, { recursive: true })
       page.on('pageerror', (error) => errors.push(error.message))
       page.on('console', (message) => {
@@ -137,7 +151,26 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       const access = await host.open(target, caller, { allowInteraction: true })
       await page.setViewportSize({ width: 1100, height: 900 })
       await page.goto(access.url)
-      await expect(page.getByText('project started', { exact: true })).toBeVisible()
+      const log = page.getByTestId('replay-live-record').locator('pre').first()
+      await expect(log).toHaveText(startupOutput)
+      if (longLogs) {
+        for (let index = 0; index < 8; index++) {
+          startupOutput += `\nstreamed log update ${index}`
+          source = {
+            ...source,
+            run: { ...source.run!, text: { ...source.run!.text, stdout: startupOutput } }
+          }
+          await new Promise((done) => setTimeout(done, 30))
+        }
+        await expect(log).toHaveText(startupOutput)
+        await expect
+          .poll(() =>
+            page
+              .getByRole('region', { name: 'Execution record', exact: true })
+              .evaluate((element) => element.scrollTop)
+          )
+          .toBeGreaterThan(1000)
+      }
       expect(await page.evaluate(() => 'api' in window)).toBe(false)
       expect(await page.evaluate(() => document.cookie)).toBe('')
       expect(projectLoads).toBe(0)
@@ -149,8 +182,33 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       expect(captured.viewerId).toBe(access.viewerId)
       const selection = await viewers.selection(access.viewerId, { caller })
       expect(selection?.selectionId).toBe(captured.selectionId)
-      expect(selection?.snapshot.run?.logs.stdout.text).toBe('project started')
+      expect(selection?.snapshot.run?.logs.stdout.text).toBe(startupOutput)
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
+      const beforeProjectClick = {
+        button: await page
+          .getByRole('button', { name: 'Project interface', exact: true })
+          .boundingBox(),
+        viewport: page.viewportSize(),
+        scrollTop: await page
+          .getByRole('region', { name: 'Execution record', exact: true })
+          .evaluate((element) => element.scrollTop)
+      }
+      if (longLogs) {
+        // Accessibility-driven activation may reveal a control before dispatching its click.
+        // Settling that real browser scroll must not turn this mode switch into history inspection.
+        await expect(page.getByRole('group', { name: 'Run view', exact: true })).toBeInViewport({
+          ratio: 1
+        })
+        await page
+          .getByRole('button', { name: 'Project interface', exact: true })
+          .scrollIntoViewIfNeeded()
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            )
+        )
+      }
       await page.getByRole('button', { name: 'Project interface', exact: true }).click()
       const projectFrame = page.frameLocator('iframe[title="Interactive project"]')
       await expect(projectFrame.getByRole('heading', { name: 'Interactive project' }))
@@ -159,7 +217,12 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
           await page.screenshot({ path: join(evidence, 'failure.png') })
           await writeFile(
             join(evidence, 'failure.json'),
-            JSON.stringify({ body: await page.locator('body').innerText(), errors, projectLoads })
+            JSON.stringify({
+              beforeProjectClick,
+              body: await page.locator('body').innerText(),
+              errors,
+              projectLoads
+            })
           )
           throw error
         })
@@ -172,6 +235,22 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       await page.getByRole('button', { name: 'Project interface', exact: true }).click()
       await expect(projectFrame.locator('output')).toHaveText('1')
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
+      if (longLogs) {
+        await page.getByRole('button', { name: 'Execution record', exact: true }).click()
+        await expect(page.getByRole('group', { name: 'Run view', exact: true })).toBeInViewport({
+          ratio: 1
+        })
+        const region = page.getByRole('region', { name: 'Execution record', exact: true })
+        const bounds = (await region.boundingBox())!
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height - 40)
+        await page.mouse.wheel(0, -180)
+        await expect(page.getByRole('button', { name: 'Back to live', exact: true })).toBeVisible()
+        await page.getByRole('button', { name: 'Project interface', exact: true }).click()
+        await expect(page.locator('iframe[title="Interactive project"]')).toBeHidden()
+        expect(projectLoads).toBe(1)
+        await page.getByRole('button', { name: 'Back to live', exact: true }).click()
+        await expect(projectFrame.locator('output')).toHaveText('1')
+      }
       await page.getByRole('button', { name: 'Pause following', exact: true }).click()
       await expect(page.locator('iframe[title="Interactive project"]')).toBeHidden()
       expect(await frame?.evaluate((node) => node.closest('[inert]') !== null)).toBe(true)
@@ -188,7 +267,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         executionContext: { purpose: 'offline-demo', conditionChanges: [] },
         run: {
           ...source.run!,
-          text: { ...source.run!.text, stdout: 'project started\nlater output' }
+          text: { ...source.run!.text, stdout: `${startupOutput}\nlater output` }
         }
       }
       await observedChange
@@ -205,7 +284,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         .toContain('later output')
       expect(
         (await viewers.selection(access.viewerId, { caller }))?.snapshot.run?.logs.stdout.text
-      ).toBe('project started')
+      ).toBe(startupOutput)
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
       await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
       await expect(projectFrame.locator('output')).toHaveText('1')

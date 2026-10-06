@@ -60,7 +60,7 @@ export const ReplayLiveRecord = ({
       data-observation-record={`${snapshot.cursor.epoch}:${snapshot.cursor.sequence}`}
     >
       <div
-        className="flex shrink-0 flex-wrap gap-1"
+        className="sticky top-0 z-10 flex shrink-0 flex-wrap gap-1 bg-bg-000"
         role="group"
         aria-label={t('Run view')}
         data-replay-live-interaction
