@@ -1,8 +1,33 @@
 # Replay live viewing — stage three
 
-Status: implemented and accepted locally on 2026-10-06. The installed functional commit is
-`134ca7841f96962abea7849eee15efdfdea1674b`; subsequent delivery documentation does not require a
-new application build. This ledger preserves both the final evidence and earlier failed attempts.
+Status: implemented and accepted locally on 2026-10-06. The installed functional commit remains
+`134ca7841f96962abea7849eee15efdfdea1674b`. The subsequent upstream integration below is verified
+in source but has not been installed in Test. This ledger preserves final evidence and failed attempts.
+
+## Upstream integration, 2026-10-06
+
+Merged upstream `bf35648b342611a7823dc5c3f19a67185dc41365` (version 0.35.1) into the local
+`codex/replay-live-view` branch. The conversation conflict retains both source-specific research
+draft presentation and the upstream empty-conversation native-find handshake. The two Notebook
+module-impact conflicts retain both sets of ownership and test evidence; duplicated entries from
+overlapping registrations were removed without removing any distinct coverage.
+
+The integration checks passed:
+
+- Notebook dependency analysis, working-file observation, managed output collection/publication,
+  all three execution entry points, recorded-media reading and real `.science` package checks:
+  102 test files, 3261 tests passed; one file and 66 tests were skipped by existing conditions.
+- Conversation/draft/Replay previews, selected-step delivery, i18n and ownership checks: the initial
+  12-file run passed 1367 tests and failed nine manifest checks on duplicate entries. After the
+  correction, all three affected guard files passed their 44 tests. Other passed checks were unchanged.
+- A fresh production Replay viewer build and all five real Electron embedding scenarios passed,
+  including small panes, the actual workspace divider, foreground capture and resize behavior.
+- Node, sandbox and Web type checks, changed production-file lint, conflict-file formatting and
+  `git diff --check` passed.
+
+This is scoped integration evidence, not a new complete repository sweep or installed Tuanzi run.
+No experiment was rerun. Test remains at `0.35.0-test.134ca7841f96.2`; no client replacement,
+remote branch push or PR creation accompanies this local merge.
 
 ## Final installed acceptance, 2026-10-06
 
