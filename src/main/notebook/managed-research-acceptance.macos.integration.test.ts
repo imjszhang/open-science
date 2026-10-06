@@ -14,6 +14,7 @@ import {
   ephemeralAcceptanceCipher,
   readAcceptanceBudgetSeal,
   readAcceptanceCredentials,
+  recordAcceptanceTrialUsage,
   reserveAcceptanceTrial
 } from './research-acceptance.test-support'
 import { ApplicationEventHub } from '../application-events'
@@ -89,6 +90,7 @@ type Acceptance = {
   live?: {
     budgetFilename: string
     providersFilename: string
+    usageReceiptFilename: string
     trialEnvironmentVariable: string
     trialIds: Record<'author' | 'external' | 'ordinary' | 'fork', string>
   }
@@ -354,6 +356,16 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
       )
     // This is before any credential file read, network grant, preparation or trial dispatch.
     const budget = budgetPath ? await readAcceptanceBudgetSeal(budgetPath) : undefined
+    const usageReceiptFilename = acceptance.live?.usageReceiptFilename
+    if (
+      acceptance.live &&
+      (!usageReceiptFilename ||
+        basename(usageReceiptFilename) !== usageReceiptFilename ||
+        !acceptance.outputs?.some(
+          (item) => item.filename === usageReceiptFilename && !item.optional
+        ))
+    )
+      throw new Error('Live acceptance requires a declared usage receipt output.')
     const providersPath = acceptance.live
       ? resolve(root, acceptance.live.providersFilename)
       : undefined
@@ -402,6 +414,8 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
       : (['external', 'ordinary', 'fork'] as const)
     for (const entry of entries) {
       const cleanupStart = cleanups.length
+      let reservedTrialId: string | undefined
+      let dispatchAttempted = false
       try {
         const h = await createSessionOperationTestHarness(cleanups, {
           canonicalStorageRoot: true,
@@ -558,6 +572,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
             )
           // Consume a slot before preparation, preserving failed/uncertain attempts without reruns.
           await reserveAcceptanceTrial(budgetPath!, budget, acceptance.live.trialIds[entry])
+          reservedTrialId = acceptance.live.trialIds[entry]
         }
         const available = await api.execution.runtimes()
         const prepared = await api.execution.prepare({
@@ -588,6 +603,8 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           ).map((run) => run.runId)
         )
         let nativeRunId: string | undefined
+        // Once an execution entry has been invoked, any lost reply remains uncertain.
+        dispatchAttempted = true
         if (entry === 'external' || entry === 'author') {
           await api.execution.execute(request)
         } else {
@@ -663,9 +680,44 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
         )
         const resultRoot = join(output, entry)
         await mkdir(resultRoot)
+        // A package fork may retain the author's outputs. Only this trial's new producer can
+        // provide current result/usage evidence, even when the imported file name is identical.
+        const currentRunIds = new Set(runs.map((run) => run.runId))
+        const publishedArtifacts = (
+          await Promise.all(
+            (current.artifacts ?? []).map(async (artifact) => {
+              if (!artifact.versionId) return undefined
+              const version = await h.fixture.client.artifactVersion.findUnique({
+                where: { id: artifact.versionId }
+              })
+              return currentRunIds.has(version?.producerRunId ?? '') ? artifact : undefined
+            })
+          )
+        ).filter((artifact): artifact is NonNullable<typeof artifact> => artifact !== undefined)
         for (const selection of acceptance.outputs ?? []) {
-          const artifact = current.artifacts?.find((item) => item.name === selection.filename)
+          const artifact = publishedArtifacts.find((item) => item.name === selection.filename)
           if (artifact) await copyFile(artifact.path, join(resultRoot, selection.filename))
+        }
+        if (
+          acceptance.live &&
+          budget &&
+          usageReceiptFilename &&
+          publishedArtifacts.some((item) => item.name === usageReceiptFilename)
+        ) {
+          const receipt = JSON.parse(await readFile(join(resultRoot, usageReceiptFilename), 'utf8'))
+          if (
+            receipt.trialId !== acceptance.live.trialIds[entry] ||
+            receipt.budgetDocumentSha256 !== budget.sha256
+          )
+            throw new Error(
+              'Usage receipt does not belong to this reserved trial and reviewed budget.'
+            )
+          await recordAcceptanceTrialUsage(
+            budgetPath!,
+            budget,
+            acceptance.live.trialIds[entry],
+            receipt.usage
+          )
         }
         expect(done, JSON.stringify(done)).toMatchObject({ status: 'completed' })
         if (!done) throw new Error('The admitted research operation disappeared.')
@@ -705,7 +757,7 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           sessionId: roundtrip.sessionId
         })
         for (const selection of acceptance.outputs ?? []) {
-          const artifact = current.artifacts?.find((item) => item.name === selection.filename)
+          const artifact = publishedArtifacts.find((item) => item.name === selection.filename)
           if (!artifact?.versionId) continue
           const mapped = await h.fixture.client.artifactVersion.findUniqueOrThrow({
             where: { id: origin.identities[artifact.versionId] }
@@ -725,10 +777,24 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
           operation: done,
           notebookRunId: run.runId,
           packageSha256: sha(await readFile(resultArchive)),
-          outputCount: current.artifacts?.length
+          outputCount: publishedArtifacts.length
         })
         if (entry === 'author') archive = resultArchive
         await writeEvidence('in-progress')
+      } catch (error) {
+        if (reservedTrialId && budget && !dispatchAttempted) {
+          // Admission/prepare failed before any execution entry. Record explicit zero requests,
+          // but retain the full reservation and require manual reconciliation before any retry.
+          await recordAcceptanceTrialUsage(budgetPath!, budget, reservedTrialId, {
+            unit: 'tokens',
+            state: 'complete',
+            knownUnits: 0,
+            requestCount: 0,
+            requestsWithUsage: 0,
+            requestsWithoutUsage: 0
+          })
+        }
+        throw error
       } finally {
         // Native policy has one process owner. End this isolated application before starting the
         // next entry, including when an assertion or package transfer fails.

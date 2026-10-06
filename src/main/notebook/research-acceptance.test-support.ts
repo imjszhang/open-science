@@ -10,62 +10,115 @@ import { writeDurableJsonFile, readDurableJsonFile } from '../storage/durable-js
 
 const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
 const trialId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/u)
+const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const sealSchema = z
   .object({
     studyId: trialId,
     status: z.literal('sealed'),
-    currency: z.literal('CNY'),
-    totalCeiling: z.number().positive().max(100),
-    allocationPerTrialCeiling: z.number().positive().max(25),
-    maximumCostPerTrialCny: z.number().positive().max(25),
-    providerRatesVerified: z.literal(true),
-    verifiedRateSources: z.array(z.string().trim().min(1)).min(1),
+    unit: z.literal('tokens'),
+    totalCeiling: count.positive().max(1_000_000_000),
+    allocationPerTrialCeiling: count.positive().max(250_000_000),
+    maximumUnitsPerTrial: count.positive().max(250_000_000),
+    maxRequestsPerTrial: count.positive().max(6),
+    countingPolicy: z.literal('input-plus-output-no-double-count-reasoning-v1'),
     trialIds: z.array(trialId).length(4)
   })
   .passthrough()
 export type AcceptanceBudgetSeal = z.infer<typeof sealSchema> & { sha256: string }
 
-/** Test orchestration only. This is an operator-sealed price ceiling, not a price estimator. */
+/** Test orchestration only: a reviewed token bound, independent of provider prices. */
 export async function readAcceptanceBudgetSeal(path: string): Promise<AcceptanceBudgetSeal> {
   try {
     const bytes = await readFile(path)
     const seal = sealSchema.parse(JSON.parse(bytes.toString('utf8')))
     if (
       new Set(seal.trialIds).size !== 4 ||
-      seal.maximumCostPerTrialCny > seal.allocationPerTrialCeiling ||
+      seal.maximumUnitsPerTrial > seal.allocationPerTrialCeiling ||
       seal.allocationPerTrialCeiling * 4 > seal.totalCeiling
     )
       throw new Error('invalid allocation')
     return { ...seal, sha256: digest(bytes) }
   } catch {
-    // Never relay parsed input or upstream price/account text into a test log.
-    throw new Error('Live acceptance is blocked: the reviewed four-trial CNY budget is not sealed.')
+    // Never relay parsed input or upstream account text into a test log.
+    throw new Error(
+      'Live acceptance is blocked: the reviewed four-trial token budget is not sealed.'
+    )
   }
 }
+
+const usageSchema = z
+  .object({
+    unit: z.literal('tokens'),
+    state: z.enum(['unknown', 'partial', 'complete']),
+    knownUnits: count.nullable(),
+    requestCount: count.nullable(),
+    requestsWithUsage: count,
+    requestsWithoutUsage: count.nullable()
+  })
+  .strict()
+  .superRefine((usage, ctx) => {
+    const invalid = (): void => ctx.addIssue({ code: 'custom', message: 'Invalid usage evidence.' })
+    if (usage.requestCount === null || usage.requestsWithoutUsage === null) {
+      if (
+        usage.state !== 'unknown' ||
+        usage.knownUnits !== null ||
+        usage.requestsWithUsage !== 0 ||
+        usage.requestCount !== null ||
+        usage.requestsWithoutUsage !== null
+      )
+        invalid()
+      return
+    }
+    if (usage.requestsWithUsage + usage.requestsWithoutUsage !== usage.requestCount) invalid()
+    if (usage.state === 'unknown') {
+      if (usage.knownUnits !== null || usage.requestsWithUsage !== 0) invalid()
+    } else if (usage.state === 'partial') {
+      if (
+        usage.knownUnits === null ||
+        usage.requestsWithUsage === 0 ||
+        usage.requestsWithoutUsage === 0
+      )
+        invalid()
+    } else if (usage.knownUnits === null || usage.requestsWithoutUsage !== 0) invalid()
+  })
+export type AcceptanceTrialUsage = z.infer<typeof usageSchema>
+const unknownUsage = (): AcceptanceTrialUsage => ({
+  unit: 'tokens',
+  state: 'unknown',
+  knownUnits: null,
+  requestCount: null,
+  requestsWithUsage: 0,
+  requestsWithoutUsage: null
+})
 const ledgerSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
+    unit: z.literal('tokens'),
     studyId: trialId,
     sealSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     reservations: z
       .array(
         z
-          .object({ trialId, maximumCostCny: z.number().positive(), reservedAt: z.string() })
+          .object({
+            trialId,
+            maximumUnits: count.positive(),
+            reservedAt: z.string(),
+            usage: usageSchema,
+            usageRecordedAt: z.string().optional()
+          })
           .strict()
       )
       .max(4)
   })
   .strict()
+type AcceptanceLedger = z.infer<typeof ledgerSchema>
 
-/** Failed or uncertain trials retain their entire reservation. No automatic retry/refund. */
-export async function reserveAcceptanceTrial(
+async function withAcceptanceLedger(
   budgetPath: string,
   seal: AcceptanceBudgetSeal,
-  requestedTrial: string
+  operation: (ledger: AcceptanceLedger) => void
 ): Promise<void> {
-  if (!seal.trialIds.includes(requestedTrial))
-    throw new Error('Trial is not in the sealed acceptance budget.')
-  // One ledger beside the fixed materials folder, shared by every output directory and rerun.
+  // One ledger beside fixed materials, shared by every output directory and rerun.
   const ledgerPath = join(
     dirname(dirname(await realpath(budgetPath))),
     'live-acceptance-budget-ledger.json'
@@ -89,14 +142,15 @@ export async function reserveAcceptanceTrial(
       {},
       { maxBytes: 16384 }
     )
-    const ledger =
+    const ledger: AcceptanceLedger =
       read.status === 'found'
         ? read.value
         : {
-            version: 1 as const,
+            version: 2,
+            unit: 'tokens',
             studyId: seal.studyId,
             sealSha256: seal.sha256,
-            reservations: [] as z.infer<typeof ledgerSchema>['reservations']
+            reservations: []
           }
     if (ledger.studyId !== seal.studyId || ledger.sealSha256 !== seal.sha256)
       throw new Error(
@@ -106,30 +160,73 @@ export async function reserveAcceptanceTrial(
       new Set(ledger.reservations.map((row) => row.trialId)).size !== ledger.reservations.length ||
       ledger.reservations.some(
         (row) =>
-          !seal.trialIds.includes(row.trialId) || row.maximumCostCny !== seal.maximumCostPerTrialCny
+          !seal.trialIds.includes(row.trialId) || row.maximumUnits !== seal.maximumUnitsPerTrial
       )
     )
       throw new Error('Existing budget reservations do not match the sealed allocation.')
-    if (ledger.reservations.some((row) => row.trialId === requestedTrial))
-      throw new Error(
-        'This acceptance trial is already reserved; automatic paid retries are forbidden.'
-      )
-    if (
-      ledger.reservations.reduce((total, row) => total + row.maximumCostCny, 0) +
-        seal.maximumCostPerTrialCny >
-      seal.totalCeiling
-    )
-      throw new Error('Acceptance budget ceiling exceeded.')
-    ledger.reservations.push({
-      trialId: requestedTrial,
-      maximumCostCny: seal.maximumCostPerTrialCny,
-      reservedAt: new Date().toISOString()
-    })
+    operation(ledger)
     await writeDurableJsonFile(ledgerPath, JSON.stringify(ledgerSchema.parse(ledger)))
   } finally {
     await lock.close()
     await rm(lockPath)
   }
+}
+
+/** Failed or uncertain trials retain their entire reservation. No automatic retry/refund. */
+export async function reserveAcceptanceTrial(
+  budgetPath: string,
+  seal: AcceptanceBudgetSeal,
+  requestedTrial: string
+): Promise<void> {
+  if (!seal.trialIds.includes(requestedTrial))
+    throw new Error('Trial is not in the sealed acceptance budget.')
+  await withAcceptanceLedger(budgetPath, seal, (ledger) => {
+    if (ledger.reservations.some((row) => row.trialId === requestedTrial))
+      throw new Error(
+        'This acceptance trial is already reserved; automatic paid retries are forbidden.'
+      )
+    if (
+      ledger.reservations.some(
+        (row) =>
+          (row.usage.knownUnits !== null && row.usage.knownUnits > row.maximumUnits) ||
+          (row.usage.requestCount !== null && row.usage.requestCount > seal.maxRequestsPerTrial)
+      )
+    )
+      throw new Error('Observed usage exceeded its reviewed bound; further trials are blocked.')
+    if (
+      ledger.reservations.reduce((total, row) => total + row.maximumUnits, 0) +
+        seal.maximumUnitsPerTrial >
+      seal.totalCeiling
+    )
+      throw new Error('Acceptance budget ceiling exceeded.')
+    ledger.reservations.push({
+      trialId: requestedTrial,
+      maximumUnits: seal.maximumUnitsPerTrial,
+      reservedAt: new Date().toISOString(),
+      usage: unknownUsage()
+    })
+  })
+}
+
+/** Actual reported usage is evidence only. Partial, zero or missing usage never refunds a slot. */
+export async function recordAcceptanceTrialUsage(
+  budgetPath: string,
+  seal: AcceptanceBudgetSeal,
+  requestedTrial: string,
+  value: AcceptanceTrialUsage
+): Promise<void> {
+  const usage = usageSchema.parse(value)
+  await withAcceptanceLedger(budgetPath, seal, (ledger) => {
+    const row = ledger.reservations.find((entry) => entry.trialId === requestedTrial)
+    if (!row) throw new Error('Usage cannot be attached to an unreserved trial.')
+    if (row.usageRecordedAt) {
+      if (JSON.stringify(row.usage) !== JSON.stringify(usage))
+        throw new Error('Conflicting terminal usage evidence; operator reconciliation is required.')
+      return
+    }
+    row.usage = usage
+    row.usageRecordedAt = new Date().toISOString()
+  })
 }
 
 /** Reads explicitly selected slots, never merges .env into the runner/child process environment. */

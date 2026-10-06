@@ -66,10 +66,13 @@ one small author baseline and three recipient executions. The live runner and ch
 no live baseline or recipient outcome is claimed. These four executions validate the product path,
 not the proposed 20-pair scientific study or a statistically supported treatment effect.
 
-The user authorized the existing Tuanzi `.env` configuration with an aggregate 100 CNY live-test
-ceiling. Secrets must remain local. The relay service's actual pricing or enforceable quota still
-needs verification; a call-count limit alone is not a monetary ceiling. The live material budget
-remains unsealed, so no paid request is authorized by a passing fixture test or local preflight.
+The user authorized the existing Tuanzi `.env` configuration and then replaced the monetary limit
+with an aggregate **1,000,000,000-token** ceiling. The earlier 100 CNY/pricing-verification gate no
+longer applies. Secrets remain local. Acceptance still uses four small trials; the authorized ceiling
+is not a target consumption. Token admission reserves a conservative allowance before dispatch,
+records provider-reported usage separately, and retains reservations when usage is missing or a
+request's outcome is uncertain. Updating the acceptance budget does not introduce a product-wide
+billing or provider quota feature.
 
 ## Implementation evidence
 
@@ -315,12 +318,13 @@ service permissions in practice or provider charges. The exact-host profile is a
 Notebook network authorization is still required. Successful real-provider execution and observed
 G/S usage must be recorded before claiming the complete Tuanzi live path was exercised.
 
-The live protocol's declared transport limits and budget reservations need verified relay rates or
-an enforceable provider quota before paid dispatch. Failed or uncertain requests retain their
-reservation; new retries must not create unaccounted trials. Baseline and recipient runs must use
-separate run identities and preserve their public conditions, usage availability and output hashes.
-This budget ledger belongs to the authorized acceptance harness; it is not a general product billing
-limit or a guarantee about an arbitrary provider's charges.
+The live protocol's declared token limits and durable reservations must be admitted before paid
+dispatch. Failed or uncertain requests retain their reservation; new retries must not create
+unaccounted trials. Provider-reported input and output usage are counted once; reasoning and cache
+details already included in those totals are not added again. Missing usage remains unknown rather
+than zero. Baseline and recipient runs use separate identities and preserve public conditions,
+usage coverage and output hashes. This ledger belongs to the authorized acceptance harness; it is
+not a general product billing limit or a guarantee about an arbitrary provider's charges.
 
 A receipt that cannot be associated with the same verified native Artifact Run remains unknown,
 including recovery records published under a different turn. Observation coverage is sampled and
