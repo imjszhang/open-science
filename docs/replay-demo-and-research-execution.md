@@ -413,7 +413,7 @@ prepare probe. Node/sandbox typechecks, lint, formatting and diff checks passed.
 Test build ran all 777 locale guards and passed deep signature verification. No new renderer copy
 was introduced by the material-selection error change.
 
-## Final Test update and pending user action
+## Final Test update and startup verification
 
 The actual author result archive was imported and its analysis report inspected in Test project
 `Tuanzi · 真实 G/S 复现验收 · 20261007`, read-only Session #97. The report visibly showed valid G/S,
@@ -425,10 +425,16 @@ The latest product source `188bf72ab00e16d0baebd874e09306024c18bd5a` is now inst
 `1bf551a8b46e7c7361e12cd4bc473f2a497440fbf3af9b81c0298f936d66e086`. The production app, original
 input package, source Tuanzi tree and root Open Science checkout remain unchanged.
 
-- [ ] Complete the new version's startup after the user finishes the macOS keychain dialog; verify
-      version, existing project/session/configuration readback, and absence of startup errors.
+- [x] Complete the new version's startup after the macOS keychain dialog; verify version, existing
+      project/session/configuration readback, and absence of a startup error screen.
 
-The operating system blocks automation from this security dialog, so the user was asked to enter
-the local password there, never in chat. Installation/signature checks are complete; successful
-startup and post-upgrade UI checks are not yet claimed. This pending user action does not require
-repeating the paid experiments. No upstream or fork push has been performed.
+The operating system blocked automation from the security dialog; that startup obstruction is now
+resolved. A fresh native accessibility and screenshot check confirmed the exact version in About,
+the independent Test identity, existing project and read-only Session #97, discussion/Replay
+entries, and the readable analysis report with valid G/S and evidence-integrity results. Settings
+read back the existing Codex subscription with a verified connection and saved appearance/language
+preferences. Notebook reports ready, and no startup error screen is present. The client is left
+showing the author report. `installed-author-ui-01/client-upgrade-receipt.json` and
+`token-budget-delivery.json` record the completed checks; no new paid requests were made. All
+required implementation and bounded acceptance items above are now complete, subject to the
+explicit scientific, recording and platform boundaries. No upstream or fork push was performed.
