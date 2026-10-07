@@ -11,12 +11,18 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     import type * as Shared from '../../src/shared/run-observation'
     import type * as Recorded from '../../src/shared/run-observation-recorded'
     import type * as Archive from '../../src/shared/run-observation-archive'
+    import type * as ProjectRecording from '../../src/shared/project-recording'
     import type * as Capture from '../../src/shared/run-observation-capture'
     import type { RunObservationRecordingStatus } from '../../src/shared/run-observation-recording-status'
     import type { RuntimeViewLaunch } from '../../src/shared/runtime-view'
     type Assert<T extends true> = T
     type Compatible<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false
+    type RecordingFormat = Assert<Compatible<SDK.RecordedEvidenceFormat, Recorded.RecordedEvidenceFormat>>
+    type RecordingEvidence = Assert<Compatible<SDK.RecordedEvidencePayload, Recorded.RecordedEvidencePayload>>
     type RecordingPayload = Assert<Compatible<SDK.RecordedObservationPayload, Recorded.RecordedObservationPayload>>
+    type ProjectRecordingContent = Assert<Compatible<SDK.ProjectRecording, ProjectRecording.ProjectRecording>>
+    type ProjectRecordingPayload = Assert<Compatible<SDK.RecordedProjectPayload, Recorded.RecordedProjectPayload>>
+    type FileSelection = Assert<Compatible<SDK.RecordedObservationFileSelection, Recorded.RecordedObservationFileSelection>>
     type RecordingSelection = Assert<Compatible<SDK.RecordedRunObservationSelection, Recorded.RecordedRunObservationSelection>>
     type RecordingArchive = Assert<Compatible<SDK.RunObservationArchive, Archive.RunObservationArchive>>
     type RecordingStatus = Assert<Compatible<SDK.RunObservationRecordingStatus, RunObservationRecordingStatus>>
@@ -60,7 +66,13 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     client.observations.selection({ viewerId: 'v' }).then(selection => selection?.snapshot)
     client.observations.revoke({ viewerId: 'v' })
     client.observations.openRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(view => view.mode)
-    client.observations.recording({ viewerId: 'v' }).then(payload => payload.archive.records)
+    client.observations.recording({ viewerId: 'v' }).then(payload => 'archive' in payload ? payload.archive.records : payload.recording.frames)
+    client.observations.openRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }, format: 'project-recording' })
+    client.observations.readRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(payload => payload.archive.records)
+    client.observations.readProjectRecording({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(payload => payload.recording.frames)
+    client.observations.selectRecordedFile({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }, mediaKey: 'frame', format: 'project-recording' }).then(selection => selection.resource.versionId)
+    client.observations.selectRecordingFile({ viewerId: 'v', mediaKey: 'frame' })
+    client.observations.recordingFileSelection({ viewerId: 'v' }).then(selection => selection?.resource)
     client.observations.selectRecording({ viewerId: 'v', stepKey: 'observation-0' })
     client.observations.recordingSelection({ viewerId: 'v' }).then(selection => selection?.receiving)
     client.observations.capture({ viewerId: 'v', request: { source: 'project-export', exportKey: 'image.png', idempotencyKey: 'request' } }).then(frame => frame.viewerEvidence?.cursor)
@@ -103,6 +115,9 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     ts
       .getPreEmitDiagnostics(program)
       .filter((diagnostic) => diagnostic.file?.fileName === path)
-      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
+      .map((diagnostic) => ({
+        line: diagnostic.file!.getLineAndCharacterOfPosition(diagnostic.start ?? 0).line + 1,
+        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+      }))
   ).toEqual([])
 }, 15000)

@@ -3939,6 +3939,30 @@ gate('managed execution Host SDK bridge', () => {
           executionId: 'execution'
         }
       ])
+      for (const [method, payload] of [
+        ['inspectOfflinePlans', { sourceSessionId: 'research' }],
+        [
+          'executeOfflinePlan',
+          {
+            sourceSessionId: 'research',
+            sourceIdentity: 'fixed-source',
+            planVersionId: 'offline-plan',
+            requestId: 'offline-run'
+          }
+        ]
+      ] as const) {
+        const reply = await send(
+          `const result = await host.managedExecution.${method}(${JSON.stringify(payload)}); return { frozen: Object.isFrozen(result) && Object.isFrozen(result.nested), state: result.nested.state }`
+        )
+        expect(reply.error).toBeNull()
+        expect(JSON.parse(reply.result ?? '{}')).toEqual({ frozen: true, state: 'ready' })
+        expect(requests.at(-1)).toEqual({
+          method,
+          payload,
+          sessionId: 'session',
+          executionId: 'execution'
+        })
+      }
       for (const method of ['collectOutputs', 'discardOutputs']) {
         const payload = {
           environmentId: 'environment',
@@ -3961,7 +3985,7 @@ gate('managed execution Host SDK bridge', () => {
       expect((await send('await host.managedExecution.execute([])')).error).toContain('object')
       end()
       expect((await send('await host.managedExecution.runtimes()')).error).toContain('active Main')
-      expect(requests).toHaveLength(3)
+      expect(requests).toHaveLength(5)
     } finally {
       child.kill()
       end()

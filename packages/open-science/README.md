@@ -450,6 +450,24 @@ reference does not automatically send a message to Codex. Source IDs identify au
 the current receiving Artifact/Version controls reads. This uses ordinary Artifact bytes and does
 not add mandatory `.science` entries or change native recipes.
 
+For independent project recordings, use `openRecorded({ target, format: 'project-recording' })`.
+The viewer format is fixed when opened; `recording` returns either an observation archive or a
+project recording. Both are read-only and never start a program, prepare an environment, or
+reconnect to an author-machine service. `readRecorded({ target })` and
+`readProjectRecording({ target })` read the same verified content without opening a viewer.
+
+Results and captured images have their own file evidence. Call
+`selectRecordedFile({ target, mediaKey, format: 'project-recording' })`, or use
+`selectRecordingFile({ viewerId, mediaKey })` and read `recordingFileSelection({ viewerId })`.
+These return the exact receiving Artifact Version and checksum without inventing a Notebook step.
+An unspecified result stage is not inferred to mean a final result.
+
+With `recordObservation: true`, declared image outputs and an optional declared
+`project-recording-data.json` are also sampled into an independent project recording. No browser
+or Notebook observation is required. Missing or failed captures are reported separately from the
+experiment result; frames preserve capture provenance and structured states remain author-declared.
+This is a bounded sampled recording, not a complete video of every screen update.
+
 ### Read current captured images from Codex or another local agent
 
 `observations.captures` lists images already captured for the active Run. It does not take a new

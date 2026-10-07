@@ -56,6 +56,59 @@ const provenance = {
   runtimeSegmentId: 'segment',
   promptMessageId: 'prompt'
 }
+
+it('finishes independent project recording inside output authority lifetime, without a project service or observation reader', async () => {
+  const h = await setup()
+  const close = vi.fn(async () => {
+    expect(h.runs).toHaveLength(1)
+    const registration = register.mock.calls[0][0]
+    const file = await resolveManagedOutputAuthority(
+      registration.outputAuthority,
+      registration.target,
+      'result.json'
+    )
+    expect(await readFile(file.path, 'utf8')).toBe('{"value":42}')
+    return {
+      status: 'saved' as const,
+      artifactId: 'project-recording',
+      versionId: 'project-recording-version',
+      warnings: []
+    }
+  })
+  const register = vi.fn<
+    NonNullable<ManagedExecutionServiceDependencies['registerProjectRecording']>
+  >(() => ({ close }))
+  h.dependencies.registerProjectRecording = register
+  const result = await h.service.executeDemoInTurn(
+    { ...h.request, recordObservation: true },
+    h.context
+  )
+  expect(result.status).toBe('completed')
+  expect(result.projectRecording).toMatchObject({
+    status: 'saved',
+    versionId: 'project-recording-version'
+  })
+  expect(register).toHaveBeenCalledOnce()
+  expect(register.mock.calls[0][0].target).not.toHaveProperty('runId')
+  expect(close).toHaveBeenCalledOnce()
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
+
+it('does not change or retry an experiment when optional project recording publication fails', async () => {
+  const h = await setup()
+  h.dependencies.registerProjectRecording = () => ({
+    close: async () => {
+      throw new Error('capture failed')
+    }
+  })
+  const result = await h.service.executeInTurn({ ...h.request, recordObservation: true }, h.context)
+  expect(result.status).toBe('completed')
+  expect(result.projectRecording).toEqual({
+    status: 'unavailable',
+    warnings: ['publication-failed']
+  })
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+})
 const deferred = (): { promise: Promise<void>; resolve: () => void } => {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {

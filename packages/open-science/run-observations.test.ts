@@ -13,6 +13,11 @@ const methods = [
   'selection',
   'revoke',
   'openRecorded',
+  'readRecorded',
+  'readProjectRecording',
+  'selectRecordedFile',
+  'selectRecordingFile',
+  'recordingFileSelection',
   'recording',
   'selectRecording',
   'recordingSelection',
@@ -25,6 +30,11 @@ const methods = [
 const commandFor = (method: string): string =>
   ({
     openRecorded: 'open-recorded',
+    readRecorded: 'read-recorded',
+    readProjectRecording: 'read-project-recording',
+    selectRecordedFile: 'select-recorded-file',
+    selectRecordingFile: 'select-recording-file',
+    recordingFileSelection: 'recording-file-selection',
     selectRecording: 'select-recording',
     recordingSelection: 'recording-selection',
     recordingStatus: 'recording-status',
@@ -61,6 +71,11 @@ describe('run observation SDK', () => {
       selection: { viewerId },
       revoke: { viewerId },
       openRecorded: { target: recordedTarget },
+      readRecorded: { target: recordedTarget },
+      readProjectRecording: { target: recordedTarget },
+      selectRecordedFile: { target: recordedTarget, mediaKey: 'file', format: 'project-recording' },
+      selectRecordingFile: { viewerId, mediaKey: 'file' },
+      recordingFileSelection: { viewerId },
       recording: { viewerId },
       selectRecording: { viewerId, stepKey: 'observation-0' },
       recordingSelection: { viewerId },
@@ -366,10 +381,25 @@ it('rejects recorded viewers that request live authority or lack receiving Versi
   })
   for (const input of [
     { target: recordedTarget, allowInteraction: true },
+    { target: recordedTarget, format: 'live' },
     { target },
     { target: { ...recordedTarget, runId: 'author-run' } },
     { target: { ...recordedTarget, versionId: '../v' } }
   ])
     expect(() => client.observations.openRecorded(input)).toThrow('receiving Artifact Version')
   expect(fetch).not.toHaveBeenCalled()
+})
+
+it('opens a fixed independent project recording format without live execution permissions', async () => {
+  const fetch = vi.fn<(url: string, options: RequestInit) => Promise<Response>>(async () =>
+    jsonResponse({ viewerId, format: 'project-recording' })
+  )
+  const client = new OpenScienceClient({
+    baseUrl: 'http://127.0.0.1:44100',
+    token: 'sdk-token',
+    fetch
+  })
+  const request = { target: recordedTarget, format: 'project-recording' }
+  await client.observations.openRecorded(request)
+  expect(fetch.mock.calls[0][1].body).toBe(JSON.stringify(request))
 })

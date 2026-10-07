@@ -921,6 +921,11 @@ Recorded observations use a receiving Artifact Version, not an author-machine Ru
 
 ```bash
 open-science observations open-recorded --input-json '{"target":{"projectId":"p","sessionId":"s","artifactId":"a","versionId":"v"}}' --json
+open-science observations read-recorded '{"target":{"projectId":"p","sessionId":"s","artifactId":"a","versionId":"v"}}'
+open-science observations read-project-recording '{"target":{"projectId":"p","sessionId":"s","artifactId":"a","versionId":"v"}}'
+open-science observations select-recorded-file '{"target":{"projectId":"p","sessionId":"s","artifactId":"a","versionId":"v"},"mediaKey":"frame","format":"project-recording"}'
+open-science observations select-recording-file '{"viewerId":"<viewer-id>","mediaKey":"frame"}'
+open-science observations recording-file-selection '{"viewerId":"<viewer-id>"}'
 open-science observations recording --input-json '{"viewerId":"VIEWER_UUID"}' --json
 open-science observations select-recording --input-json '{"viewerId":"VIEWER_UUID","stepKey":"observation-0"}' --json
 open-science observations recording-selection --input-json '{"viewerId":"VIEWER_UUID"}' --json

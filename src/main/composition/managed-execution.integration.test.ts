@@ -620,6 +620,40 @@ it('opens a real imported recording through production composition without grant
     content: Buffer.from(JSON.stringify(recording)),
     contentType: 'application/json'
   })
+  const projectRecording = {
+    format: 'open-science-project-recording',
+    version: 1,
+    recordingId: 'independent-recording',
+    startedAt: 100,
+    endedAt: 101,
+    media: [],
+    frames: [],
+    events: [],
+    states: [
+      {
+        stateId: 'state-0',
+        sequence: 0,
+        recordedAt: 100,
+        source: 'author-declared',
+        value: { count: 2 }
+      }
+    ],
+    coverage: {
+      kind: 'sampled-project-recording',
+      stopReason: 'finished',
+      failures: 0,
+      unchangedSamples: 0,
+      droppedSamples: 0,
+      missingMediaKeys: []
+    }
+  }
+  const projectSource = await versions.adoptLegacyArtifact({
+    ...originalScope,
+    sourceFileId: 'project-recording',
+    logicalFilename: 'project-recording.json',
+    content: Buffer.from(JSON.stringify(projectRecording)),
+    contentType: 'application/json'
+  })
   const packagePath = join(h.fixture.storageRoot, 'recording.science')
   await packages.exportTo(originalScope, packagePath)
   const imported = await packages.importFrom(packagePath)
@@ -669,6 +703,61 @@ it('opens a real imported recording through production composition without grant
     caller
   )
   expect(selection).toMatchObject({ receiving: target, record: recording.records[0] })
+  await expect(
+    composed.external.observation!.call('readRecorded', { target }, caller)
+  ).resolves.toEqual(payload)
+  const selectedFile = await composed.external.observation!.call(
+    'selectRecordedFile',
+    { target, mediaKey: 'status-1' },
+    caller
+  )
+  expect(selectedFile).toMatchObject({
+    kind: 'recorded-observation-file',
+    receiving: target,
+    resource: { ...imported, versionId: receipt.identities[media[1].versionId] },
+    stage: 'unspecified'
+  })
+  const viewerFile = await composed.external.observation!.call(
+    'selectRecordingFile',
+    { viewerId: view.viewerId, mediaKey: 'status-1' },
+    caller
+  )
+  expect(viewerFile).toMatchObject({
+    kind: 'recorded-observation-file',
+    receiving: target,
+    resource: { ...imported, versionId: receipt.identities[media[1].versionId] },
+    stage: 'unspecified'
+  })
+  await expect(
+    composed.external.observation!.call(
+      'recordingFileSelection',
+      { viewerId: view.viewerId },
+      caller
+    )
+  ).resolves.toEqual(viewerFile)
+  const projectTarget = {
+    ...imported,
+    artifactId: receipt.identities[projectSource.fileId],
+    versionId: receipt.identities[projectSource.versionId]
+  }
+  await expect(
+    composed.external.observation!.call('readProjectRecording', { target: projectTarget }, caller)
+  ).resolves.toMatchObject({ receiving: projectTarget, recording: projectRecording })
+  const projectView = (await composed.external.observation!.call(
+    'openRecorded',
+    { target: projectTarget, format: 'project-recording' },
+    caller
+  )) as { viewerId: string }
+  await expect(
+    composed.external.observation!.call('recording', { viewerId: projectView.viewerId }, caller)
+  ).resolves.toMatchObject({ receiving: projectTarget, recording: projectRecording })
+  await expect(
+    composed.external.observation!.call(
+      'selectRecording',
+      { viewerId: projectView.viewerId, stepKey: 'observation-0' },
+      caller
+    )
+  ).rejects.toMatchObject({ code: 'unavailable' })
   expect(await readFile(sessionPath)).toEqual(before)
   expect(assertSessionAvailable).not.toHaveBeenCalled()
   expect(reserveSessionOperation).not.toHaveBeenCalled()

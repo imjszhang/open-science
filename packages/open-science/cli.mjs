@@ -199,6 +199,11 @@ const EXECUTION_COMMANDS = Object.freeze({
 
 const OBSERVATION_COMMANDS = Object.freeze({
   'open-recorded': 'openRecorded',
+  'read-recorded': 'readRecorded',
+  'read-project-recording': 'readProjectRecording',
+  'select-recorded-file': 'selectRecordedFile',
+  'select-recording-file': 'selectRecordingFile',
+  'recording-file-selection': 'recordingFileSelection',
   recording: 'recording',
   'select-recording': 'selectRecording',
   'recording-selection': 'recordingSelection',

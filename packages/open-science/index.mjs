@@ -169,7 +169,9 @@ const validateRecordedObservationOpen = (input) => {
   const keys = ['projectId', 'sessionId', 'artifactId', 'versionId']
   if (
     !object(input) ||
-    Object.keys(input).some((key) => key !== 'target') ||
+    Object.keys(input).some((key) => !['target', 'format'].includes(key)) ||
+    (input.format !== undefined &&
+      !['run-observation', 'project-recording'].includes(input.format)) ||
     !object(input.target) ||
     Object.keys(input.target).some((key) => !keys.includes(key)) ||
     !keys.every(
@@ -282,6 +284,11 @@ export class OpenScienceClient {
           'selection',
           'revoke',
           'openRecorded',
+          'readRecorded',
+          'readProjectRecording',
+          'selectRecordedFile',
+          'selectRecordingFile',
+          'recordingFileSelection',
           'recording',
           'selectRecording',
           'recordingSelection',

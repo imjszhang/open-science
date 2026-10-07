@@ -46,6 +46,7 @@ import {
 } from '../run-observation/media-collector'
 import { createLogger } from '../logger'
 import { readObservationProjectExport } from '../run-observation/project-export-reader'
+import { startManagedProjectRecording } from '../project-recordings/managed-adapter'
 import { captureElectronObservationView } from '../run-observation/electron-capture'
 import { ReplayViewerHttpHost } from '../replay-viewer/http-host'
 import { createReplayViewerAssetReader } from '../replay-viewer/assets'
@@ -235,6 +236,11 @@ export async function composeManagedExecution({
     operations,
     runtime: notebook,
     registerProjectService: (registration) => projectViews.register(registration),
+    registerProjectRecording: (input) =>
+      startManagedProjectRecording(input, () => {
+        input.signal.throwIfAborted()
+        assertOpen(input.target)
+      }),
     registerObservationMedia: (input) => {
       const outputs = input.outputs.filter((output) => /\.(png|jpe?g|webp)$/i.test(output.filename))
       const assertCurrent = (): void => {
@@ -459,7 +465,10 @@ export async function composeManagedExecution({
     authorizeScope: authorizeObservationScope,
     recorded: {
       authorizeScope: authorizeObservationScope,
-      read: (target) => recordedObservations.read(target)
+      read: (target) => recordedObservations.read(target),
+      readProject: (target) => recordedObservations.readProject(target),
+      selectFile: (target, mediaKey, format) =>
+        recordedObservations.selectFile({ target, mediaKey, format })
     },
     onRevoked: (viewerId) => {
       viewerHost.closeViewer(viewerId)
@@ -557,8 +566,10 @@ export async function composeManagedExecution({
     viewers: observationViewers,
     projectViews,
     readAsset: createReplayViewerAssetReader(),
-    readRecordingMedia: (target, mediaKey, signal) =>
-      recordedObservations.readMedia(target, mediaKey, signal),
+    readRecordingMedia: (target, mediaKey, signal, format) =>
+      format === 'project-recording'
+        ? recordedObservations.readProjectMedia(target, mediaKey, signal)
+        : recordedObservations.readMedia(target, mediaKey, signal),
     readArtifact: async ({ target, artifact, signal }) => {
       signal.throwIfAborted()
       if (
@@ -687,12 +698,14 @@ export async function composeManagedExecution({
       await authorizeObservationScope(target)
       return status
     },
-    openRecordedViewer: (target, caller) =>
-      viewerHost.openRecorded(
-        target,
-        caller,
-        caller.surface === 'electron' ? { desktopParent: 'file:' } : {}
-      ),
+    readRecorded: (target) => recordedObservations.read(target),
+    readProjectRecording: (target) => recordedObservations.readProject(target),
+    selectRecordedFile: (request) => recordedObservations.selectFile(request),
+    openRecordedViewer: (target, caller, format) =>
+      viewerHost.openRecorded(target, caller, {
+        ...(format ? { format } : {}),
+        ...(caller.surface === 'electron' ? { desktopParent: 'file:' as const } : {})
+      }),
     openViewer: (target, caller, permissions) =>
       viewerHost.open(target, caller, {
         ...permissions,

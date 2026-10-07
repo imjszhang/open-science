@@ -1,3 +1,4 @@
+import { configuredCredentialPatterns, screenAuxiliaryOutput } from './screened-auxiliary-output'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readdir, open } from 'node:fs/promises'
 import { ResearchExecutionConfigurationBroker } from '../research-execution-profiles/configuration-broker'
@@ -109,6 +110,15 @@ export type ManagedExecutionTurnContext = Pick<
   /** Exact Main control invocation, present only when borrowing an active Agent turn. */
   executionInvocationId?: string
 }
+const projectRecordingResultSchema = z
+  .object({
+    status: z.enum(['saved', 'unavailable']),
+    artifactId: z.string().optional(),
+    versionId: z.string().optional(),
+    warnings: z.array(z.string()).max(32)
+  })
+  .strict()
+export type ManagedProjectRecordingResult = z.infer<typeof projectRecordingResultSchema>
 const resultSchema = z
   .object({
     collectionId: z
@@ -122,7 +132,8 @@ const resultSchema = z
     outputs: z.array(z.object({ filename: z.string(), versionId: z.string() }).strict()).max(102),
     missingOptionalOutputs: z.array(z.string()).max(100),
     missingCancelledOutputs: z.array(z.string()).max(100).optional(),
-    observation: managedObservationResultSchema.optional()
+    observation: managedObservationResultSchema.optional(),
+    projectRecording: projectRecordingResultSchema.optional()
   })
   .strict()
 export type ManagedExecutionResult = z.infer<typeof resultSchema>
@@ -210,6 +221,7 @@ const journalSchema = z
     // Fail closed on recovery if credential-bearing outputs were not scanned before interruption.
     credentialOutputsChecked: z.boolean().optional(),
     observation: managedObservationResultSchema.optional(),
+    projectRecording: projectRecordingResultSchema.optional(),
     state: z.enum(['running', 'awaiting-publication', 'completed', 'failed']),
     collection: collectionSchema.optional(),
     result: resultSchema.optional()
@@ -271,6 +283,16 @@ export type ManagedObservationMediaRegistration = {
   saveAuxiliaryOutput: NonNullable<ManagedExecutionTurnContext['saveAuxiliaryOutput']>
   signal: AbortSignal
 }
+export type ManagedProjectRecordingRegistration = {
+  target: Required<
+    Pick<RunObservationTarget, 'projectId' | 'sessionId' | 'operationId' | 'executionInvocationId'>
+  > &
+    Pick<RunObservationTarget, 'runId'>
+  outputs: z.output<typeof managedOutputSelectionSchema>[]
+  outputAuthority: ManagedOutputAuthority
+  saveAuxiliaryOutput: NonNullable<ManagedExecutionTurnContext['saveAuxiliaryOutput']>
+  signal: AbortSignal
+}
 
 export type ManagedExecutionServiceDependencies = {
   dataRoot: string
@@ -295,6 +317,13 @@ export type ManagedExecutionServiceDependencies = {
   /** Optional Main integration; omitted for existing non-interactive executions. */
   registerProjectService?(service: ManagedServiceRegistration): () => void
   registerObservationMedia?(input: ManagedObservationMediaRegistration): { close(): Promise<void> }
+  registerProjectRecording?(input: ManagedProjectRecordingRegistration):
+    | {
+        close(
+          reason?: 'finished' | 'stopped' | 'interrupted'
+        ): Promise<ManagedProjectRecordingResult>
+      }
+    | undefined
   runtimes: {
     discover(): Promise<{
       runtimes: Array<{ runtimeId: string; runtime: ManagedResearchRuntime }>
@@ -1301,14 +1330,7 @@ export class ManagedExecutionService {
     for (const selection of journal.collection.frozen.files) {
       const file = await resolveManagedOutputAuthority(authority, context, selection.path)
       // Streaming bounded-memory scan; include common encodings that might otherwise leak in exports.
-      const patterns = secrets
-        .flatMap((secret) => [
-          secret,
-          encodeURIComponent(secret),
-          Buffer.from(secret).toString('base64')
-        ])
-        .filter(Boolean)
-        .map((secret) => Buffer.from(secret))
+      const patterns = configuredCredentialPatterns(secrets)
       if (!patterns.length) continue
       const overlap = Math.max(...patterns.map((pattern) => pattern.length)) - 1
       const handle = await open(file.path, 'r')
@@ -1565,7 +1587,8 @@ export class ManagedExecutionService {
         ...(frozen.missingCancelledOutputs?.length
           ? { missingCancelledOutputs: frozen.missingCancelledOutputs }
           : {}),
-        ...(journal.observation ? { observation: journal.observation } : {})
+        ...(journal.observation ? { observation: journal.observation } : {}),
+        ...(journal.projectRecording ? { projectRecording: journal.projectRecording } : {})
       }
       // This ordinary Artifact records the current collection event. Recovery never claims a new
       // producer Run and never reopens the prior Artifact turn. Earlier partial receipts remain.
@@ -2113,24 +2136,78 @@ export class ManagedExecutionService {
                 }))
               )
             const executionInvocationId = 'managed-' + key
-            await this.dependencies.runtime.executeManagedShell(
-              {
-                projectId: request.projectId,
-                sessionId: request.sessionId,
-                workspaceCwd: context.workspaceCwd,
-                command: request.command,
-                timeoutMs: request.timeoutMs,
-                executionInvocationId,
-                rootExecutionId: context.operationId,
-                provenanceContext: context.provenanceContext,
-                registeredInputFiles: inputs
-              },
-              environment.capability,
-              environment.signal,
-              context.executionInvocationId
-                ? { parentControlInvocationId: context.executionInvocationId }
-                : undefined
-            )
+            let projectRecording: ReturnType<
+              NonNullable<ManagedExecutionServiceDependencies['registerProjectRecording']>
+            >
+            if (
+              request.recordObservation &&
+              context.saveAuxiliaryOutput &&
+              this.dependencies.registerProjectRecording
+            ) {
+              try {
+                projectRecording = this.dependencies.registerProjectRecording({
+                  target: {
+                    projectId: request.projectId,
+                    sessionId: request.sessionId,
+                    operationId: context.operationId,
+                    executionInvocationId
+                  },
+                  outputs: structuredClone(request.outputs),
+                  outputAuthority: environment.createOutputAuthority(context.operationId),
+                  saveAuxiliaryOutput: screenAuxiliaryOutput(
+                    context.saveAuxiliaryOutput.bind(context),
+                    credentialLease?.secretValues ?? []
+                  ),
+                  signal: environment.publicationSignal
+                })
+              } catch {
+                journal.projectRecording = { status: 'unavailable', warnings: ['capture-failed'] }
+              }
+            }
+            let processFinished = false
+            try {
+              await this.dependencies.runtime.executeManagedShell(
+                {
+                  projectId: request.projectId,
+                  sessionId: request.sessionId,
+                  workspaceCwd: context.workspaceCwd,
+                  command: request.command,
+                  timeoutMs: request.timeoutMs,
+                  executionInvocationId,
+                  rootExecutionId: context.operationId,
+                  provenanceContext: context.provenanceContext,
+                  registeredInputFiles: inputs
+                },
+                environment.capability,
+                environment.signal,
+                context.executionInvocationId
+                  ? { parentControlInvocationId: context.executionInvocationId }
+                  : undefined
+              )
+              processFinished = true
+            } finally {
+              // Finish inside the environment/turn authority lifetime, including cancellation.
+              // Capture failure never changes the experiment outcome or retries execution.
+              if (projectRecording) {
+                try {
+                  journal.projectRecording = projectRecordingResultSchema.parse(
+                    await projectRecording.close(
+                      environment.signal.aborted
+                        ? 'stopped'
+                        : processFinished
+                          ? 'finished'
+                          : 'interrupted'
+                    )
+                  )
+                } catch {
+                  journal.projectRecording = {
+                    status: 'unavailable',
+                    warnings: ['publication-failed']
+                  }
+                }
+              }
+              if (journal.projectRecording) await this.writeJournal(journal).catch(() => undefined)
+            }
             await closeMedia()
             const cleanup = await this.dependencies.runtime.confirmManagedShellCleanup(
               { projectId: request.projectId, sessionId: request.sessionId, executionInvocationId },

@@ -1117,6 +1117,108 @@ export type RecordedObservationPayload = Readonly<{
   /** Verified collection context beside the unchanged archive v1; absent legacy values mean unknown. */
   executionContext?: RunObservationExecutionContext
 }>
+export type ProjectRecordingValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ProjectRecordingValue[]
+  | { [key: string]: ProjectRecordingValue }
+export type ProjectRecording = {
+  format: 'open-science-project-recording'
+  version: 1
+  recordingId: string
+  title?: string
+  startedAt: number
+  endedAt: number
+  source?: {
+    projectId?: string
+    sessionId?: string
+    operationId?: string
+    executionInvocationId?: string
+    runId?: string
+  }
+  media: Array<{
+    mediaKey: string
+    name: string
+    mimeType: string
+    checksum: string
+    sizeBytes: number
+    sourceVersionId: string
+  }>
+  frames: Array<{
+    frameId: string
+    sequence: number
+    recordedAt: number
+    mediaKey: string
+    provenance:
+      | {
+          kind: 'capture'
+          source: 'project-export' | 'host-view'
+          sourceKey?: string
+          startedAt: number
+          finishedAt: number
+          width: number
+          height: number
+          reportedCapturedAt?: number
+        }
+      | { kind: 'derived'; method: string; sourceMediaKeys: string[] }
+  }>
+  states: Array<{
+    stateId: string
+    sequence: number
+    recordedAt: number
+    label?: string
+    source: 'author-declared'
+    sourceId?: string
+    reportedAt?: number
+    value: ProjectRecordingValue
+  }>
+  events: Array<{
+    eventId: string
+    sequence: number
+    recordedAt: number
+    name: string
+    source: 'author-declared'
+    sourceId?: string
+    reportedAt?: number
+    data?: ProjectRecordingValue
+  }>
+  coverage: {
+    kind: 'sampled-project-recording'
+    stopReason: 'finished' | 'stopped' | 'interrupted' | 'capacity' | 'capture-failed'
+    failures: number
+    unchangedSamples: number
+    droppedSamples: number
+    missingMediaKeys: string[]
+  }
+}
+export type RecordedProjectPayload = Readonly<{
+  receiving: RecordedObservationTarget
+  recording: ProjectRecording
+  media: readonly ResolvedObservationMedia[]
+}>
+export type RecordedObservationFileSelection = {
+  kind: 'recorded-observation-file'
+  selectionId?: string
+  selectedAt?: number
+  source: 'run-observation' | 'project-recording'
+  recordingId: string
+  receiving: RecordedObservationTarget
+  mediaKey: string
+  resource: RecordedObservationTarget & {
+    name: string
+    mimeType: string
+    checksum: string
+    sizeBytes: number
+  }
+  scope: 'step' | 'recording'
+  stepKeys: string[]
+  stage: 'unspecified' | 'intermediate' | 'final'
+  executionContext?: Omit<RunObservationExecutionContext, 'conditionChanges'> & {
+    conditionChanges: string[]
+  }
+}
 export type RecordedRunObservationSelection = Readonly<{
   kind: 'recorded-run-observation'
   /** Present on a server-captured selection; identifies each explicit Ask action. */
@@ -1130,8 +1232,11 @@ export type RecordedRunObservationSelection = Readonly<{
   /** Main-captured collection context at this selection's evidence cutoff. */
   executionContext?: RunObservationExecutionContext
 }>
+export type RecordedEvidenceFormat = 'run-observation' | 'project-recording'
+export type RecordedEvidencePayload = RecordedObservationPayload | RecordedProjectPayload
 export type RecordedObservationView = Readonly<{
   mode: 'recorded'
+  format?: RecordedEvidenceFormat
   viewerId: string
   target: RecordedObservationTarget
   expiresAt: number
@@ -1159,13 +1264,40 @@ export type RunObservationsClient = {
     options?: RequestOptions
   ): Promise<RunObservationRecordingStatus>
   openRecorded(
-    request: { target: RecordedObservationTarget },
+    request: {
+      target: RecordedObservationTarget
+      format?: 'run-observation' | 'project-recording'
+    },
     options?: RequestOptions
   ): Promise<RecordedObservationView>
+  readRecorded(
+    request: { target: RecordedObservationTarget },
+    options?: RequestOptions
+  ): Promise<RecordedObservationPayload>
+  readProjectRecording(
+    request: { target: RecordedObservationTarget },
+    options?: RequestOptions
+  ): Promise<RecordedProjectPayload>
+  selectRecordedFile(
+    request: {
+      target: RecordedObservationTarget
+      mediaKey: string
+      format?: 'run-observation' | 'project-recording'
+    },
+    options?: RequestOptions
+  ): Promise<RecordedObservationFileSelection>
+  selectRecordingFile(
+    request: RunObservationViewerReference & { mediaKey: string },
+    options?: RequestOptions
+  ): Promise<RecordedObservationFileSelection>
+  recordingFileSelection(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<RecordedObservationFileSelection | null>
   recording(
     request: RunObservationViewerReference,
     options?: RequestOptions
-  ): Promise<RecordedObservationPayload>
+  ): Promise<RecordedObservationPayload | RecordedProjectPayload>
   selectRecording(
     request: RunObservationViewerReference & { stepKey: string },
     options?: RequestOptions
