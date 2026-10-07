@@ -75,6 +75,42 @@ afterEach(() => {
 })
 
 describe('desktop scoped Run observation preview', () => {
+  it('opts into the shared clock without changing the exact desktop navigation grant URL', async () => {
+    const api = install()
+    const receiving = {
+      projectId: 'p',
+      sessionId: 's',
+      artifactId: 'recording',
+      versionId: 'version'
+    }
+    const issued = {
+      ...access('recorded'),
+      target: receiving,
+      mode: 'recorded',
+      format: 'web-recording'
+    }
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        observations: { ...api, openRecorded: vi.fn().mockResolvedValue(issued) }
+      }
+    })
+    render(
+      <RunObservationPreview
+        title="Shared project recording"
+        mode="recorded"
+        format="web-recording"
+        target={receiving}
+        isActive
+        playback={{ recordedAt: 1000, playing: false, speed: 2, onSeekRecordedAt: vi.fn() }}
+      />
+    )
+    const frame = await screen.findByTitle('Shared project recording')
+    expect(frame.getAttribute('src')).toBe(issued.url)
+    expect(new URL(frame.getAttribute('src')!).hash).toBe('')
+    expect(frame.getAttribute('name')).toBe('open-science-research-clock')
+  })
+
   it('does not restart selection polling when a shared clock recreates callback props', async () => {
     vi.useFakeTimers()
     const api = install()

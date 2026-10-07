@@ -101,7 +101,8 @@ or ambiguous branch identity leave synchronization unavailable with an explicit 
 fallback; footage is never stretched to fit a reading timeline. Outside recording coverage or
 inside a gap, the master timeline can continue while the material reports missing footage.
 
-Only opted-in desktop embeds (`#research-replay-clock`) receive clock updates. A fresh transferred
+Only opted-in desktop embeds (`name="open-science-research-clock"`) receive clock updates; their
+authorized navigation URLs remain unchanged. A fresh transferred
 MessagePort is offered to the exact admitted viewer origin, accepted only from its direct parent,
 and retired on reload/disposal. The validated presentation messages contain time, rate, play state
 and seeks; they cannot read artifacts, reveal grants, start a runtime, or execute project actions.

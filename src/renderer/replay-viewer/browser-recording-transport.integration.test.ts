@@ -11,6 +11,7 @@ import { ObservationViewers } from '../../main/run-observation/viewers'
 import { RunObservationOwner } from '../../main/run-observation/owner'
 import { ReplayViewerHttpHost } from '../../main/replay-viewer/http-host'
 import { createReplayViewerAssetReader } from '../../main/replay-viewer/assets'
+import { desktopObservationFrameRegistry } from '../../main/replay-viewer/desktop-frame-registry'
 import {
   validateBrowserRecording,
   type RecordedBrowserPayload
@@ -159,7 +160,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
 import {useEffect,useRef,useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {useBrowserRecordingTransportHost} from './src/renderer/src/pages/workspace/replay/use-browser-recording-transport'
-const viewerUrl=${JSON.stringify(access.url + '#research-replay-clock')}
+const viewerUrl=${JSON.stringify(access.url)}
 function Bridge({iframeRef,playback,onLoad}){
  const bridge=useBrowserRecordingTransportHost({iframeRef,playback,origin:new URL(viewerUrl).origin,enabled:true})
  onLoad.current=bridge.onLoad
@@ -184,7 +185,7 @@ function App(){
   <output aria-label="Research offset">{Math.round(offset)}</output><output aria-label="Seek requests">{seeks}</output>
   <button onClick={()=>setAttached(false)}>Detach research clock</button>
   {attached?<Bridge iframeRef={iframeRef} playback={playback} onLoad={onLoad}/>:null}
-  <iframe ref={iframeRef} onLoad={()=>onLoad.current()} title="Project recording" src={viewerUrl} sandbox="allow-scripts allow-same-origin allow-forms" style={{display:'block',width:'100%',height:850,border:0}}/>
+  <iframe ref={iframeRef} name="open-science-research-clock" onLoad={()=>onLoad.current()} title="Project recording" src={viewerUrl} sandbox="allow-scripts allow-same-origin allow-forms" style={{display:'block',width:'100%',height:850,border:0}}/>
  </>
 }
 createRoot(document.getElementById('root')).render(<App/>)
@@ -206,11 +207,32 @@ createRoot(document.getElementById('root')).render(<App/>)
       const page = await browser.newPage({ viewport: { width: 1100, height: 1000 } })
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
+      const mainFrame = { frameTreeNodeId: 1, url: pathToFileURL(html).href, parent: null }
+      const registeredFrame = { frameTreeNodeId: 2, url: 'about:blank', parent: mainFrame }
+      const allowsNavigation = (url: string): boolean =>
+        desktopObservationFrameRegistry.allows({
+          url,
+          webContentsId: 1,
+          mainFrame,
+          frame: registeredFrame
+        })
+      // Browser behavior alone cannot detect Electron's owner-bound navigation policy.
+      // Exercise the actual registry populated by the HTTP host, without loosening it.
+      expect(allowsNavigation(access.url + '#research-replay-clock')).toBe(false)
+      expect(allowsNavigation(access.url)).toBe(true)
+      expect(allowsNavigation(new URL('/', access.url).href)).toBe(false)
       await page.goto(pathToFileURL(html).href)
       const child = page.frameLocator('iframe')
       await expect(child.getByTestId('browser-recording-player')).toBeVisible()
       const actualFrame = page.frames().find((frame) => frame.parentFrame() === page.mainFrame())!
-      expect(new URL(actualFrame.url()).hash).toBe('#research-replay-clock')
+      expect(new URL(actualFrame.url()).hash).toBe('')
+      expect(await actualFrame.evaluate(() => window.name)).toBe('open-science-research-clock')
+      expect(allowsNavigation(new URL('/', access.url).href)).toBe(true)
+      // The presentation flag belongs to the frame, not an authenticated navigation URL.
+      await actualFrame.goto(actualFrame.url())
+      await expect(child.getByTestId('browser-recording-player')).toBeVisible()
+      expect(await actualFrame.evaluate(() => window.name)).toBe('open-science-research-clock')
+      expect(allowsNavigation(actualFrame.url())).toBe(true)
       await expect(child.getByRole('button', { name: 'Play replay', exact: true })).toHaveCount(0)
       await expect(child.getByRole('slider')).toHaveCount(0)
       await expect(child.getByRole('combobox', { name: 'Playback speed' })).toHaveCount(0)
@@ -300,7 +322,10 @@ createRoot(document.getElementById('root')).render(<App/>)
           JSON.stringify(
             {
               oneTransport: true,
-              bootstrapPreservesHash: true,
+              bootstrapPreservesFrameName: true,
+              reloadPreservesFrameName: true,
+              originalUrlPassesDesktopRegistry: true,
+              urlHashRejectedByDesktopRegistry: true,
               exactCrossSegmentSeek: true,
               masterPlayPauseAndSpeed: true,
               gapContinuesOnMaster: true,

@@ -222,7 +222,7 @@ const RecordedBrowserViewerApp = ({
   const embedded =
     context.presentation === 'desktop' &&
     window.parent !== window &&
-    window.location.hash === '#research-replay-clock'
+    window.name === 'open-science-research-clock'
   const transport = useBrowserRecordingTransportReceiver({ enabled: embedded })
   const [selection, setSelection] = useState<BrowserRecordingMoment>()
   useEffect(() => {

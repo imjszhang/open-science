@@ -514,11 +514,12 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             onLoad={recordingTransport.onLoad}
             key={access.viewerId}
             title={props.title}
-            src={
+            name={
               props.mode === 'recorded' && props.format === 'web-recording' && props.playback
-                ? `${access.url}#research-replay-clock`
-                : access.url
+                ? 'open-science-research-clock'
+                : undefined
             }
+            src={access.url}
             sandbox="allow-scripts allow-same-origin allow-forms"
             referrerPolicy="no-referrer"
             className="min-h-0 w-full flex-1 border-0"
