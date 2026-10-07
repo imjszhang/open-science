@@ -10,6 +10,8 @@ import {
 import { validateProjectRecording, type ProjectRecording } from './project-recording'
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
+export const recordedEvidenceFormatSchema = z.enum(['run-observation', 'project-recording'])
+export type RecordedEvidenceFormat = z.infer<typeof recordedEvidenceFormatSchema>
 /** Receiving Artifact identity, never an author-machine Run or service locator. */
 export const recordedObservationTargetSchema = z
   .object({ projectId: id, sessionId: id, artifactId: id, versionId: id })
@@ -37,6 +39,7 @@ export type RecordedProjectPayload = Readonly<{
   recording: ProjectRecording
   media: readonly ResolvedObservationMedia[]
 }>
+export type RecordedEvidencePayload = RecordedObservationPayload | RecordedProjectPayload
 export const recordedFileRequestSchema = z
   .object({
     target: recordedObservationTargetSchema,
@@ -174,3 +177,7 @@ export const recordedProjectPayloadSchema = z
     media: z.array(resolvedObservationMediaSchema).max(2000)
   })
   .strict()
+export const recordedEvidencePayloadSchema = z.union([
+  recordedObservationPayloadSchema,
+  recordedProjectPayloadSchema
+])

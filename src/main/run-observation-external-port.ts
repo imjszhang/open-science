@@ -6,6 +6,8 @@ import {
 } from '../shared/run-observation'
 import {
   recordedObservationTargetSchema,
+  recordedEvidenceFormatSchema,
+  type RecordedEvidenceFormat,
   recordedObservationPayloadSchema,
   recordedProjectPayloadSchema,
   recordedFileRequestSchema,
@@ -90,7 +92,11 @@ export function createRunObservationExternalPort(dependencies: {
     target: RunObservationTarget,
     caller: CallerContext
   ): Promise<RunObservationRecordingStatus>
-  openRecordedViewer?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
+  openRecordedViewer?(
+    target: RecordedObservationTarget,
+    caller: CallerContext,
+    format?: RecordedEvidenceFormat
+  ): Promise<unknown>
   readRecorded?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
   readProjectRecording?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
   selectRecordedFile?(request: RecordedFileRequest, caller: CallerContext): Promise<unknown>
@@ -237,13 +243,18 @@ export function createRunObservationExternalPort(dependencies: {
             break
           }
           case 'openRecorded': {
-            const { target } = z
-              .object({ target: recordedObservationTargetSchema })
+            const { target, format } = z
+              .object({
+                target: recordedObservationTargetSchema,
+                format: recordedEvidenceFormatSchema.optional()
+              })
               .strict()
               .parse(payload)
             if (!dependencies.openRecordedViewer)
               throw new Error('Recorded viewers are unavailable.')
-            result = await dependencies.openRecordedViewer(target, caller!)
+            result = await (format === undefined
+              ? dependencies.openRecordedViewer(target, caller!)
+              : dependencies.openRecordedViewer(target, caller!, format))
             break
           }
           case 'recording':

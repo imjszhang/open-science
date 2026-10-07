@@ -10,6 +10,11 @@ import type { RunObservationOwner, RunObservationViewer } from './owner'
 import {
   recordedObservationTargetSchema,
   recordedObservationPayloadSchema,
+  recordedProjectPayloadSchema,
+  recordedEvidenceFormatSchema,
+  type RecordedEvidenceFormat,
+  type RecordedEvidencePayload,
+  type RecordedProjectPayload,
   recordedFileSelectionSchema,
   recordedFileSelectionForPayload,
   type RecordedObservationFileSelection,
@@ -30,6 +35,7 @@ export type LiveObservationViewDescriptor = Readonly<{
 export type RecordedObservationViewDescriptor = Readonly<{
   viewerId: string
   mode: 'recorded'
+  format?: RecordedEvidenceFormat
   target: RecordedObservationTarget
   expiresAt: number
 }>
@@ -58,9 +64,11 @@ export type ObservationViewersDependencies = Readonly<{
   recorded?: Readonly<{
     authorizeScope(target: RecordedObservationTarget): Promise<void>
     read(target: RecordedObservationTarget): Promise<RecordedObservationPayload>
+    readProject?(target: RecordedObservationTarget): Promise<RecordedProjectPayload>
     selectFile?(
       target: RecordedObservationTarget,
-      mediaKey: string
+      mediaKey: string,
+      format?: RecordedEvidenceFormat
     ): Promise<RecordedObservationFileSelection>
   }>
   onRevoked?(viewerId: string, reason: RevokeReason): void | Promise<void>
@@ -279,7 +287,7 @@ export class ObservationViewers {
   private async authorizeDescriptor(
     descriptor:
       | Pick<LiveObservationViewDescriptor, 'target' | 'mode'>
-      | Pick<RecordedObservationViewDescriptor, 'target' | 'mode'>
+      | Pick<RecordedObservationViewDescriptor, 'target' | 'mode' | 'format'>
   ): Promise<void> {
     if (descriptor.mode === 'recorded') {
       if (!this.dependencies.recorded)
@@ -292,12 +300,19 @@ export class ObservationViewers {
       throw new ObservationViewerError('unavailable', 'A recording does not authorize a live Run.')
     return record.descriptor.target
   }
-  private async readRecording(record: ViewerRecord): Promise<RecordedObservationPayload> {
+  private async readRecording(record: ViewerRecord): Promise<RecordedEvidencePayload> {
     if (record.descriptor.mode !== 'recorded' || !this.dependencies.recorded)
       throw new ObservationViewerError('unavailable', 'This viewer does not reference a recording.')
-    const payload = recordedObservationPayloadSchema.parse(
-      await this.dependencies.recorded.read(structuredClone(record.descriptor.target))
-    )
+    const project = record.descriptor.format === 'project-recording'
+    if (project && !this.dependencies.recorded.readProject)
+      throw new ObservationViewerError('unavailable', 'Project recordings are unavailable.')
+    const payload = project
+      ? recordedProjectPayloadSchema.parse(
+          await this.dependencies.recorded.readProject!(structuredClone(record.descriptor.target))
+        )
+      : recordedObservationPayloadSchema.parse(
+          await this.dependencies.recorded.read(structuredClone(record.descriptor.target))
+        )
     if (
       Object.entries(record.descriptor.target).some(
         ([key, value]) => payload.receiving[key as keyof RecordedObservationTarget] !== value
@@ -308,10 +323,18 @@ export class ObservationViewers {
   }
   async createRecorded(
     targetInput: RecordedObservationTarget,
-    callerInput: CallerContext
+    callerInput: CallerContext,
+    format?: RecordedEvidenceFormat
   ): Promise<ObservationViewAccess> {
     const target = recordedObservationTargetSchema.parse(targetInput)
-    return this.createBound({ mode: 'recorded', target }, callerInput)
+    return this.createBound(
+      {
+        mode: 'recorded',
+        target,
+        ...(format === undefined ? {} : { format: recordedEvidenceFormatSchema.parse(format) })
+      },
+      callerInput
+    )
   }
   async create(
     targetInput: RunObservationTarget,
@@ -322,7 +345,7 @@ export class ObservationViewers {
   private async createBound(
     descriptor:
       | Pick<LiveObservationViewDescriptor, 'target' | 'mode'>
-      | Pick<RecordedObservationViewDescriptor, 'target' | 'mode'>,
+      | Pick<RecordedObservationViewDescriptor, 'target' | 'mode' | 'format'>,
     callerInput: CallerContext
   ): Promise<ObservationViewAccess> {
     this.assertOpen()
@@ -478,7 +501,7 @@ export class ObservationViewers {
   async recording(
     viewerId: string,
     auth: ObservationViewAuthorization
-  ): Promise<RecordedObservationPayload> {
+  ): Promise<RecordedEvidencePayload> {
     return this.withViewer(viewerId, auth, (record) => this.readRecording(record))
   }
   async selectRecording(
@@ -488,6 +511,11 @@ export class ObservationViewers {
   ): Promise<RecordedRunObservationSelection> {
     return this.withViewer(viewerId, auth, async (record) => {
       const payload = await this.readRecording(record)
+      if (!('archive' in payload))
+        throw new ObservationViewerError(
+          'unavailable',
+          'A project recording has no Notebook observation step.'
+        )
       const step = payload.archive.records.find((entry) => entry.stepKey === stepKey)
       if (!step)
         throw new ObservationViewerError('unavailable', 'The recorded step is unavailable.')
@@ -531,8 +559,11 @@ export class ObservationViewers {
     if (!this.dependencies.recorded?.selectFile)
       throw new ObservationViewerError('unavailable', 'Recorded file selection is unavailable.')
     const expected = recordedFileSelectionForPayload(payload, mediaKey)
+    const format = record.descriptor.mode === 'recorded' ? record.descriptor.format : undefined
     const selected = recordedFileSelectionSchema.parse(
-      await this.dependencies.recorded.selectFile(payload.receiving, mediaKey)
+      await (format === undefined
+        ? this.dependencies.recorded.selectFile(payload.receiving, mediaKey)
+        : this.dependencies.recorded.selectFile(payload.receiving, mediaKey, format))
     )
     const content = { ...selected }
     delete content.selectionId

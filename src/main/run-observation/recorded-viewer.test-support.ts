@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import type { RecordedObservationPayload } from '../../shared/run-observation-recorded'
+import type {
+  RecordedObservationPayload,
+  RecordedProjectPayload
+} from '../../shared/run-observation-recorded'
 import { buildRunObservationArchive } from './archive'
 
 export const recordedFixture = (): { payload: RecordedObservationPayload; bytes: Buffer } => {
@@ -73,6 +76,45 @@ export const recordedFixture = (): { payload: RecordedObservationPayload; bytes:
           sizeBytes: bytes.length
         }
       ]
+    }
+  }
+}
+export const projectRecordedFixture = (): { payload: RecordedProjectPayload; bytes: Buffer } => {
+  const legacy = recordedFixture()
+  const media = legacy.payload.archive.media[0]
+  return {
+    bytes: legacy.bytes,
+    payload: {
+      receiving: legacy.payload.receiving,
+      media: legacy.payload.media,
+      recording: {
+        format: 'open-science-project-recording',
+        version: 1,
+        recordingId: 'project-recording',
+        startedAt: 100,
+        endedAt: 300,
+        media: [
+          {
+            mediaKey: media.mediaKey,
+            name: media.name,
+            mimeType: media.mimeType,
+            checksum: media.checksum,
+            sizeBytes: media.sizeBytes,
+            sourceVersionId: media.sourceVersionId!
+          }
+        ],
+        frames: [],
+        states: [],
+        events: [],
+        coverage: {
+          kind: 'sampled-project-recording',
+          stopReason: 'finished',
+          failures: 0,
+          unchangedSamples: 0,
+          droppedSamples: 0,
+          missingMediaKeys: []
+        }
+      }
     }
   }
 }

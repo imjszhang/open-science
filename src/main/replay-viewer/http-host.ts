@@ -37,6 +37,8 @@ import {
   type ObservationViewerCapture
 } from '../../shared/run-observation-capture'
 
+type RecordedEvidenceFormat = import('../../shared/run-observation-recorded').RecordedEvidenceFormat
+
 export type ReplayViewerHttpAccess = ObservationViewDescriptor & Readonly<{ url: string }>
 export type ReplayViewerHttpOpenOptions = Readonly<{
   allowInteraction?: boolean
@@ -101,7 +103,8 @@ export interface ReplayViewerHttpDependencies {
   readRecordingMedia?(
     target: RecordedObservationTarget,
     mediaKey: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    format?: RecordedEvidenceFormat
   ): Promise<Asset | undefined>
   cancelRun?(input: {
     target: RunObservationTarget
@@ -488,16 +491,20 @@ export class ReplayViewerHttpHost {
   async openRecorded(
     target: RecordedObservationTarget,
     caller: CallerContext,
-    options: Pick<ReplayViewerHttpOpenOptions, 'desktopParent'> = {}
+    options: Pick<ReplayViewerHttpOpenOptions, 'desktopParent'> & {
+      format?: RecordedEvidenceFormat
+    } = {}
   ): Promise<ReplayViewerHttpAccess> {
     if (this.closed) throw new HostError(410, 'unavailable')
     if (
-      Object.keys(options).some((key) => key !== 'desktopParent') ||
+      Object.keys(options).some((key) => !['desktopParent', 'format'].includes(key)) ||
+      (options.format !== undefined &&
+        !['run-observation', 'project-recording'].includes(options.format)) ||
       (options.desktopParent !== undefined && options.desktopParent !== 'file:')
     )
       throw new HostError(403, 'forbidden')
     return this.bind(
-      await this.dependencies.viewers.createRecorded(target, caller),
+      await this.dependencies.viewers.createRecorded(target, caller, options.format),
       caller,
       options
     )
@@ -513,7 +520,11 @@ export class ReplayViewerHttpHost {
     const binding: Binding = {
       descriptor: {
         ...(access.mode === 'recorded'
-          ? { mode: 'recorded' as const, target: structuredClone(access.target) }
+          ? {
+              mode: 'recorded' as const,
+              target: structuredClone(access.target),
+              ...(access.format ? { format: access.format } : {})
+            }
           : { target: structuredClone(access.target) }),
         viewerId: access.viewerId,
         expiresAt: access.expiresAt
@@ -883,7 +894,12 @@ export class ReplayViewerHttpHost {
         const payload = await this.dependencies.viewers.recording(viewerId, auth)
         if (!payload.media.some((media) => media.mediaKey === mediaKey))
           throw new HostError(404, 'not-found')
-        asset = await this.dependencies.readRecordingMedia(descriptor.target, mediaKey, signal)
+        asset = await this.dependencies.readRecordingMedia(
+          descriptor.target,
+          mediaKey,
+          signal,
+          descriptor.format
+        )
         if (!asset) throw new HostError(404, 'not-found')
       } else if (url.pathname === '/api/artifact' && request.method === 'GET') {
         if (descriptor.mode === 'recorded') throw new HostError(403, 'forbidden')

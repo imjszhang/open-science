@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { normalizeObservationHistory } from '../src/lib/replay/live-source'
-import type { RecordedObservationPayload } from '../../shared/run-observation-recorded'
+import type { RecordedEvidencePayload } from '../../shared/run-observation-recorded'
 import type { RunObservationHistory } from '../../shared/run-observation'
 import {
   appendViewerChanges,
@@ -12,7 +12,7 @@ import {
 export type ViewerObservationState = {
   context?: ReplayViewerContext
   history?: RunObservationHistory
-  recording?: RecordedObservationPayload
+  recording?: RecordedEvidencePayload
   connection: 'connected' | 'reconnecting' | 'disconnected'
   error?: 'authorization' | 'unavailable'
 }
@@ -49,6 +49,7 @@ export function useViewerObservation(
             const recording = await client.recording(signal)
             const target = context.target
             if (
+              (context.format === 'project-recording') !== 'recording' in recording ||
               (['projectId', 'sessionId', 'artifactId', 'versionId'] as const).some(
                 (key) => recording.receiving[key] !== target[key]
               )

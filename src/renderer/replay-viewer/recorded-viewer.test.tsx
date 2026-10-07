@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testin
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   recordedObservationPayloadSchema,
+  recordedProjectPayloadSchema,
   recordedFileSelectionForPayload,
   type RecordedObservationPayload,
   type RecordedRunObservationSelection
@@ -136,6 +137,70 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('recorded browser viewer', () => {
+  it('loads a project-only recording through the same read-only client and validates its file selection', async () => {
+    const legacy = payload()
+    const media = { ...legacy.archive.media[0], stepKeys: undefined }
+    delete media.stepKeys
+    const recording = recordedProjectPayloadSchema.parse({
+      receiving: legacy.receiving,
+      media: legacy.media,
+      recording: {
+        format: 'open-science-project-recording',
+        version: 1,
+        recordingId: 'project-only',
+        startedAt: 100,
+        endedAt: 300,
+        media: [media],
+        frames: [],
+        states: [],
+        events: [],
+        coverage: {
+          kind: 'sampled-project-recording',
+          stopReason: 'finished',
+          failures: 0,
+          unchangedSamples: 0,
+          droppedSamples: 0,
+          missingMediaKeys: []
+        }
+      }
+    })
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(recording))
+    const client = new ReplayViewerClient(fetcher)
+    expect(await client.recording()).toEqual(recording)
+    const selected = {
+      ...recordedFileSelectionForPayload(recording, 'saved-file'),
+      selectionId: 'file-reference',
+      selectedAt: 400
+    }
+    fetcher.mockResolvedValue(json(selected))
+    expect(await client.selectRecordingFile(recording, 'saved-file')).toEqual(selected)
+    expect(selected.source).toBe('project-recording')
+    expect(selected.scope).toBe('recording')
+    expect(selected.stepKeys).toEqual([])
+    vi.spyOn(client, 'context').mockResolvedValue({
+      ...context(legacy),
+      format: 'project-recording'
+    })
+    const read = vi.spyOn(client, 'recording').mockResolvedValue(recording)
+    const history = vi.spyOn(client, 'history')
+    const { result } = renderHook(() => useViewerObservation(client, 0))
+    await waitFor(() => expect(result.current.recording).toEqual(recording))
+    expect(read).toHaveBeenCalledOnce()
+    expect(history).not.toHaveBeenCalled()
+    expect(result.current.history).toBeUndefined()
+  })
+  it('rejects a legacy payload for a capability pinned to project recordings', async () => {
+    const recording = payload(),
+      client = new ReplayViewerClient()
+    vi.spyOn(client, 'context').mockResolvedValue({
+      ...context(recording),
+      format: 'project-recording'
+    })
+    vi.spyOn(client, 'recording').mockResolvedValue(recording)
+    const { result } = renderHook(() => useViewerObservation(client, 0))
+    await waitFor(() => expect(result.current.error).toBe('unavailable'))
+    expect(result.current.recording).toBeUndefined()
+  })
   it('uses a separate authenticated file-selection route and rejects substituted immutable evidence', async () => {
     const recording = payload()
     const selection = {

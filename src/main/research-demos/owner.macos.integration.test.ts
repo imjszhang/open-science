@@ -373,6 +373,7 @@ it.skipIf(process.platform !== 'darwin' || !packagePath || !evidencePath || canc
       const recorded = await composed.observationViewers.recording(recordedView.viewerId, {
         caller
       })
+      if (!('archive' in recorded)) throw new Error('Expected the original observation archive.')
       await writeFile(join(output, 'completed-observation.json'), JSON.stringify(recorded, null, 2))
       expect(recorded.executionContext?.purpose).toBe('offline-demo')
       // The archive closes during result collection, before the enclosing operation commits.

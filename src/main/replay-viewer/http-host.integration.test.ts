@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { createCallerContext, type CallerContext } from '../caller-context'
 import { RunObservationOwner, type RunObservationSource } from '../run-observation/owner'
 import { ObservationViewers } from '../run-observation/viewers'
-import { recordedFixture } from '../run-observation/recorded-viewer.test-support'
+import {
+  recordedFixture,
+  projectRecordedFixture
+} from '../run-observation/recorded-viewer.test-support'
 import { recordedFileSelectionForPayload } from '../../shared/run-observation-recorded'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
@@ -52,7 +55,7 @@ function harness(
     readAsset?: ReplayViewerHttpDependencies['readAsset']
     cancel?: boolean
     lifetimeMs?: number
-    recorded?: boolean
+    recorded?: boolean | 'project'
     capture?: ReplayViewerHttpDependencies['capture']
     listCaptures?: ReplayViewerHttpDependencies['listCaptures']
     readCapture?: ReplayViewerHttpDependencies['readCapture']
@@ -92,9 +95,18 @@ function harness(
           recorded: {
             authorizeScope: async () => undefined,
             read: async (target) => ({ ...recordedFixture().payload, receiving: target }),
-            selectFile: async (target, mediaKey) =>
+            readProject: async (target) => ({
+              ...projectRecordedFixture().payload,
+              receiving: target
+            }),
+            selectFile: async (target, mediaKey, format) =>
               recordedFileSelectionForPayload(
-                { ...recordedFixture().payload, receiving: target },
+                {
+                  ...(format === 'project-recording'
+                    ? projectRecordedFixture().payload
+                    : recordedFixture().payload),
+                  receiving: target
+                },
                 mediaKey
               )
           }
@@ -782,6 +794,45 @@ describe('isolated Replay viewer HTTP host', () => {
 })
 
 describe('recorded Replay HTTP viewer', () => {
+  it('opens a project-only recording through the same bounded viewer with no Notebook or live service', async () => {
+    const h = harness({ recorded: 'project', cancel: true })
+    const { payload } = projectRecordedFixture()
+    const access = await h.host.openRecorded(payload.receiving, h.owner, {
+      format: 'project-recording'
+    })
+    const boot = await http(access.url)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(access.url).origin
+    const get = (path: string): ReturnType<typeof http> =>
+      http(origin + path, { headers: { cookie } })
+    const post = (path: string, body: unknown): ReturnType<typeof http> =>
+      http(origin + path, {
+        method: 'POST',
+        headers: { cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    expect(JSON.parse((await get('/api/context')).body)).toMatchObject({
+      mode: 'recorded',
+      format: 'project-recording',
+      canInteract: false,
+      canCancel: false,
+      canCapture: false
+    })
+    expect(JSON.parse((await get('/api/recording')).body)).toEqual(payload)
+    expect((await get('/api/recording/media?mediaKey=export-a')).status).toBe(200)
+    expect(
+      JSON.parse((await post('/api/recording/file-selection', { mediaKey: 'export-a' })).body)
+    ).toMatchObject({ source: 'project-recording', stepKeys: [] })
+    expect((await post('/api/recording/select', { stepKey: 'invented' })).status).not.toBe(200)
+    expect((await get('/api/snapshot')).status).toBe(403)
+    expect((await post('/api/project-view', {})).status).toBe(403)
+    expect((await post('/api/cancel', { confirmed: true })).status).toBe(403)
+    expect(
+      (await get('/api/recording/media?mediaKey=export-a&format=run-observation')).status
+    ).toBe(400)
+    expect(h.projectOpen).not.toHaveBeenCalled()
+    expect(h.cancel).not.toHaveBeenCalled()
+  })
   it('serves receiver-scoped history/media and selection without live or execution permissions', async () => {
     const h = harness({ recorded: true, cancel: true })
     const { payload, bytes } = recordedFixture()

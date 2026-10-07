@@ -3,7 +3,7 @@ import { createCallerContext, type CallerContext } from '../caller-context'
 import type { RunObservationTarget } from '../../shared/run-observation'
 import { RunObservationOwner, type RunObservationSource } from './owner'
 import { ObservationViewers, type ObservationViewersDependencies } from './viewers'
-import { recordedFixture } from './recorded-viewer.test-support'
+import { recordedFixture, projectRecordedFixture } from './recorded-viewer.test-support'
 import { recordedFileSelectionForPayload } from '../../shared/run-observation-recorded'
 
 const target: RunObservationTarget = {
@@ -352,6 +352,42 @@ describe('ObservationViewers', () => {
 })
 
 describe('recorded viewer authority', () => {
+  it('pins project-recording format to the read-only viewer capability without creating Notebook authority', async () => {
+    const { payload } = projectRecordedFixture()
+    const recorded = {
+      authorizeScope: vi.fn(async () => undefined),
+      read: vi.fn(async () => recordedFixture().payload),
+      readProject: vi.fn(async () => payload),
+      selectFile: vi.fn(async () => recordedFileSelectionForPayload(payload, 'export-a'))
+    }
+    const h = harness(undefined, recorded)
+    const access = await h.viewers.createRecorded(payload.receiving, h.caller, 'project-recording')
+    const browser = await h.viewers.authenticateGrant(access.grant)
+    const auth = { capability: browser.capability }
+    expect(await h.viewers.describe(access.viewerId, auth)).toMatchObject({
+      mode: 'recorded',
+      format: 'project-recording'
+    })
+    expect(await h.viewers.recording(access.viewerId, auth)).toEqual(payload)
+    expect(await h.viewers.selectRecordingFile(access.viewerId, 'export-a', auth)).toMatchObject({
+      source: 'project-recording',
+      scope: 'recording',
+      stepKeys: []
+    })
+    expect(recorded.selectFile).toHaveBeenCalledWith(
+      payload.receiving,
+      'export-a',
+      'project-recording'
+    )
+    await expect(
+      h.viewers.selectRecording(access.viewerId, 'invented-step', auth)
+    ).rejects.toMatchObject({ code: 'unavailable' })
+    await expect(h.viewers.snapshot(access.viewerId, auth)).rejects.toMatchObject({
+      code: 'unavailable'
+    })
+    expect(recorded.read).not.toHaveBeenCalled()
+    expect(h.read).not.toHaveBeenCalled()
+  })
   it('keeps file Ask separate from step Ask and revalidates its exact readable Version on retrieval', async () => {
     const { payload } = recordedFixture()
     let available = true

@@ -14,7 +14,9 @@ import {
 } from '../../shared/run-observation'
 import {
   recordedObservationTargetSchema,
-  recordedObservationPayloadSchema,
+  recordedEvidencePayloadSchema,
+  recordedEvidenceFormatSchema,
+  type RecordedEvidencePayload,
   recordedFileSelectionSchema,
   recordedFileSelectionForPayload,
   type RecordedObservationFileSelection,
@@ -58,6 +60,7 @@ const liveContextSchema = z
   .strict()
 const recordedContextSchema = liveContextSchema.extend({
   mode: z.literal('recorded'),
+  format: recordedEvidenceFormatSchema.optional(),
   target: recordedObservationTargetSchema,
   canInteract: z.literal(false),
   canCancel: z.literal(false),
@@ -203,7 +206,7 @@ export class ReplayViewerRequestError extends Error {
 }
 const verifiedRecordedFileSelection = (
   value: unknown,
-  payload: RecordedObservationPayload,
+  payload: RecordedEvidencePayload,
   mediaKey?: string
 ): RecordedObservationFileSelection => {
   const selection = recordedFileSelectionSchema.parse(value)
@@ -409,8 +412,8 @@ export class ReplayViewerClient {
       ? (replayImageSource(capture.mimeType, base64(bytes)) ?? null)
       : null
   }
-  recording(signal?: AbortSignal): Promise<RecordedObservationPayload> {
-    return this.json('/api/recording', recordedObservationPayloadSchema, undefined, signal)
+  recording(signal?: AbortSignal): Promise<RecordedEvidencePayload> {
+    return this.json('/api/recording', recordedEvidencePayloadSchema, undefined, signal)
   }
   async selectRecording(
     payload: RecordedObservationPayload,
@@ -440,7 +443,7 @@ export class ReplayViewerClient {
     return response ? verifiedRecordedSelection(response, payload) : null
   }
   async selectRecordingFile(
-    payload: RecordedObservationPayload,
+    payload: RecordedEvidencePayload,
     mediaKey: string,
     signal?: AbortSignal
   ): Promise<RecordedObservationFileSelection> {
@@ -458,7 +461,7 @@ export class ReplayViewerClient {
     return verifiedRecordedFileSelection(response, payload, mediaKey)
   }
   async recordedFileSelection(
-    payload: RecordedObservationPayload,
+    payload: RecordedEvidencePayload,
     signal?: AbortSignal
   ): Promise<RecordedObservationFileSelection | null> {
     const response = await this.json(
@@ -470,7 +473,7 @@ export class ReplayViewerClient {
     return response ? verifiedRecordedFileSelection(response, payload) : null
   }
   async recordedMedia(
-    payload: RecordedObservationPayload,
+    payload: RecordedEvidencePayload,
     resource: ReplayResource,
     signal?: AbortSignal
   ): Promise<{ content: string; mimeType: string; truncated: boolean }> {
@@ -478,7 +481,10 @@ export class ReplayViewerClient {
       (item) => item.artifactId === resource.artifactId && item.versionId === resource.versionId
     )
     const declared =
-      resolved && payload.archive.media.find((item) => item.mediaKey === resolved.mediaKey)
+      resolved &&
+      ('archive' in payload ? payload.archive : payload.recording).media.find(
+        (item) => item.mediaKey === resolved.mediaKey
+      )
     if (
       !resolved ||
       !declared ||
@@ -501,7 +507,7 @@ export class ReplayViewerClient {
     })
   }
   async readRecordedResource(
-    payload: RecordedObservationPayload,
+    payload: RecordedEvidencePayload,
     resource: ReplayResource
   ): Promise<ReplayPreparedResource> {
     return this.prepareResource(resource, () => this.recordedMedia(payload, resource))

@@ -397,3 +397,16 @@ it('opens exact receiving recordings without live authority and returns server-h
   expect(h.openViewer).not.toHaveBeenCalled()
   expect(h.viewers.snapshot).not.toHaveBeenCalled()
 })
+
+it('pins the optional project-recording format without granting live authority', async () => {
+  const h = harness(),
+    caller = createTaskCallerContext()
+  const target = { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }
+  await h.port.call('openRecorded', { target, format: 'project-recording' }, caller)
+  expect(h.openRecordedViewer).toHaveBeenCalledExactlyOnceWith(target, caller, 'project-recording')
+  await expect(
+    h.port.call('openRecorded', { target, format: 'live' }, caller)
+  ).rejects.toMatchObject({ code: 'invalid_request' })
+  expect(h.openRecordedViewer).toHaveBeenCalledOnce()
+  expect(h.openViewer).not.toHaveBeenCalled()
+})
