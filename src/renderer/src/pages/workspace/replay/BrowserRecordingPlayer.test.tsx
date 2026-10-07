@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useLayoutEffect } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { browserRecordingFixture } from './BrowserRecording.test-support'
@@ -14,6 +15,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 const mediaUrl = (key: string): string => `/api/recording/media?mediaKey=${key}`
 it('seeks into exact segments and asks at the selected time without any runtime', async () => {
@@ -113,6 +115,57 @@ it('starts at the first captured timestamp and releases media when the browser t
   expect(screen.getByLabelText('Recorded webpage')).toBeTruthy()
   expect(screen.getByRole('slider').getAttribute('value')).toBe('24')
   expect(screen.getByRole('button', { name: 'Play replay' })).toBeTruthy()
+})
+it('uses the newest visibility record when a hidden iframe becomes visible in one observer batch', () => {
+  let deliver: (entries: IntersectionObserverEntry[]) => void = () => undefined
+  let target: Element
+  class Observer implements IntersectionObserver {
+    readonly root = null
+    readonly rootMargin = '0px'
+    readonly scrollMargin = '0px'
+    readonly thresholds = [0]
+    constructor(callback: IntersectionObserverCallback) {
+      deliver = (entries) => callback(entries, this)
+    }
+    observe(element: Element): void {
+      target = element
+    }
+    unobserve = vi.fn()
+    disconnect = vi.fn()
+    takeRecords(): IntersectionObserverEntry[] {
+      return []
+    }
+  }
+  vi.stubGlobal('IntersectionObserver', Observer)
+  render(<BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={mediaUrl} />)
+  const entry = (visible: boolean, time: number, element = target): IntersectionObserverEntry =>
+    ({ target: element, isIntersecting: visible, time }) as IntersectionObserverEntry
+  act(() => deliver([entry(false, 1), entry(true, 2)]))
+  expect(screen.getByLabelText('Recorded webpage')).toBeTruthy()
+  // Ignore an older entry or an entry for another observed surface, even if listed last.
+  act(() => deliver([entry(true, 4), entry(false, 3), entry(false, 5, document.body)]))
+  expect(screen.getByLabelText('Recorded webpage')).toBeTruthy()
+  act(() => deliver([entry(true, 6), entry(false, 6)]))
+  expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+  act(() => deliver([entry(false, 7), entry(true, 8)]))
+  expect(screen.getByLabelText('Recorded webpage')).toBeTruthy()
+})
+it('resynchronizes visibility when the document is shown before passive effects subscribe', () => {
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  function ShowDuringCommit(): null {
+    useLayoutEffect(() => {
+      visibility.mockReturnValue('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+    }, [])
+    return null
+  }
+  render(
+    <>
+      <BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={mediaUrl} />
+      <ShowDuringCommit />
+    </>
+  )
+  expect(screen.getByLabelText('Recorded webpage')).toBeTruthy()
 })
 it('distinguishes unavailable receiving media from activity that was never recorded', () => {
   render(<BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={() => null} />)

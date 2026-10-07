@@ -239,9 +239,11 @@ const ResearchReplayContent = ({
           return (
             <div className="flex h-full min-h-0 flex-col">
               <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
-                <p className="truncate text-sm text-text-200" title={current?.descriptor.name}>
-                  {current?.descriptor.name ?? t('Project recording')}
-                </p>
+                {recordings.length <= 1 ? (
+                  <p className="truncate text-sm text-text-200" title={current?.descriptor.name}>
+                    {current?.descriptor.name ?? t('Project recording')}
+                  </p>
+                ) : null}
                 {recordings.length > 1 ? (
                   <select
                     aria-label={t('Project recording')}

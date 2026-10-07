@@ -153,12 +153,23 @@ const BrowserRecordingPlayerContent = ({
   useEffect(() => {
     const update = (): void => setDocumentVisible(document.visibilityState !== 'hidden')
     document.addEventListener('visibilitychange', update)
+    // An initially hidden desktop frame may become visible between render and subscription.
+    update()
     return () => document.removeEventListener('visibilitychange', update)
   }, [])
   useEffect(() => {
-    if (!surface.current || typeof IntersectionObserver === 'undefined') return
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting))
-    observer.observe(surface.current)
+    const element = surface.current
+    if (!element || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver((entries) => {
+      // Hidden material tabs can queue both hide and show records before this callback runs.
+      // Using the first record would leave a visible iframe suspended until another tab switch.
+      let latest: IntersectionObserverEntry | undefined
+      for (const entry of entries) {
+        if (entry.target === element && (!latest || entry.time >= latest.time)) latest = entry
+      }
+      if (latest) setVisible(latest.isIntersecting)
+    })
+    observer.observe(element)
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
