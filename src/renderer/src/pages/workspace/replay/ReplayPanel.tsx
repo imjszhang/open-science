@@ -1100,12 +1100,7 @@ const ReplayPanelContent = ({
           ) : null}
           {live.onStop && !live.recorded && !isObservationTerminal(live.snapshot) ? (
             <Button variant="outline" size="sm" disabled={live.stopping} onClick={live.onStop}>
-              {live.stopping
-                ? t('Waiting for the run to stop…')
-                : (live.executionContext ?? live.snapshot.executionContext)?.purpose ===
-                    'offline-demo'
-                  ? t('Stop demo')
-                  : t('Stop run')}
+              {live.stopping ? t('Waiting for the run to stop…') : t('Stop run')}
             </Button>
           ) : null}
           {inspection ? (

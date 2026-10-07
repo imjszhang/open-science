@@ -7188,9 +7188,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "研究を実行しただけでは、再現に成功した証拠にはなりません。",
     "Execution conditions": "実行条件",
     "Recorded configuration: {{name}}": "記録された設定：{{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "このデモは処理が終わった後もプロジェクトページを開いたままにします。閲覧が終わったらデモを停止してください。",
-    "This demo’s project page closes when its program exits.": "このデモのプログラムが終了すると、プロジェクトページが閉じます。",
-    "The viewing time limit was not recorded for this demo.": "このデモの閲覧時間の上限は記録されていません。",
     "The viewing time limit was reached.": "閲覧時間の上限に達しました。",
     "The run was stopped.": "実行が停止されました。",
     "The run failed.": "実行に失敗しました。",
@@ -7203,7 +7200,6 @@
     "Evidence from the selected step": "選択したステップの証拠",
     "This is a recorded image, not a live project page.": "これは保存された画像であり、ライブのプロジェクトページではありません。",
     "Source step: {{step}}": "記録元のステップ：{{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "デモの最長実行時間：{{minutes}} 分。プログラムはそれより前に終了する場合があります。",
     "Back to recording": "記録に戻る",
     "Project replay": "プロジェクトの画面再生",
     "Offline run": "オフライン実行",
@@ -7233,6 +7229,10 @@
     "Local historical run": "この端末の過去の実行",
     "Recorded on this device. This is separate from the imported author’s evidence.": "この端末で記録されました。インポートした作成者の証拠とは別です。",
     "Some local runs have no saved recording. Viewing history does not resume them.": "記録が保存されていない実行があります。履歴を閲覧しても再開されません。",
-    "Copy file reference": "ファイル参照をコピー"
+    "Copy file reference": "ファイル参照をコピー",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "この実行では動作終了後もプロジェクト画面を開いたままにします。閲覧後に実行を停止してください。",
+    "The project page closes when this run ends.": "この実行が終了するとプロジェクト画面は閉じます。",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "最大実行時間：{{minutes}} 分。プログラムが先に終了する場合があります。",
+    "The viewing time limit was not recorded for this run.": "この実行の閲覧時間の上限は記録されていません。"
   }
 }

@@ -30,18 +30,18 @@ export const DemoViewingNotice = ({
       <p>
         {viewing?.mode === 'until-stop-or-timeout'
           ? t(
-              'This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.'
+              'This run keeps the project page open after its actions finish. Stop the run when you are done viewing.'
             )
-          : t('This demo’s project page closes when its program exits.')}
+          : t('The project page closes when this run ends.')}
       </p>
       {viewing ? (
         <p>
-          {t('Maximum demo execution time: {{minutes}} min. The program may finish earlier.', {
+          {t('Maximum execution time: {{minutes}} min. The program may finish earlier.', {
             minutes: Math.ceil(viewing.timeoutMs / 60_000)
           })}
         </p>
       ) : (
-        <p>{t('The viewing time limit was not recorded for this demo.')}</p>
+        <p>{t('The viewing time limit was not recorded for this run.')}</p>
       )}
     </div>
   )

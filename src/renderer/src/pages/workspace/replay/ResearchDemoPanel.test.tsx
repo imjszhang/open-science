@@ -112,11 +112,11 @@ it('shows the inspected viewing policy before starting without launching a run',
   })
   render(<ResearchDemoPanel source={source} isActive />)
   expect(
-    await screen.findByText('Maximum demo execution time: 10 min. The program may finish earlier.')
+    await screen.findByText('Maximum execution time: 10 min. The program may finish earlier.')
   ).toBeTruthy()
   expect(
     screen.getByText(
-      'This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.'
+      'This run keeps the project page open after its actions finish. Stop the run when you are done viewing.'
     )
   ).toBeTruthy()
   expect(mocks.start).not.toHaveBeenCalled()

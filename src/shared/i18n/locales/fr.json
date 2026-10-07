@@ -7516,9 +7516,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "L’exécution d’une recherche ne constitue pas, à elle seule, une preuve de reproduction réussie.",
     "Execution conditions": "Conditions d’exécution",
     "Recorded configuration: {{name}}": "Configuration enregistrée : {{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Cette démo garde la page du projet ouverte après la fin de ses actions. Arrêtez la démo lorsque vous avez terminé la consultation.",
-    "This demo’s project page closes when its program exits.": "La page du projet de cette démo se ferme lorsque son programme se termine.",
-    "The viewing time limit was not recorded for this demo.": "Aucune limite de durée de consultation n’a été enregistrée pour cette démo.",
     "The viewing time limit was reached.": "La limite de durée de consultation a été atteinte.",
     "The run was stopped.": "L’exécution a été arrêtée.",
     "The run failed.": "L’exécution a échoué.",
@@ -7531,7 +7528,6 @@
     "Evidence from the selected step": "Éléments de preuve de l’étape sélectionnée",
     "This is a recorded image, not a live project page.": "Il s’agit d’une image enregistrée, et non d’une page du projet en direct.",
     "Source step: {{step}}": "Étape source : {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Durée maximale d’exécution de la démo : {{minutes}} min. Le programme peut se terminer plus tôt.",
     "Back to recording": "Revenir à l’enregistrement",
     "Project replay": "Lecture du projet",
     "Offline run": "Exécution hors ligne",
@@ -7561,6 +7557,10 @@
     "Local historical run": "Exécution locale antérieure",
     "Recorded on this device. This is separate from the imported author’s evidence.": "Enregistré sur cet appareil, séparément des preuves importées de l’auteur.",
     "Some local runs have no saved recording. Viewing history does not resume them.": "Certaines exécutions locales n’ont pas d’enregistrement sauvegardé. Consulter l’historique ne les reprend pas.",
-    "Copy file reference": "Copier la référence du fichier"
+    "Copy file reference": "Copier la référence du fichier",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "Cette exécution garde la page du projet ouverte après ses actions. Arrêtez-la une fois la consultation terminée.",
+    "The project page closes when this run ends.": "La page du projet se ferme à la fin de cette exécution.",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "Durée maximale d’exécution : {{minutes}} min. Le programme peut se terminer plus tôt.",
+    "The viewing time limit was not recorded for this run.": "La limite de consultation n’a pas été enregistrée pour cette exécution."
   }
 }

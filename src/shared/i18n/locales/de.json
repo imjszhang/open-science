@@ -7348,9 +7348,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "Die Ausführung einer Forschung ist für sich genommen kein Beleg für eine erfolgreiche Reproduktion.",
     "Execution conditions": "Ausführungsbedingungen",
     "Recorded configuration: {{name}}": "Aufgezeichnete Konfiguration: {{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Diese Demo hält die Projektseite nach Abschluss ihrer Aktionen geöffnet. Stoppen Sie die Demo, wenn Sie mit der Ansicht fertig sind.",
-    "This demo’s project page closes when its program exits.": "Die Projektseite dieser Demo wird geschlossen, wenn das Programm beendet wird.",
-    "The viewing time limit was not recorded for this demo.": "Für diese Demo wurde keine zeitliche Begrenzung der Ansicht aufgezeichnet.",
     "The viewing time limit was reached.": "Die Zeitbegrenzung für die Ansicht wurde erreicht.",
     "The run was stopped.": "Der Lauf wurde gestoppt.",
     "The run failed.": "Der Lauf ist fehlgeschlagen.",
@@ -7363,7 +7360,6 @@
     "Evidence from the selected step": "Belege aus dem ausgewählten Schritt",
     "This is a recorded image, not a live project page.": "Dies ist ein aufgezeichnetes Bild, keine Live-Projektseite.",
     "Source step: {{step}}": "Quellschritt: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Maximale Ausführungszeit der Demo: {{minutes}} Min. Das Programm kann früher enden.",
     "Back to recording": "Zurück zur Aufzeichnung",
     "Project replay": "Projektwiedergabe",
     "Offline run": "Offline-Ausführung",
@@ -7393,6 +7389,10 @@
     "Local historical run": "Frühere lokale Ausführung",
     "Recorded on this device. This is separate from the imported author’s evidence.": "Auf diesem Gerät aufgezeichnet, getrennt von den importierten Nachweisen des Autors.",
     "Some local runs have no saved recording. Viewing history does not resume them.": "Für einige lokale Ausführungen fehlt eine gespeicherte Aufzeichnung. Das Anzeigen des Verlaufs setzt sie nicht fort.",
-    "Copy file reference": "Dateiverweis kopieren"
+    "Copy file reference": "Dateiverweis kopieren",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "Diese Ausführung hält die Projektseite nach Abschluss der Aktionen offen. Beenden Sie die Ausführung nach dem Ansehen.",
+    "The project page closes when this run ends.": "Die Projektseite schließt sich nach Ende dieser Ausführung.",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "Maximale Ausführungszeit: {{minutes}} Min. Das Programm kann früher enden.",
+    "The viewing time limit was not recorded for this run.": "Für diese Ausführung wurde keine Zeitgrenze für das Ansehen aufgezeichnet."
   }
 }

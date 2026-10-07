@@ -7188,9 +7188,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "執行研究本身並不能證明重現成功。",
     "Execution conditions": "執行條件",
     "Recorded configuration: {{name}}": "記錄中的設定：{{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "此演示在動作結束後仍會保持專案頁面開啟。觀看完畢後可停止演示。",
-    "This demo’s project page closes when its program exits.": "此演示的程式結束時，專案頁面將關閉。",
-    "The viewing time limit was not recorded for this demo.": "此演示未記錄觀看時限。",
     "The viewing time limit was reached.": "已達到觀看時限。",
     "The run was stopped.": "執行已停止。",
     "The run failed.": "執行失敗。",
@@ -7203,7 +7200,6 @@
     "Evidence from the selected step": "所選步驟的證據",
     "This is a recorded image, not a live project page.": "這是已儲存的影像，並非即時專案頁面。",
     "Source step: {{step}}": "來源步驟：{{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最長執行時間：{{minutes}} 分鐘。程式可能提前結束。",
     "Back to recording": "返回錄製",
     "Project replay": "專案畫面回放",
     "Offline run": "離線執行",
@@ -7233,6 +7229,10 @@
     "Local historical run": "本機歷史執行",
     "Recorded on this device. This is separate from the imported author’s evidence.": "這是本機執行留下的記錄，與匯入的作者證據分開。",
     "Some local runs have no saved recording. Viewing history does not resume them.": "部分本機執行沒有儲存記錄，檢視歷程不會恢復執行。",
-    "Copy file reference": "複製檔案引用"
+    "Copy file reference": "複製檔案引用",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "此次執行會在動作結束後保持專案頁面可用。檢視完畢後可停止執行。",
+    "The project page closes when this run ends.": "此次執行結束後，專案頁面將關閉。",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "最長執行時間：{{minutes}} 分鐘。程式可能提前結束。",
+    "The viewing time limit was not recorded for this run.": "此次執行未記錄觀看時間上限。"
   }
 }

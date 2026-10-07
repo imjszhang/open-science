@@ -157,15 +157,15 @@ describe('shared live Replay viewer', () => {
     expect(screen.getByText('No result files were recorded at this step.')).toBeTruthy()
   })
 
-  it('labels the existing stop action as a demo only for a verified offline purpose', () => {
+  it('uses the ordinary stop action for a verified offline run', () => {
     const first = props({
       ...snapshot(1),
       executionContext: { purpose: 'offline-demo', conditionChanges: [] }
     })
     render(<LiveReplayView {...first} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Stop demo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop run' }))
     expect(first.onStop).toHaveBeenCalledOnce()
-    expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop demo' })).toBeNull()
   })
 
   it('keeps legacy purpose unknown even when a completed run or title suggests reproduction', () => {
@@ -663,7 +663,7 @@ describe('shared live Replay viewer', () => {
     expect(
       screen.getByText('Earlier observed records are no longer available in this view.')
     ).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop demo' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Pause following' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
     expect(screen.queryByTitle('Live project')).toBeNull()

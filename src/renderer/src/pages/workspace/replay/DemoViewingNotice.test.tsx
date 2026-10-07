@@ -23,11 +23,11 @@ it('discloses the admitted viewing policy and upper bound before launch', () => 
   )
   expect(
     screen.getByText(
-      'This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.'
+      'This run keeps the project page open after its actions finish. Stop the run when you are done viewing.'
     )
   ).toBeTruthy()
   expect(
-    screen.getByText('Maximum demo execution time: 10 min. The program may finish earlier.')
+    screen.getByText('Maximum execution time: 10 min. The program may finish earlier.')
   ).toBeTruthy()
 })
 
@@ -43,7 +43,7 @@ it('shows an execution budget while running without inventing an absolute deadli
     />
   )
   expect(
-    screen.getByText('Maximum demo execution time: 6 min. The program may finish earlier.')
+    screen.getByText('Maximum execution time: 6 min. The program may finish earlier.')
   ).toBeTruthy()
   expect(screen.queryByText(/no later than/)).toBeNull()
 })
@@ -55,8 +55,8 @@ it('does not promise to hold a legacy program open or infer its deadline', () =>
       context={{ purpose: 'offline-demo', conditionChanges: [] }}
     />
   )
-  expect(screen.getByText('This demo’s project page closes when its program exits.')).toBeTruthy()
-  expect(screen.getByText('The viewing time limit was not recorded for this demo.')).toBeTruthy()
+  expect(screen.getByText('The project page closes when this run ends.')).toBeTruthy()
+  expect(screen.getByText('The viewing time limit was not recorded for this run.')).toBeTruthy()
 })
 
 it.each(['completed', 'failed', 'cancelled', 'interrupted', 'timeout', 'collecting'] as const)(

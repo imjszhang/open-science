@@ -7186,9 +7186,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "연구 실행 자체만으로는 재현에 성공했다는 증거가 되지 않습니다.",
     "Execution conditions": "실행 조건",
     "Recorded configuration: {{name}}": "기록된 구성: {{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "이 데모는 작업이 끝난 뒤에도 프로젝트 페이지를 열어 둡니다. 확인을 마치면 데모를 중지하세요.",
-    "This demo’s project page closes when its program exits.": "이 데모의 프로그램이 종료되면 프로젝트 페이지가 닫힙니다.",
-    "The viewing time limit was not recorded for this demo.": "이 데모의 열람 시간 제한은 기록되지 않았습니다.",
     "The viewing time limit was reached.": "열람 시간 제한에 도달했습니다.",
     "The run was stopped.": "실행이 중지되었습니다.",
     "The run failed.": "실행에 실패했습니다.",
@@ -7201,7 +7198,6 @@
     "Evidence from the selected step": "선택한 단계의 증거",
     "This is a recorded image, not a live project page.": "실시간 프로젝트 페이지가 아닌 저장된 이미지입니다.",
     "Source step: {{step}}": "출처 단계: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "데모 최대 실행 시간: {{minutes}}분. 프로그램이 더 일찍 종료될 수 있습니다.",
     "Back to recording": "기록으로 돌아가기",
     "Project replay": "프로젝트 화면 재생",
     "Offline run": "오프라인 실행",
@@ -7231,6 +7227,10 @@
     "Local historical run": "이 기기의 이전 실행",
     "Recorded on this device. This is separate from the imported author’s evidence.": "이 기기에서 기록되었습니다. 가져온 작성자의 증거와는 별개입니다.",
     "Some local runs have no saved recording. Viewing history does not resume them.": "일부 로컬 실행에는 저장된 기록이 없습니다. 기록을 봐도 실행이 재개되지 않습니다.",
-    "Copy file reference": "파일 참조 복사"
+    "Copy file reference": "파일 참조 복사",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "이 실행은 작업이 끝난 후에도 프로젝트 페이지를 유지합니다. 확인을 마치면 실행을 중지하세요.",
+    "The project page closes when this run ends.": "이 실행이 끝나면 프로젝트 페이지가 닫힙니다.",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "최대 실행 시간: {{minutes}}분. 프로그램이 더 일찍 종료될 수 있습니다.",
+    "The viewing time limit was not recorded for this run.": "이 실행의 보기 시간 제한이 기록되지 않았습니다."
   }
 }

@@ -7655,9 +7655,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "Само по себе выполнение исследования не является доказательством успешного воспроизведения.",
     "Execution conditions": "Условия выполнения",
     "Recorded configuration: {{name}}": "Записанная конфигурация: {{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Эта демонстрация оставляет страницу проекта открытой после завершения действий. Остановите демонстрацию, когда закончите просмотр.",
-    "This demo’s project page closes when its program exits.": "Страница проекта этой демонстрации закрывается при завершении программы.",
-    "The viewing time limit was not recorded for this demo.": "Для этой демонстрации не записано ограничение времени просмотра.",
     "The viewing time limit was reached.": "Достигнуто ограничение времени просмотра.",
     "The run was stopped.": "Выполнение остановлено.",
     "The run failed.": "Выполнение завершилось с ошибкой.",
@@ -7670,7 +7667,6 @@
     "Evidence from the selected step": "Свидетельства выбранного шага",
     "This is a recorded image, not a live project page.": "Это сохранённое изображение, а не страница проекта в реальном времени.",
     "Source step: {{step}}": "Исходный шаг: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Максимальное время выполнения демонстрации: {{minutes}} мин. Программа может завершиться раньше.",
     "Back to recording": "Вернуться к записи",
     "Project replay": "Воспроизведение проекта",
     "Offline run": "Автономный запуск",
@@ -7700,6 +7696,10 @@
     "Local historical run": "Прошлый локальный запуск",
     "Recorded on this device. This is separate from the imported author’s evidence.": "Записано на этом устройстве отдельно от импортированных свидетельств автора.",
     "Some local runs have no saved recording. Viewing history does not resume them.": "Для некоторых локальных запусков нет сохранённой записи. Просмотр истории не возобновляет их.",
-    "Copy file reference": "Копировать ссылку на файл"
+    "Copy file reference": "Копировать ссылку на файл",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "Этот запуск сохраняет страницу проекта открытой после завершения действий. Остановите его по окончании просмотра.",
+    "The project page closes when this run ends.": "Страница проекта закроется после завершения запуска.",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "Максимальное время выполнения: {{minutes}} мин. Программа может завершиться раньше.",
+    "The viewing time limit was not recorded for this run.": "Ограничение времени просмотра для этого запуска не записано."
   }
 }

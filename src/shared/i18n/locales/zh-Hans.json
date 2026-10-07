@@ -7188,9 +7188,6 @@
     "A research execution is not, by itself, evidence of successful reproduction.": "执行研究本身并不能证明复现成功。",
     "Execution conditions": "执行条件",
     "Recorded configuration: {{name}}": "记录中的配置：{{name}}",
-    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "此演示在动作结束后仍会保持项目页面打开。观看完毕后可停止演示。",
-    "This demo’s project page closes when its program exits.": "此演示的程序退出时，项目页面将关闭。",
-    "The viewing time limit was not recorded for this demo.": "此演示未记录观看时限。",
     "The viewing time limit was reached.": "已达到观看时限。",
     "The run was stopped.": "运行已停止。",
     "The run failed.": "运行失败。",
@@ -7203,7 +7200,6 @@
     "Evidence from the selected step": "所选步骤的证据",
     "This is a recorded image, not a live project page.": "这是已保存的图像，并非实时项目页面。",
     "Source step: {{step}}": "来源步骤：{{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最长执行时间：{{minutes}} 分钟。程序可能提前结束。",
     "Back to recording": "返回录制",
     "Project replay": "项目画面回放",
     "Offline run": "离线运行",
@@ -7233,6 +7229,10 @@
     "Local historical run": "本机历史运行",
     "Recorded on this device. This is separate from the imported author’s evidence.": "这是本机运行留下的记录，与导入的作者证据分开。",
     "Some local runs have no saved recording. Viewing history does not resume them.": "部分本机运行没有保存记录，查看历史不会恢复运行。",
-    "Copy file reference": "复制文件引用"
+    "Copy file reference": "复制文件引用",
+    "This run keeps the project page open after its actions finish. Stop the run when you are done viewing.": "此次运行会在动作结束后保持项目页面可用。查看完毕后可停止运行。",
+    "The project page closes when this run ends.": "此次运行结束后，项目页面将关闭。",
+    "Maximum execution time: {{minutes}} min. The program may finish earlier.": "最长运行时间：{{minutes}} 分钟。程序可能提前结束。",
+    "The viewing time limit was not recorded for this run.": "此次运行未记录观看时间上限。"
   }
 }
