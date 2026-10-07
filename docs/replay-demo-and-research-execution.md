@@ -542,3 +542,21 @@ and outputs, and the saved HTML and exact-step image remained readable. This can
 zero provider calls when its engineering evidence was saved; its final provider reread is explicitly
 unverified. The natural-completion fixture verified both checks. See `installed-ui/verification.json`
 and `evidence/native-final-audit.json` in the independent evidence root.
+
+### Final Test installation and archive UI acceptance
+
+The final code commit is `5b741826e6fd751a6be3b9b8d62c11b702cacd29`, installed as
+`0.35.1-test.5b741826e6fd.2` from release `20261007T054905Z-5b741826e6fd`. Maintenance
+commit `9a6082723641bccad3348e0c3f3ec9593a14541e` supplied the existing isolated overlay
+and fixed signing identity. Installation backed up Test data as `20261007T055153Z-ab10cafd`.
+The installed asar SHA-256 is `4c0042f85782a64c2294deae931d2f723dbf6da5ac63d332cce3dbb288c443b6`.
+
+The final 808-test translation/archive set, five real Chromium scenarios, relevant Node/sandbox
+and Web types, and changed-file lint passed. Fresh SDK access after Test restart confirmed the
+same cancelled run was still released and its saved context retained `endReason: stopped`.
+Both native Test and the Codex browser opened `project-result.html` from Recording attachments
+on the first click. The browser returned to the same image and `observation-1` at step 2/3.
+The final native view shows the saved HTML; the Codex view shows the actual captured image with
+its source step, acquisition interval, and stopped-run explanation. No new experiment was needed
+for these final archive checks. The production application, original Tuanzi source and earlier
+`.science` archive hashes remain unchanged; no push was performed.
