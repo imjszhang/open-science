@@ -39,7 +39,7 @@ it.skipIf(!enabled)(
     const directory = await mkdtemp(join(tmpdir(), 'browser-recording-electron-'))
     cleanups.push(() => rm(directory, { recursive: true, force: true }))
     const project = await serve(
-      `<!doctype html><style>html,body{margin:0;background:rgb(0,180,70);width:100%;height:100%;overflow:hidden}canvas{display:block;width:100%;height:100%}button{position:absolute;left:12px;top:12px}input{position:absolute;left:12px;top:50px;width:160px;height:30px;border:0;background:white;color:red}</style><canvas width="640" height="360"></canvas><button>Click me</button><input value="must-never-record-this"><script>const canvas=document.querySelector('canvas'),c=canvas.getContext('2d');let f=0;function frame(){globalThis.animationFrames=f;c.fillStyle='rgb(0,180,70)';c.fillRect(0,0,640,360);c.fillStyle='rgb(220,20,20)';c.fillRect((f++*2)%560,140,80,80);requestAnimationFrame(frame)}frame();document.querySelector('button').onclick=e=>{e.target.textContent='Clicked';history.pushState({},'', '?run=fixture&tab=diagnostics&token=must-not-store');};</script>`
+      `<!doctype html><style>html,body{margin:0;background:rgb(0,180,70);width:100%;height:100%;overflow:hidden}canvas{display:block;width:100%;height:100%}button{position:absolute;left:12px;top:12px}input{position:absolute;left:12px;top:50px;width:160px;height:30px;border:0;background:white;color:red}</style><canvas width="640" height="360"></canvas><button>Click me</button><div id="scrollable" style="position:absolute;bottom:0;left:0;width:10px;height:10px;overflow:auto"><div style="height:1000px"></div></div><input value="must-never-record-this"><script>const canvas=document.querySelector('canvas'),c=canvas.getContext('2d');let f=0;function frame(){globalThis.animationFrames=f;c.fillStyle='rgb(0,180,70)';c.fillRect(0,0,640,360);c.fillStyle='rgb(220,20,20)';c.fillRect((f++*2)%560,140,80,80);requestAnimationFrame(frame)}frame();document.querySelector('button').onclick=e=>{e.target.textContent='Clicked';history.pushState({},'', '?run=fixture&tab=diagnostics&token=must-not-store');};</script>`
     )
     const viewer = await serve(
       `<!doctype html><style>html,body{margin:0;background:magenta;width:100%;height:100%}iframe{position:absolute;left:40px;top:42px;width:640px;height:360px;border:0}</style><iframe id="project" src="${project.origin}/" sandbox="allow-scripts allow-forms allow-same-origin"></iframe>`
@@ -119,6 +119,15 @@ it.skipIf(!enabled)(
         action
       )
     await control('pause')
+    await page.frameLocator('#viewer').frameLocator('#project').locator('button').click()
+    await page
+      .frameLocator('#viewer')
+      .frameLocator('#project')
+      .locator('#scrollable')
+      .evaluate((element) => {
+        element.scrollTop = 25
+        history.pushState({}, '', '?tab=paused&token=must-not-store')
+      })
     await page.waitForTimeout(700)
     await control('resume')
     await page.waitForTimeout(1800)
@@ -130,6 +139,14 @@ it.skipIf(!enabled)(
       refocused.diagnostics.encodedFrames - blurred.diagnostics.encodedFrames
     ).toBeGreaterThanOrEqual(15)
     await control('hide')
+    await page
+      .frameLocator('#viewer')
+      .frameLocator('#project')
+      .locator('#scrollable')
+      .evaluate((element) => {
+        element.scrollTop = 50
+        history.pushState({}, '', '?tab=hidden&token=must-not-store')
+      })
     await page.waitForTimeout(700)
     await control('show')
     await page.waitForTimeout(1600)
@@ -143,6 +160,15 @@ it.skipIf(!enabled)(
         .evaluate(() => performance.timeOrigin)
     ).toBe(navigation)
     expect(result.ended).toEqual([])
+    expect(
+      result.events.filter((event) => (event as { kind: string }).kind === 'click')
+    ).toHaveLength(1)
+    expect(
+      result.events.filter((event) => (event as { kind: string }).kind === 'scroll')
+    ).toHaveLength(0)
+    expect(
+      result.events.filter((event) => (event as { kind: string }).kind === 'navigation')
+    ).toHaveLength(1)
     expect(JSON.stringify(result.events)).not.toContain('must-not-store')
     expect(result.segments.length, JSON.stringify(result)).toBeGreaterThanOrEqual(3)
     expect(

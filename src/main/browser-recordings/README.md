@@ -50,6 +50,9 @@ encoder initialization. Pause time is retained as gaps, not removed from the tim
 ranges never span a pause or hidden interval. Loss of focus alone is allowed: compositor frames
 still belong to this webContents and do not contain another application's overlapping window.
 True hidden/minimized states, or a frame reporting hidden, suspend recording with a gap.
+On resumption, the first passive event batch is drained and discarded, so clicks, scrolls and
+navigation during a pause or hidden interval are not relabeled as later recorded actions.
+Document-navigation invalidation remains active throughout those intervals.
 
 This version finishes with partial evidence on zoom, any crop/layout change, document/frame
 replacement, or source authorization loss. It does not guess new crop coordinates or silently

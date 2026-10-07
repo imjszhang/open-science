@@ -7424,6 +7424,7 @@
     "Web recording saved": "Webseitenaufzeichnung gespeichert",
     "Web recording timeline": "Zeitleiste der Webseitenaufzeichnung",
     "{{speed}}×": "{{speed}}×",
-    "Recording ended early. Saved footage remains available. You can start a new recording.": "Die Aufzeichnung wurde vorzeitig beendet. Gespeicherte Bilder bleiben verfügbar. Sie können eine neue Aufzeichnung starten."
+    "Recording ended early. Saved footage remains available. You can start a new recording.": "Die Aufzeichnung wurde vorzeitig beendet. Gespeicherte Bilder bleiben verfügbar. Sie können eine neue Aufzeichnung starten.",
+    "Host-observed event": "Vom Host beobachtetes Ereignis"
   }
 }

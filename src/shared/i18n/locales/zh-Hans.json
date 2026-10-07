@@ -7264,6 +7264,7 @@
     "Web recording saved": "网页录制已保存",
     "Web recording timeline": "网页录制时间轴",
     "{{speed}}×": "{{speed}}×",
-    "Recording ended early. Saved footage remains available. You can start a new recording.": "录制提前结束。已保存的画面仍可查看，您可以开始新的录制。"
+    "Recording ended early. Saved footage remains available. You can start a new recording.": "录制提前结束。已保存的画面仍可查看，您可以开始新的录制。",
+    "Host-observed event": "主机观察到的事件"
   }
 }

@@ -117,3 +117,43 @@ it('distinguishes unavailable receiving media from activity that was never recor
   expect(screen.getByText('Could not read the recorded material.')).toBeTruthy()
   expect(screen.queryByText('No webpage footage was recorded at this time.')).toBeNull()
 })
+it('pauses before asking and cites the actual media time between sparse timeupdate events', async () => {
+  const ask = vi.fn()
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={ask}
+    />
+  )
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '3200' } })
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+  await act(async () => {})
+  video.currentTime = 1.375
+  // The media has advanced 175 ms since the last React timeline update.
+  expect(screen.getByRole('slider').getAttribute('value')).toBe('3200')
+  const pause = vi.mocked(HTMLMediaElement.prototype.pause)
+  pause.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this moment' }))
+  await act(async () => {})
+  expect(ask).toHaveBeenCalledWith(3375)
+  expect(pause.mock.invocationCallOrder[0]).toBeLessThan(ask.mock.invocationCallOrder[0])
+  expect(screen.getByRole('slider').getAttribute('value')).toBe('3375')
+  expect(screen.getByRole('button', { name: 'Play replay' })).toBeTruthy()
+})
+it('distinguishes host observations, browser interactions and author declarations', () => {
+  const recording = browserRecordingFixture()
+  recording.events = [
+    { eventId: 'host', offsetMs: 0, kind: 'navigation', source: 'host-observed' },
+    { eventId: 'browser', offsetMs: 1000, kind: 'click', source: 'browser-observed' },
+    { eventId: 'author', offsetMs: 1500, kind: 'author', source: 'author-declared' }
+  ]
+  render(<BrowserRecordingPlayer recording={recording} mediaUrl={mediaUrl} />)
+  fireEvent.click(screen.getByText('Recorded actions and events'))
+  expect(screen.getByText(/navigation · Host-observed event/)).toBeTruthy()
+  expect(screen.getByText(/click · Browser-observed action/)).toBeTruthy()
+  expect(screen.getByText(/author · Author-declared event/)).toBeTruthy()
+})

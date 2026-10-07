@@ -7592,6 +7592,7 @@
     "Web recording saved": "Grabación de la página web guardada",
     "Web recording timeline": "Línea de tiempo de la grabación de la página web",
     "{{speed}}×": "{{speed}}×",
-    "Recording ended early. Saved footage remains available. You can start a new recording.": "La grabación terminó antes de tiempo. Las imágenes guardadas siguen disponibles. Puede iniciar una nueva grabación."
+    "Recording ended early. Saved footage remains available. You can start a new recording.": "La grabación terminó antes de tiempo. Las imágenes guardadas siguen disponibles. Puede iniciar una nueva grabación.",
+    "Host-observed event": "Evento observado por el host"
   }
 }

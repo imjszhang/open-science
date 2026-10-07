@@ -7264,6 +7264,7 @@
     "Web recording saved": "ウェブページの録画を保存済み",
     "Web recording timeline": "ウェブページ録画のタイムライン",
     "{{speed}}×": "{{speed}}×",
-    "Recording ended early. Saved footage remains available. You can start a new recording.": "録画が途中で終了しました。保存済みの映像は引き続き表示できます。新しい録画を開始できます。"
+    "Recording ended early. Saved footage remains available. You can start a new recording.": "録画が途中で終了しました。保存済みの映像は引き続き表示できます。新しい録画を開始できます。",
+    "Host-observed event": "ホストが観測したイベント"
   }
 }

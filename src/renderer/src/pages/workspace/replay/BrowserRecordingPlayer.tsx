@@ -149,10 +149,30 @@ const BrowserRecordingPlayerContent = ({
             variant="outline"
             disabled={!active || !segment || !source || asking || failed}
             onClick={() => {
+              // timeupdate is deliberately sparse. Freeze and read the actual media position,
+              // rather than citing the earlier timestamp most recently rendered by React.
+              const element = video.current
+              element?.pause()
+              const atMs =
+                element &&
+                segment &&
+                element.readyState >= 1 &&
+                Number.isFinite(element.currentTime)
+                  ? Math.min(
+                      segment.endMs - 1,
+                      Math.max(
+                        segment.startMs,
+                        segment.startMs + Math.round(element.currentTime * 1000)
+                      )
+                    )
+                  : Math.round(offsetMs)
+              desiredOffset.current = atMs
+              setOffsetMs(atMs)
               setPlaying(false)
               setAsking(true)
               setAskFailed(false)
-              void Promise.resolve(onAskMoment(Math.round(offsetMs)))
+              void Promise.resolve()
+                .then(() => onAskMoment(atMs))
                 .catch(() => {
                   if (mounted.current) setAskFailed(true)
                 })
@@ -283,7 +303,9 @@ const BrowserRecordingPlayerContent = ({
                   {recordingTime(event.offsetMs)} · {event.label ?? event.kind} ·{' '}
                   {event.source === 'author-declared'
                     ? t('Author-declared event')
-                    : t('Browser-observed action')}
+                    : event.source === 'host-observed'
+                      ? t('Host-observed event')
+                      : t('Browser-observed action')}
                 </button>
               </li>
             ))}

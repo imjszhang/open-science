@@ -140,13 +140,21 @@ export async function startElectronSurfaceRecording(
   const navigationIds = frames.map((frame) => [frame.processId, frame.routingId])
   // A same-origin RenderFrame can survive a real document navigation. Browser navigation
   // events, not just frame tokens or a renderer-controlled URL, fence that document boundary.
+  let eventsSuspended = true
   let documentChanged = false,
     pendingNavigations = 0
   const onNavigation = (details: WebContentsDidStartNavigationEventParams): void => {
     const frame = details.frame
     if (frame && !frames.includes(frame)) return
     if (!details.isSameDocument || !frame) documentChanged = true
-    else if (frame === project) pendingNavigations = Math.min(100, pendingNavigations + 1)
+    else if (
+      frame === project &&
+      !eventsSuspended &&
+      window.isVisible() &&
+      !window.isMinimized() &&
+      project.visibilityState === 'visible'
+    )
+      pendingNavigations = Math.min(100, pendingNavigations + 1)
   }
   const onDocumentNavigation = (
     _event: unknown,
@@ -265,6 +273,7 @@ export async function startElectronSurfaceRecording(
   })
   const eventKey = `__openScienceRecording${randomBytes(12).toString('hex')}`
   const started = performance.now()
+  eventsSuspended = false
   options.onStarted?.(Date.now())
   const now = (): number => Math.max(0, Math.round(performance.now() - started))
   let stopped = false,
@@ -297,6 +306,8 @@ export async function startElectronSurfaceRecording(
   }
   let gap: { startMs: number; reason: BrowserSurfaceGap['reason'] } | undefined
   const beginGap = (reason: BrowserSurfaceGap['reason'], startMs = now()): void => {
+    eventsSuspended = true
+    pendingNavigations = 0
     if (!gap) gap = { startMs, reason }
   }
   const endGap = (): void => {
@@ -304,6 +315,7 @@ export async function startElectronSurfaceRecording(
     const endMs = now()
     if (endMs > gap.startMs) options.onGap({ ...gap, endMs })
     gap = undefined
+    eventsSuspended = false
   }
   const finishSegment = async (endMs = gap?.startMs ?? now()): Promise<void> => {
     if (segmentStart === undefined) return
@@ -378,6 +390,9 @@ export async function startElectronSurfaceRecording(
       if (geometryKey(await measure()) !== initialKey) throw Error('layout-changed')
       assertSurface()
       if (stopped || paused) return
+      // This read drains the passive DOM queue, including actions performed during a gap.
+      // Discard that first batch on resumption instead of assigning it a new capture time.
+      const discardEvents = eventsSuspended
       if (gap) await finishSegment(gap.startMs)
       if (segmentStart !== undefined && stamp - segmentStart >= segmentDurationMs)
         await finishSegment()
@@ -389,9 +404,11 @@ export async function startElectronSurfaceRecording(
       encodedFrames++
       consecutiveFailures = 0
       lastFrame = stamp
-      for (let remaining = pendingNavigations; remaining > 0; remaining--)
+      const navigations = !discardEvents && !eventsSuspended ? pendingNavigations : 0
+      for (let remaining = navigations; remaining > 0; remaining--)
         options.onEvent({ kind: 'navigation', source: 'host-observed', offsetMs: stamp })
       pendingNavigations = 0
+      if (discardEvents || eventsSuspended) return
       for (const entry of record.events) {
         const e = entry as { kind?: unknown; x?: unknown; y?: unknown }
         if (e && (e.kind === 'click' || e.kind === 'scroll') && safeNumber(e.x) && safeNumber(e.y))
