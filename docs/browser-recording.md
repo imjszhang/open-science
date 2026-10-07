@@ -26,12 +26,25 @@ zoom or document identity changes; resize the preview before recording or start 
 afterwards. It must never keep a stale crop or report a frozen frame as continuous evidence.
 
 Stopping the recorder does not stop the experiment. Execution shutdown drains the encoder and
-publishes the index while the original write capability still exists. Every saved media segment
-also publishes a partial immutable index, so already saved evidence remains discoverable after
-an interruption. Recovery never restarts the project. Recording budgets are independent of model
-usage: media segments are at most 16 MiB, total recording media defaults to 512 MiB and the maximum
-recording duration defaults to one hour. Capacity or encoding failures do not change the experiment
-outcome. Actual gaps and dropped frames are preserved in the index.
+saves the final index while the original write capability still exists. Each saved segment also
+gets an immutable `web-recording-{recordingId}-checkpoint-{segmentCount}.json`; the final index is
+`web-recording-{recordingId}.json`. These distinct filenames preserve the managed writer's existing
+idempotency boundary. After publication, discovery shows the final index or the latest available
+checkpoint. Recovery never restarts the project.
+
+A recording status of `finalized` means capture and index writing have finished. It does not mean
+that the Artifacts are published or that the hosting experiment has ended. The saved Versions
+become ordinary read-only evidence when the owning execution or Agent turn finalizes its Artifact
+publication. While that execution is still running, `read` and `openRecorded` can return
+`unavailable` even when `stop` has returned an exact `target`. Wait for the same execution's terminal
+status before opening that target. If finalization requires recovery, complete the original
+publication workflow; do not start another execution or recording to make these bytes readable.
+Historical readers retain their published-Version requirement and never borrow producer authority.
+
+Recording budgets are independent of model usage: media segments are at most 16 MiB, total
+recording media defaults to 512 MiB and the maximum recording duration defaults to one hour.
+Capacity or encoding failures do not change the experiment outcome. Actual gaps and dropped frames
+are preserved in the index.
 
 ## Portable evidence
 
@@ -71,7 +84,11 @@ for SDK reading or copy its reference; it cannot automatically send a message to
 ## Verification and follow-up
 
 The implementation includes contract, lifecycle, authorization, SDK, renderer, Range, exact-import
-and real Electron/Chromium tests. Native capture tests assert unchanged document identity/request
+and real Electron/Chromium tests. `recorded-reader.test.ts` checks published reads and rejects an
+unpublished archive or media without producer privileges. `browser-recordings/owner.test.ts` uses
+the real managed writer and Artifact repository to verify independent checkpoints, a single final
+index, and continued rejection of changed content at an existing write identity. Native capture
+tests assert unchanged document identity/request
 count, moving Canvas content, input masking, focus changes, explicit gaps and decodable independent
 segments. The Tuanzi engineering acceptance uses pinned v0.5.6 source
 `b6d5810fef3baac1195c980fe728ce7a8a69408b` in a fresh directory, with no external provider calls.

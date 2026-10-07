@@ -105,7 +105,10 @@ it('adds the saved recording action only after capture ends and preserves it dur
         }),
         revoke: vi.fn().mockResolvedValue(undefined)
       },
-      projectRecordings: { status: vi.fn(async () => status) }
+      projectRecordings: {
+        status: vi.fn(async () => status),
+        read: vi.fn(async () => ({ receiving: saved }))
+      }
     }
   })
   await act(async () => {
@@ -135,4 +138,63 @@ it('adds the saved recording action only after capture ends and preserves it dur
     await vi.advanceTimersByTimeAsync(1000)
   })
   expect(screen.getByRole('button', { name: 'View recording' })).toBe(savedAction)
+})
+
+it('waits for the exact published reader before offering playback and caches a successful publication check', async () => {
+  vi.useFakeTimers()
+  const target = { projectId: 'p', sessionId: 's', runId: 'run' }
+  const saved = { projectId: 'p', sessionId: 's', artifactId: 'saved', versionId: 'v1' }
+  let published = false
+  const read = vi.fn(async () => {
+    if (!published) throw new Error('Artifact has not been published')
+    return { receiving: saved }
+  })
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: {
+      observations: {
+        open: vi.fn().mockResolvedValue({
+          viewerId: 'live',
+          target,
+          expiresAt: 999999,
+          url: `http://viewer-live.localhost:56789/__open_science_viewer?grant=${'a'.repeat(64)}`
+        }),
+        revoke: vi.fn().mockResolvedValue(undefined)
+      },
+      projectRecordings: {
+        status: vi.fn().mockResolvedValue({
+          state: 'finalized',
+          elapsedMs: 3000,
+          segments: 1,
+          bytes: 300,
+          droppedFrames: 0,
+          recordingId: 'one',
+          target: saved
+        }),
+        read
+      }
+    }
+  })
+  await act(async () => {
+    render(<RunObservationPreview title="Live project" target={target} isActive allowInteraction />)
+  })
+  expect(
+    screen.getByText('Recording saved. Playback will be available when this run finishes.')
+  ).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'View recording' })).toBeNull()
+  expect(read).toHaveBeenCalledWith({ target: saved })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+  expect(screen.queryByRole('button', { name: 'View recording' })).toBeNull()
+  published = true
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+  expect(screen.getByRole('button', { name: 'View recording' })).toBeTruthy()
+  const reads = read.mock.calls.length
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000)
+  })
+  expect(read).toHaveBeenCalledTimes(reads)
 })

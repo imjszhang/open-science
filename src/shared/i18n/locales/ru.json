@@ -7732,6 +7732,7 @@
     "Web recording timeline": "Шкала времени записи веб-страницы",
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "Запись завершилась досрочно. Сохранённые кадры остаются доступны. Можно начать новую запись.",
-    "Host-observed event": "Событие, наблюдаемое хостом"
+    "Host-observed event": "Событие, наблюдаемое хостом",
+    "Recording saved. Playback will be available when this run finishes.": "Запись сохранена. Воспроизведение станет доступно после завершения этого запуска."
   }
 }

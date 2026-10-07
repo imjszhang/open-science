@@ -686,3 +686,44 @@ describe('viewer-local retained capture images', () => {
     await expect(result.current.readImage('frame')).resolves.not.toBeNull()
   })
 })
+it.each(['collecting', 'completed'] as const)(
+  'uses execution publication phase, rather than the finished Notebook Run, to gate web playback: %s',
+  async (phase) => {
+    const client = makeClient()
+    vi.mocked(client.context).mockResolvedValue({
+      ...context,
+      presentation: 'browser',
+      canRecord: true
+    })
+    vi.mocked(client.history).mockResolvedValue({
+      coverage: 'process-local',
+      truncated: false,
+      snapshots: [{ ...snapshot, phase, run: { ...snapshot.run!, status: 'completed' } }]
+    })
+    vi.spyOn(client, 'inspectBrowserRecording').mockResolvedValue({
+      supported: false,
+      active: {
+        state: 'finalized',
+        recordingId: 'saved',
+        elapsedMs: 1200,
+        segments: 1,
+        bytes: 20,
+        droppedFrames: 0,
+        target: {
+          projectId: 'p',
+          sessionId: 's',
+          artifactId: 'saved-index',
+          versionId: 'saved-version'
+        }
+      }
+    })
+    render(<ViewerApp client={client} />)
+    const button = await screen.findByRole('button', { name: 'View recording' })
+    expect(button.hasAttribute('disabled')).toBe(phase === 'collecting')
+    expect(
+      Boolean(
+        screen.queryByText('Recording saved. Playback will be available when this run finishes.')
+      )
+    ).toBe(phase === 'collecting')
+  }
+)

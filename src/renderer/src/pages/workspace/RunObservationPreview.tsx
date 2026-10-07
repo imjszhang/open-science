@@ -141,6 +141,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
   const [access, setAccess] = useState<ViewerAccess>()
   const [openFailed, setOpenFailed] = useState(false)
   const [savedBrowserTarget, setSavedBrowserTarget] = useState<RecordedObservationTarget>()
+  const [publishedBrowserTargetKey, setPublishedBrowserTargetKey] = useState<string>()
+  const publishedBrowserTargets = useRef(new Set<string>())
+  const pendingBrowserReads = useRef(new Map<string, Promise<boolean>>())
   const [selectionFailed, setSelectionFailed] = useState<'read' | 'ask'>()
   const [retry, setRetry] = useState(0)
   const liveTarget = admission.mode === 'live' ? admission.target : undefined
@@ -176,8 +179,33 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
         const value = await window.api.projectRecordings.status({ viewerId: access.viewerId })
         // Keep the previous saved recording available during the next capture. Removing
         // its action row would change the project's capture rectangle mid-recording.
-        if (!disposed && value.target && ['finalized', 'partial', 'failed'].includes(value.state))
-          setSavedBrowserTarget(value.target)
+        if (!disposed && value.target && ['finalized', 'partial', 'failed'].includes(value.state)) {
+          const target = value.target
+          const key = targetKey(target)
+          setSavedBrowserTarget(target)
+          // A finalized encoder may still belong to a running execution whose artifacts are
+          // unpublished. The existing exact reader is authoritative; never relax its boundary.
+          if (!publishedBrowserTargets.current.has(key)) {
+            let checking = pendingBrowserReads.current.get(key)
+            if (!checking) {
+              checking = Promise.resolve()
+                .then(() => window.api.projectRecordings.read({ target }))
+                .then(
+                  (payload) => {
+                    if (targetKey(payload.receiving) !== key) return false
+                    publishedBrowserTargets.current.add(key)
+                    return true
+                  },
+                  () => false
+                )
+                .finally(() => pendingBrowserReads.current.delete(key))
+              pendingBrowserReads.current.set(key, checking)
+            }
+            await checking
+          }
+          if (!disposed && publishedBrowserTargets.current.has(key))
+            setPublishedBrowserTargetKey(key)
+        }
       } catch {
         /* Recording controls own errors. */
       }
@@ -398,20 +426,26 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
       ) : access ? (
         <>
           {savedBrowserTarget ? (
-            <div className="shrink-0 border-b border-border-200 px-3 py-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  showRecordedObservation(
-                    savedBrowserTarget,
-                    t('Project recording'),
-                    'web-recording'
-                  )
-                }
-              >
-                {t('View recording')}
-              </Button>
+            <div className="h-12 shrink-0 overflow-y-auto border-b border-border-200 px-3 py-2">
+              {publishedBrowserTargetKey === targetKey(savedBrowserTarget) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    showRecordedObservation(
+                      savedBrowserTarget,
+                      t('Project recording'),
+                      'web-recording'
+                    )
+                  }
+                >
+                  {t('View recording')}
+                </Button>
+              ) : (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {t('Recording saved. Playback will be available when this run finishes.')}
+                </p>
+              )}
             </div>
           ) : null}
           {recordingStatus?.archive ? (

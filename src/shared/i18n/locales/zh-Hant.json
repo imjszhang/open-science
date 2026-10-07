@@ -7265,6 +7265,7 @@
     "Web recording timeline": "網頁錄製時間軸",
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "錄製提前結束。已儲存的畫面仍可檢視，您可以開始新的錄製。",
-    "Host-observed event": "主機觀察到的事件"
+    "Host-observed event": "主機觀察到的事件",
+    "Recording saved. Playback will be available when this run finishes.": "錄製已儲存，執行結束後即可回放。"
   }
 }

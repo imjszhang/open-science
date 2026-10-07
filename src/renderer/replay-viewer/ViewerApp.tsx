@@ -310,6 +310,10 @@ export const ViewerApp = ({
           client={client}
           enabled={connection === 'connected' && snapshot.run?.status === 'running'}
           hostViewOpen={Boolean(access)}
+          playbackReady={
+            connection === 'connected' &&
+            ['completed', 'failed', 'cancelled', 'interrupted', 'timeout'].includes(snapshot.phase)
+          }
           onOpen={
             context.presentation === 'browser'
               ? async (status) => {

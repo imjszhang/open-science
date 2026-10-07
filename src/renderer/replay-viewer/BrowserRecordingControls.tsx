@@ -15,11 +15,14 @@ export const BrowserRecordingControls = ({
   client,
   enabled,
   hostViewOpen,
+  playbackReady = false,
   onOpen
 }: {
   client: ReplayViewerClient
   enabled: boolean
   hostViewOpen: boolean
+  /** True only after the live execution has settled its artifact publication. */
+  playbackReady?: boolean
   onOpen?: (status: BrowserRecordingStatus) => void | Promise<void>
 }): React.JSX.Element => {
   const { t } = useTranslation()
@@ -155,7 +158,7 @@ export const BrowserRecordingControls = ({
           <Button
             size="sm"
             variant="outline"
-            disabled={busy}
+            disabled={busy || !playbackReady}
             onClick={() => {
               setBusy(true)
               void Promise.resolve(onOpen(status))
@@ -167,6 +170,11 @@ export const BrowserRecordingControls = ({
           </Button>
         ) : null}
       </div>
+      {status?.target && terminal && !playbackReady ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          {t('Recording saved. Playback will be available when this run finishes.')}
+        </p>
+      ) : null}
       {status && ['recording', 'paused'].includes(status.state) ? (
         <p className="text-xs text-muted-foreground">
           {t('Stopping recording does not stop the experiment.')}

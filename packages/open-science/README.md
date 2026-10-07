@@ -488,6 +488,16 @@ const saved = await client.projectRecordings.stop({
   viewerId: viewer.viewerId,
   request: { requestId: 'stop-1', recordingId: recording.recordingId }
 })
+// `finalized` above describes capture, not Artifact publication. Keep the original execution
+// requestId from execute/executeOfflinePlan; the recording requestId is a different identity.
+const operationRef = { projectId, sessionId, requestId: executionRequestId }
+let operation = await client.execution.getOperation(operationRef)
+while (operation && ['admitting', 'running', 'cancelling'].includes(operation.status)) {
+  operation = await client.execution.waitOperation({ ...operationRef, timeoutMs: 30000 })
+}
+if (!operation || operation.recoveryPending) {
+  throw new Error('Inspect or recover the original execution publication before opening Replay.')
+}
 if (saved.target) {
   const playback = await client.projectRecordings.openRecorded({ target: saved.target })
   // Open playback.url in the host's browser panel; the SDK does not open it automatically.
@@ -501,8 +511,18 @@ if (saved.target) {
 
 `pause`, `resume`, and `stop` require an idempotent `requestId` and the `recordingId` returned by
 `start`. `status({ viewerId })` returns the latest recording even after its source page disappears.
-Stopping recording does not stop the experiment. Recorded segments are independently playable,
-bounded WebM Artifacts, indexed by ordinary `open-science-web-recording` JSON. The `.science`
+Stopping recording does not stop the experiment. A `finalized` recording has finished collecting
+and saving evidence; its Artifacts are published when the hosting execution or Agent turn ends and
+finalizes its outputs. Before that, `read` and `openRecorded` may return `unavailable` for the saved
+exact target. Use the original execution's `getOperation`/`waitOperation` reference to wait for a
+terminal status. An observation timeout only ends the wait. If output publication remains pending
+after termination, inspect or recover the original finalization; do not rerun the experiment or
+recording. Historical reads require published Versions and never acquire the producing turn's
+private read authority.
+
+Recorded segments are independently playable, bounded WebM Artifacts, indexed by ordinary
+`open-science-web-recording` JSON. Immutable checkpoints and the final index have distinct filenames;
+Replay discovery selects the final index or the newest available checkpoint. The `.science`
 container rules do not change. Import resolves media against receiving immutable Versions and
 checksums; recording timestamps never authorize a Notebook step, an executable page, or a service.
 

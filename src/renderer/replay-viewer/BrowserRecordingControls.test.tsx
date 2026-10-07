@@ -87,7 +87,13 @@ it('offers archived playback only after a receiving Artifact Version has been pu
   vi.mocked(client.inspectBrowserRecording).mockResolvedValue({ supported: false, active: saved })
   const open = vi.fn()
   render(
-    <BrowserRecordingControls client={client} enabled={false} hostViewOpen={false} onOpen={open} />
+    <BrowserRecordingControls
+      client={client}
+      enabled={false}
+      hostViewOpen={false}
+      playbackReady
+      onOpen={open}
+    />
   )
   fireEvent.click(await screen.findByRole('button', { name: 'View recording' }))
   expect(open).toHaveBeenCalledWith(saved)
@@ -106,4 +112,45 @@ it('keeps published partial footage available and permits a new recording', asyn
   expect(screen.getByRole('button', { name: 'Record webpage' }).hasAttribute('disabled')).toBe(
     false
   )
+})
+
+it('keeps saved footage unavailable until execution publication settles, without stopping the run', async () => {
+  const client = clientForTest()
+  const saved = {
+    ...status('finalized'),
+    target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }
+  }
+  vi.mocked(client.inspectBrowserRecording).mockResolvedValue({ supported: true, active: saved })
+  const open = vi.fn()
+  const cancel = vi.spyOn(client, 'cancel')
+  const { rerender } = render(
+    <BrowserRecordingControls
+      client={client}
+      enabled
+      hostViewOpen
+      playbackReady={false}
+      onOpen={open}
+    />
+  )
+  await screen.findByText('Recording saved. Playback will be available when this run finishes.')
+  const button = screen.getByRole('button', { name: 'View recording' })
+  expect(button.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(button)
+  expect(open).not.toHaveBeenCalled()
+  expect(cancel).not.toHaveBeenCalled()
+  rerender(
+    <BrowserRecordingControls
+      client={client}
+      enabled={false}
+      hostViewOpen={false}
+      playbackReady
+      onOpen={open}
+    />
+  )
+  expect(
+    screen.queryByText('Recording saved. Playback will be available when this run finishes.')
+  ).toBeNull()
+  expect(button.hasAttribute('disabled')).toBe(false)
+  fireEvent.click(button)
+  expect(open).toHaveBeenCalledWith(saved)
 })
