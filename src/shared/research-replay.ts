@@ -58,8 +58,23 @@ export type ResearchReplayRecording = {
   target: RecordedObservationTarget
   name: string
 }
+export type ResearchReplayRecordingCoverage = {
+  recordingId: string
+  target: RecordedObservationTarget
+  startedAt: number
+  endedAt: number
+  ranges: Array<{ startedAt: number; endedAt: number }>
+}
+export type ResearchReplayTiming = {
+  recordedTimeOrigins: Readonly<Record<string, number>>
+  coverage: Readonly<Record<string, ResearchReplayRecordingCoverage[]>>
+  timelineCoverage: Readonly<Record<string, Array<{ startedAt: number; endedAt: number }>>>
+  unalignedBranchIds: readonly string[]
+}
 export type ResearchReplayDocument = {
   document: ReplayDocument
+  /** The source owner computes this before collapsing technical steps; consumers must not derive it again. */
+  timing: ResearchReplayTiming
   supportingResourceIds?: string[]
   recordings: ResearchReplayRecording[]
   recordingsTruncated: boolean

@@ -136,8 +136,18 @@ export class ResearchReplayService {
                 ? await this.dependencies.recordings.readProject(candidate.target)
                 : await this.dependencies.recordings.read(candidate.target)
           supportingResourceIds.add(candidate.resource.id)
+          const frameKeys =
+            'indexChecksum' in payload
+              ? new Set(payload.recording.media.map((media) => media.mediaKey))
+              : 'archive' in payload
+                ? new Set(
+                    payload.archive.media
+                      .filter((media) => media.capture)
+                      .map((media) => media.mediaKey)
+                  )
+                : new Set(payload.recording.frames.map((frame) => frame.mediaKey))
           for (const media of payload.media) {
-            if (media.versionId) {
+            if (media.versionId && frameKeys.has(media.mediaKey)) {
               const resource = document.resources.find(
                 (item) =>
                   item.versionId === media.versionId &&
@@ -178,6 +188,12 @@ export class ResearchReplayService {
         caller,
         data: {
           document: timeline.document,
+          timing: {
+            recordedTimeOrigins: timeline.recordedTimeOrigins,
+            coverage: timeline.coverage,
+            timelineCoverage: timeline.timelineCoverage,
+            unalignedBranchIds: timeline.unalignedBranchIds
+          },
           supportingResourceIds: [...supportingResourceIds],
           recordings,
           recordingsTruncated: candidates.length > 512 || recordings.length >= 64,

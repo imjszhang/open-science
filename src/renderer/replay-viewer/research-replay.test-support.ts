@@ -4,6 +4,7 @@ import type {
   ResearchReplayPosition,
   ResearchReplaySelection
 } from '../../shared/research-replay'
+import { createResearchReplayTimeline } from '../src/lib/replay/recorded-time'
 import { browserPayloadFixture } from '../src/pages/workspace/replay/BrowserRecording.test-support'
 
 const step = (id: string, at: number, content: string): ReplayStep => ({
@@ -67,8 +68,15 @@ export function researchFixture(): ResearchReplayDocument {
     resources: [],
     issues: []
   }
+  const projected = createResearchReplayTimeline(document, [researchRecordingFixture()])
   return {
-    document,
+    document: projected.document,
+    timing: {
+      recordedTimeOrigins: projected.recordedTimeOrigins,
+      coverage: projected.coverage,
+      timelineCoverage: projected.timelineCoverage,
+      unalignedBranchIds: projected.unalignedBranchIds
+    },
     recordings: [
       {
         id: 'index-version',

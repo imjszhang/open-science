@@ -11,7 +11,6 @@ import {
   projectLegacyObservationToTrack,
   projectRecordingToTrack
 } from '../../shared/project-recording'
-import { createResearchReplayTimeline } from '../src/lib/replay/recorded-time'
 import { recordedMediaResource } from '../src/lib/replay/recorded-results'
 import type { ReplayNotebookRunReader } from '../src/lib/replay/notebook-details'
 import { ErrorNotice } from '../src/components/error-notice'
@@ -85,16 +84,10 @@ const ResearchReplayContent = ({
   unavailable: boolean
 }): React.JSX.Element => {
   const { t } = useTranslation()
-  const timed = useMemo(
-    () =>
-      createResearchReplayTimeline(
-        research.document,
-        recordings.flatMap(({ payload }) => ('indexChecksum' in payload ? [payload] : [])),
-        research.supportingResourceIds
-      ),
-    [research.document, research.supportingResourceIds, recordings]
-  )
-  const document = timed.document
+  // Main computes timing while original publication/branch evidence still exists. Applying the
+  // projection again after technical-step removal can lose attribution and trim valid coverage.
+  const timed = research.timing
+  const document = research.document
   const [initialView] = useState(() => restoreView(context.viewerId, document))
   const [selection, setSelection] = useState<ResearchReplaySelection>()
   const [selectionFailed, setSelectionFailed] = useState(false)
@@ -178,8 +171,8 @@ const ResearchReplayContent = ({
     [client]
   )
   const results = useMemo(
-    () => researchResults(document, recordings, timed.supportingResourceIds),
-    [document, recordings, timed.supportingResourceIds]
+    () => researchResults(document, recordings, research.supportingResourceIds),
+    [document, recordings, research.supportingResourceIds]
   )
   const current = recordings.find(({ descriptor }) => descriptor.id === recordingId)
   const track = useMemo(

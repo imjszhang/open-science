@@ -78,9 +78,40 @@ const recordingSchema = z
     name: z.string().max(4096)
   })
   .strict()
+const recordedRangeSchema = z
+  .object({
+    startedAt: z.number().finite().nonnegative(),
+    endedAt: z.number().finite().nonnegative()
+  })
+  .strict()
+  .refine((range) => range.endedAt >= range.startedAt)
+const timingSchema = z
+  .object({
+    recordedTimeOrigins: z.record(z.string().min(1).max(512), z.number().finite().nonnegative()),
+    coverage: z.record(
+      z.string().min(1).max(512),
+      z
+        .array(
+          z
+            .object({
+              recordingId: z.string().min(1).max(256),
+              target: recordedObservationTargetSchema,
+              startedAt: z.number().finite().nonnegative(),
+              endedAt: z.number().finite().nonnegative(),
+              ranges: z.array(recordedRangeSchema).max(20000)
+            })
+            .strict()
+        )
+        .max(64)
+    ),
+    timelineCoverage: z.record(z.string().min(1).max(512), z.array(recordedRangeSchema).max(20000)),
+    unalignedBranchIds: z.array(z.string().min(1).max(512)).max(512)
+  })
+  .strict()
 const researchDocumentSchema: z.ZodType<ResearchReplayDocument> = z
   .object({
     document: documentSchema,
+    timing: timingSchema,
     recordings: z.array(recordingSchema).max(64),
     recordingsTruncated: z.boolean(),
     unavailableRecordingIds: z.array(z.string().max(512)).max(512),

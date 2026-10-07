@@ -61,18 +61,19 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function makeClient(): {
+function makeClient(
+  research = researchFixture(),
+  recording = researchRecordingFixture()
+): {
   client: ResearchReplayClient
   fetcher: ReturnType<typeof vi.fn<typeof fetch>>
 } {
-  const research = researchFixture()
-  const timed = createResearchReplayTimeline(research.document, [researchRecordingFixture()])
   const fetcher = vi.fn<typeof fetch>(async (path, options) => {
     if (path === '/api/research/document') return json(research)
     if (path === '/api/research/selection') return json(null)
-    if (path === '/api/research/read') return json(researchRecordingFixture())
+    if (path === '/api/research/read') return json(recording)
     if (path === '/api/research/select')
-      return json(researchSelectionFixture(timed.document, JSON.parse(String(options?.body))))
+      return json(researchSelectionFixture(research.document, JSON.parse(String(options?.body))))
     throw new Error(`Unexpected endpoint ${path}`)
   })
   return { client: new ResearchReplayClient(fetcher), fetcher }
@@ -129,6 +130,84 @@ describe('complete browser research Replay', () => {
         .map(([path]) => String(path))
         .every((path) => path.startsWith('/api/research/'))
     ).toBe(true)
+  })
+  it('preserves source-owned branch attribution and trailing duration after technical publication steps were removed', async () => {
+    const research = researchFixture()
+    const recording = researchRecordingFixture()
+    recording.recording.startedAt = 20000
+    const main = research.document.branches[0]
+    const resource = {
+      id: 'published-index',
+      source: 'artifact' as const,
+      name: 'index.json',
+      ...recording.receiving,
+      availability: 'recorded' as const
+    }
+    research.document.resources.push(resource)
+    main.steps.push({
+      id: 'technical-publication',
+      branchId: main.id,
+      kind: 'artifact',
+      recordedAt: 27000,
+      startMs: 0,
+      endMs: 0,
+      durationMs: 0,
+      evidence: [],
+      activities: [],
+      runs: [],
+      resourceIds: [resource.id],
+      issues: []
+    })
+    research.document.branches.push({
+      ...structuredClone(main),
+      id: 'other',
+      steps: main.steps
+        .filter((step) => step.id !== 'technical-publication')
+        .map((step) => ({ ...step, id: `other-${step.id}`, branchId: 'other' }))
+    })
+    // The service associates this exact index publication with main before suppressing it.
+    const original = createResearchReplayTimeline(research.document, [recording], [resource.id])
+    research.document = original.document
+    research.supportingResourceIds = [...original.supportingResourceIds]
+    research.timing = {
+      recordedTimeOrigins: original.recordedTimeOrigins,
+      coverage: original.coverage,
+      timelineCoverage: original.timelineCoverage,
+      unalignedBranchIds: original.unalignedBranchIds
+    }
+    expect(
+      research.document.branches[0].steps.some((step) => step.id === 'technical-publication')
+    ).toBe(false)
+    expect(research.document.branches[0].durationMs).toBe(26000)
+    expect(research.timing.coverage.main).toHaveLength(1)
+    // Reprojection cannot recover the suppressed evidence and is deliberately non-idempotent.
+    const repeated = createResearchReplayTimeline(
+      research.document,
+      [recording],
+      research.supportingResourceIds
+    )
+    expect(repeated.coverage.main).toEqual([])
+    expect(repeated.document.branches[0].durationMs).toBe(10000)
+    const { client } = makeClient(research, recording)
+    render(<ResearchReplayViewerApp context={context} client={client} />)
+    await screen.findByTestId('research-replay-viewer')
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
+    ).toBe('26000')
+    fireEvent.click(screen.getByRole('button', { name: 'Project replay' }))
+    await screen.findByText('The project recording has not started yet.')
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to recorded footage' }))
+    await screen.findByLabelText('Recorded webpage')
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe('19000')
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
+    ).toBe('26000')
+    fireEvent.click(screen.getByRole('button', { name: 'Results' }))
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
+    ).toBe('26000')
   })
   it('freezes a selected step while later navigation continues and restores only this viewer', async () => {
     const { client } = makeClient()

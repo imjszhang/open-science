@@ -423,7 +423,7 @@ describe('useRecordedMaterials read-only ownership', () => {
     expectNoExecution()
   })
 
-  it('discovery finishing only adds a choice; revealing a material requires an explicit request', async () => {
+  it('preselects saved source footage after discovery without changing the material tab or overriding an explicit choice', async () => {
     const doc = documentFixture()
     const { rerender } = render(
       <Harness document={doc} discovery={{ ...discovery(), loading: true }} />
@@ -436,9 +436,26 @@ describe('useRecordedMaterials read-only ownership', () => {
       />
     )
     expect(screen.getByRole('option', { name: 'Independent project recording' })).toBeTruthy()
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('')
+    await screen.findByRole('img')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
+      JSON.stringify(receiving)
+    )
     expect(screen.getByTestId('material-request').textContent).toBe('none')
-    expect(api.observations.readProjectRecording).not.toHaveBeenCalled()
+    expect(api.observations.readProjectRecording).toHaveBeenCalledTimes(1)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '' } })
+    expect(
+      screen.queryByText(
+        'No project images were recorded. Other research materials remain available.'
+      )
+    ).toBeNull()
+    rerender(
+      <Harness
+        document={doc}
+        discovery={discovery([candidate()])}
+        externalCandidate={candidate()}
+      />
+    )
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'Choose discovered recording' }))
     await screen.findByRole('img')
     expect(JSON.parse(screen.getByTestId('material-request').textContent!)).toEqual({
@@ -616,5 +633,99 @@ it('keeps an explicitly opened checkpoint on its exact receiving version when di
     format: 'web-recording'
   })
   expect(screen.queryByRole('option', { name: checkpoint.resource.name })).toBeNull()
+  expectNoExecution()
+})
+
+it('freezes captured image support IDs before playback without hiding scientific report attachments', async () => {
+  const document = documentFixture()
+  const payload = projectPayload()
+  payload.recording.media.push({
+    mediaKey: 'report',
+    name: 'report.csv',
+    mimeType: 'text/csv',
+    checksum: 'b'.repeat(64),
+    sizeBytes: 20,
+    sourceVersionId: 'author-report'
+  })
+  const saved = {
+    ...payload,
+    media: [
+      ...payload.media,
+      {
+        mediaKey: 'report',
+        artifactId: 'receiver-report-artifact',
+        versionId: 'receiver-report-version',
+        checksum: 'b'.repeat(64),
+        sizeBytes: 20
+      }
+    ]
+  }
+  api.observations.readProjectRecording.mockResolvedValue(saved)
+  document.resources = [
+    candidate().resource,
+    {
+      ...candidate().resource,
+      id: 'frame-resource',
+      artifactId: 'receiver-image-artifact',
+      versionId: 'receiver-image-version',
+      name: 'frame.png'
+    },
+    {
+      ...candidate().resource,
+      id: 'report-resource',
+      artifactId: 'receiver-report-artifact',
+      versionId: 'receiver-report-version',
+      name: 'report.csv'
+    }
+  ]
+  document.branches = [
+    {
+      id: 'main',
+      kind: 'conversation',
+      durationMs: 10000,
+      steps: [
+        {
+          id: 'request',
+          kind: 'message',
+          branchId: 'main',
+          startMs: 0,
+          endMs: 1000,
+          durationMs: 1000,
+          recordedAt: 0,
+          evidence: [],
+          resourceIds: [],
+          runs: [],
+          activities: [],
+          issues: []
+        },
+        ...document.resources.map((resource, index) => ({
+          id: resource.id,
+          kind: 'artifact' as const,
+          branchId: 'main',
+          startMs: 1000 + index * 1000,
+          endMs: 2000 + index * 1000,
+          durationMs: 1000,
+          recordedAt: 10 + index * 10,
+          evidence: [],
+          resourceIds: [resource.id],
+          runs: [],
+          activities: [],
+          issues: []
+        }))
+      ]
+    }
+  ]
+  const catalog = discovery([candidate()])
+  const { result } = renderHook(() => useRecordedMaterials(document, catalog))
+  await waitFor(() => expect(result.current.timingReady).toBe(true))
+  expect(result.current.playbackDocument?.branches[0].steps.map((step) => step.id)).toEqual([
+    'request',
+    'report-resource'
+  ])
+  expect(api.observations.readProjectRecording).toHaveBeenCalledTimes(1)
+  expect(result.current.request).toBeUndefined()
+  const frozen = result.current.playbackDocument
+  act(() => result.current.choose(candidate()))
+  expect(result.current.playbackDocument).toBe(frozen)
   expectNoExecution()
 })

@@ -61,6 +61,28 @@ describe('scoped research browser reads', () => {
       kind: 'invalid-response'
     })
   })
+  it('requires authoritative timing instead of deriving a new clock from filtered history', async () => {
+    const research = researchFixture()
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ ...research, timing: undefined }))
+      .mockResolvedValueOnce(
+        json({
+          ...research,
+          timing: {
+            ...research.timing,
+            timelineCoverage: { main: [{ startedAt: 3000, endedAt: 1000 }] }
+          }
+        })
+      )
+    const client = new ResearchReplayClient(fetcher)
+    await expect(client.document(research.document.source)).rejects.toMatchObject({
+      kind: 'invalid-response'
+    })
+    await expect(client.document(research.document.source)).rejects.toMatchObject({
+      kind: 'invalid-response'
+    })
+  })
   it('saves the exact click position and rejects substituted selections', async () => {
     const research = researchFixture(),
       position = {

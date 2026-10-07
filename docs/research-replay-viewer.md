@@ -23,6 +23,9 @@ Contemporaneous operations retain their real completion times; source records re
 Branches with missing or invalid timestamps retain step presentation rather than fabricated timing.
 Verified recording indexes and media chunks are supporting attachments instead of separate research
 chapters; their exact versions remain available in the results catalog and source records.
+The external viewer receives the already projected clock and coverage with its snapshot. It does
+not infer them again from the filtered chapters. Reports and datasets referenced by a recording
+remain ordinary results; only its index and captured frames or video segments are technical media.
 
 Playback state now carries an optional application-local clock mode. Existing states without this
 field are presentation-time states. Crossing to recorded time relocates to the saved evidence/step

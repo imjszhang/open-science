@@ -70,6 +70,7 @@ export function useRecordedMaterials(
   const [history, setHistory] = useState<ResearchDemoHistory>()
   const [historyFailed, setHistoryFailed] = useState(false)
   const [selected, setSelected] = useState<Candidate>()
+  const [selectionInitialized, setSelectionInitialized] = useState(false)
   const [request, setRequest] = useState<{ id: string; revision: number }>()
   const [payload, setPayload] = useState<RecordedObservationPayload | RecordedProjectPayload>()
   const [browserPayload, setBrowserPayload] = useState<RecordedBrowserPayload>()
@@ -77,12 +78,17 @@ export function useRecordedMaterials(
     sourceKey: string
     timeline: ResearchReplayTimeline
     recordings: RecordedBrowserPayload[]
+    payloads: Map<
+      string,
+      RecordedObservationPayload | RecordedProjectPayload | RecordedBrowserPayload
+    >
   }>()
   const [loadFailed, setLoadFailed] = useState(false)
   const [loadedSourceKey, setLoadedSourceKey] = useState(sourceKey)
   if (loadedSourceKey !== sourceKey) {
     setLoadedSourceKey(sourceKey)
     setSelected(undefined)
+    setSelectionInitialized(false)
     setPayload(undefined)
     setBrowserPayload(undefined)
     setTiming(undefined)
@@ -138,6 +144,7 @@ export function useRecordedMaterials(
   )
   const choose = useCallback((candidate: Candidate, reveal = true) => {
     askRequest.current?.abort()
+    setSelectionInitialized(true)
     setSelected(candidate)
     setPayload(undefined)
     setBrowserPayload(undefined)
@@ -164,26 +171,66 @@ export function useRecordedMaterials(
     }
     let disposed = false
     const recordings: RecordedBrowserPayload[] = []
-    const candidates = discoveredRecordings.filter((item) => item.format === 'web-recording')
+    const payloads = new Map<
+      string,
+      RecordedObservationPayload | RecordedProjectPayload | RecordedBrowserPayload
+    >()
+    const supporting = new Set(discoveredSupportingIds)
+    const candidates = discoveredRecordings
     let index = 0
     const worker = async (): Promise<void> => {
       while (!disposed && index < candidates.length) {
         const candidate = candidates[index++]
         try {
-          const value = await window.api.projectRecordings.read({ target: candidate.target })
-          if (!disposed) recordings.push(value)
+          const value =
+            candidate.format === 'web-recording'
+              ? await window.api.projectRecordings.read({ target: candidate.target })
+              : candidate.format === 'project-recording'
+                ? await window.api.observations.readProjectRecording({ target: candidate.target })
+                : await window.api.observations.readRecorded({ target: candidate.target })
+          if (disposed || !value) continue
+          payloads.set(JSON.stringify(candidate.target), value)
+          supporting.add(candidate.resource.id)
+          if ('indexChecksum' in value) recordings.push(value)
+          else {
+            const frameKeys =
+              'archive' in value
+                ? new Set(
+                    value.archive.media
+                      .filter((media) => media.capture)
+                      .map((media) => media.mediaKey)
+                  )
+                : new Set(value.recording.frames.map((frame) => frame.mediaKey))
+            for (const media of value.media) {
+              if (!media.versionId || !frameKeys.has(media.mediaKey)) continue
+              const resource = document.resources.find(
+                (item) =>
+                  item.projectId === value.receiving.projectId &&
+                  item.sessionId === value.receiving.sessionId &&
+                  item.versionId === media.versionId
+              )
+              if (resource) supporting.add(resource.id)
+            }
+          }
         } catch {
           // Missing footage does not block the original conversation and Notebook.
         }
       }
     }
     void Promise.all(Array.from({ length: Math.min(2, candidates.length) }, worker)).then(() => {
-      if (!disposed)
-        setTiming({
-          sourceKey,
-          timeline: createResearchReplayTimeline(document, recordings, discoveredSupportingIds),
-          recordings
-        })
+      if (disposed) return
+      setTiming({
+        sourceKey,
+        timeline: createResearchReplayTimeline(document, recordings, [...supporting]),
+        recordings,
+        payloads
+      })
+      if (!selectionInitialized) {
+        setSelectionInitialized(true)
+        const first =
+          candidates.find((candidate) => candidate.format === 'web-recording') ?? candidates[0]
+        if (first) choose(first, false)
+      }
     })
     return () => {
       disposed = true
@@ -197,13 +244,23 @@ export function useRecordedMaterials(
     discoveredRecordings,
     discoveredSupportingIds,
     discoverMore,
-    timing?.sourceKey
+    timing?.sourceKey,
+    selectionInitialized,
+    choose
   ])
+  const prepared = timing?.sourceKey === sourceKey ? timing : undefined
+  const timed = prepared?.timeline
   useEffect(() => {
     if (selected?.format !== 'web-recording') return
+    if (!selected.localHistory && !prepared) return
+    const saved = prepared?.payloads.get(JSON.stringify(selected.target))
     let disposed = false
     void Promise.resolve()
-      .then(() => window.api.projectRecordings.read({ target: selected.target }))
+      .then(() =>
+        saved && 'indexChecksum' in saved
+          ? saved
+          : window.api.projectRecordings.read({ target: selected.target })
+      )
       .then(
         (value) => {
           if (!disposed) setBrowserPayload(value)
@@ -215,10 +272,11 @@ export function useRecordedMaterials(
     return () => {
       disposed = true
     }
-  }, [selected])
-  const timed = timing?.sourceKey === sourceKey ? timing.timeline : undefined
+  }, [selected, prepared])
   useEffect(() => {
     if (!selected || selected.format === 'web-recording') return
+    if (!selected.localHistory && !prepared) return
+    const saved = prepared?.payloads.get(JSON.stringify(selected.target))
     let disposed = false
     const load =
       selected.format === 'project-recording'
@@ -226,6 +284,7 @@ export function useRecordedMaterials(
         : window.api?.observations?.readRecorded
     void Promise.resolve()
       .then<RecordedObservationPayload | RecordedProjectPayload>(() => {
+        if (saved && !('indexChecksum' in saved)) return saved
         if (!load) throw new Error('Recording reader unavailable')
         return load({ target: selected.target })
       })
@@ -240,7 +299,7 @@ export function useRecordedMaterials(
     return () => {
       disposed = true
     }
-  }, [selected])
+  }, [selected, prepared])
   const track = useMemo(
     () =>
       payload
@@ -337,6 +396,7 @@ export function useRecordedMaterials(
           if (next) choose(next, false)
           else {
             askRequest.current?.abort()
+            setSelectionInitialized(true)
             setSelected(undefined)
             setPayload(undefined)
             setBrowserPayload(undefined)
@@ -512,9 +572,11 @@ export function useRecordedMaterials(
                   />
                 ) : (
                   <p className="p-3 text-sm text-muted-foreground">
-                    {t(
-                      'No project images were recorded. Other research materials remain available.'
-                    )}
+                    {candidates.length && !selected
+                      ? t('Choose saved project evidence. No environment is started.')
+                      : t(
+                          'No project images were recorded. Other research materials remain available.'
+                        )}
                   </p>
                 )))
               )}
