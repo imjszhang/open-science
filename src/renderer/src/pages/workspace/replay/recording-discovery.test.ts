@@ -5,7 +5,8 @@ import {
   discoverRecordingPage,
   recordingCandidates,
   mergeRecordingCandidates,
-  RECORDING_DISCOVERY_PAGE_SIZE
+  RECORDING_DISCOVERY_PAGE_SIZE,
+  type RecordingCandidate
 } from './recording-discovery'
 
 const source = { projectId: 'receiver-project', sessionId: 'receiver-session' }
@@ -191,15 +192,17 @@ describe('publisher web recording checkpoint catalog', () => {
     expect(page.unavailable).toBe(2)
   })
   it('replaces a checkpoint with a final discovered on a later page without mutating either exact target', async () => {
-    const candidates = recordingCandidates(
-      [
-        index(1),
-        ...Array.from({ length: 31 }, (_, n) => resource({ versionId: `ordinary-${n}` })),
-        index(8),
-        index(null)
-      ],
-      source
-    )
+    // Exercise an incremental feed in which the final index only appears on a later page,
+    // independently of the initial complete-resource-list probe prioritization.
+    const candidates: RecordingCandidate[] = [
+      index(1),
+      ...Array.from({ length: 31 }, (_, n) => resource({ versionId: `ordinary-${n}` })),
+      index(8),
+      index(null)
+    ].map((resource) => ({
+      resource,
+      target: { ...source, artifactId: resource.artifactId!, versionId: resource.versionId! }
+    }))
     const read = vi.fn(async ({ versionId }) =>
       versionId.startsWith('ordinary-')
         ? { ...archive, content: '{"ordinary":true}', truncated: false }
@@ -251,17 +254,75 @@ describe('publisher web recording checkpoint catalog', () => {
         return web()
       })
     )
+    expect(page.recordings).toHaveLength(5)
     expect(
       page.recordings.map((candidate) => [candidate.target.versionId, candidate.format])
-    ).toEqual([
-      ['version-final', 'web-recording'],
-      ['version-2', 'web-recording'],
-      ['version-3', 'web-recording'],
-      ['version-4', 'project-recording'],
-      ['version-5', undefined]
+    ).toEqual(
+      expect.arrayContaining([
+        ['version-final', 'web-recording'],
+        ['version-2', 'web-recording'],
+        ['version-3', 'web-recording'],
+        ['version-4', 'project-recording'],
+        ['version-5', undefined]
+      ])
+    )
+    expect(
+      page.recordings.find((candidate) => candidate.target.versionId === 'version-2')?.browserIndex
+    ).toBeUndefined()
+    expect(
+      page.recordings.find((candidate) => candidate.target.versionId === 'version-3')?.browserIndex
+    ).toBeUndefined()
+  })
+  it.each([true, false])(
+    'finds the final or newest checkpoint within the first bounded page (final: %s)',
+    async (includeFinal) => {
+      const resources = [
+        resource({ versionId: 'ordinary-before' }),
+        ...Array.from({ length: 1200 }, (_, n) => index(n + 1)),
+        resource({ versionId: 'legacy-middle', name: 'project-recording.json' }),
+        ...(includeFinal ? [index(null)] : []),
+        resource({ versionId: 'ordinary-after' })
+      ]
+      const candidates = recordingCandidates(resources, source)
+      const read = vi.fn(async () => web())
+      const first = await discoverRecordingPage(candidates, read)
+      expect(read).toHaveBeenCalledTimes(RECORDING_DISCOVERY_PAGE_SIZE)
+      expect(first.recordings.map((candidate) => candidate.target.versionId)).toEqual([
+        includeFinal ? 'version-final' : 'version-1200'
+      ])
+      expect(
+        candidates
+          .filter((candidate) => !candidate.resource.name.startsWith('web-recording-'))
+          .map((candidate) => candidate.target.versionId)
+      ).toEqual(['ordinary-before', 'legacy-middle', 'ordinary-after'])
+      expect(
+        candidates.every(
+          (candidate) => candidate.format === undefined && candidate.browserIndex === undefined
+        )
+      ).toBe(true)
+    }
+  )
+  it('only prioritizes strict generated names and still rejects ordinary JSON with a generated filename', async () => {
+    const candidates = recordingCandidates(
+      [
+        resource({ versionId: 'ordinary', name: 'ordinary.json' }),
+        index(10, { name: `web-recording-${recordingId}-checkpoint-010.json` }),
+        index(100, { name: 'web-recording-not-a-uuid.json' }),
+        index(null)
+      ],
+      source
+    )
+    expect(candidates.map((candidate) => candidate.target.versionId)).toEqual([
+      'version-final',
+      'ordinary',
+      'version-10',
+      'version-100'
     ])
-    expect(page.recordings[1].browserIndex).toBeUndefined()
-    expect(page.recordings[2].browserIndex).toBeUndefined()
+    const page = await discoverRecordingPage(
+      candidates,
+      vi.fn(async () => ({ ...archive, content: '{"ordinary":true}', truncated: false }))
+    )
+    expect(page.recordings).toEqual([])
   })
   it('groups complete content headers too, never an ID outside the verified root header', async () => {
     const page = await discoverRecordingPage(

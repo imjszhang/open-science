@@ -16,6 +16,17 @@ import {
 
 export const RECORDING_DISCOVERY_PAGE_SIZE = 32
 export const RECORDING_DISCOVERY_PREVIEW_BYTES = 4096
+const publisherRecordingIdPattern = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+const publisherIndexName = new RegExp(
+  `^web-recording-${publisherRecordingIdPattern}(?:-checkpoint-([1-9][0-9]*))?\\.json$`
+)
+const recordingProbePriority = (name: string): number => {
+  const match = publisherIndexName.exec(name)
+  if (!match) return 0
+  if (!match[1]) return Infinity
+  const checkpoint = Number(match[1])
+  return Number.isSafeInteger(checkpoint) ? checkpoint : 0
+}
 export type RecordingDiscoverySource = { projectId: string; sessionId: string }
 export type RecordingCandidate = {
   resource: ReplayResource
@@ -81,7 +92,17 @@ export const recordingCandidates = (
     }
     if (!previous) candidates.set(target.versionId, { resource, target })
   }
-  return [...candidates.values()].filter(({ target }) => !conflicting.has(target.versionId))
+  return (
+    [...candidates.values()]
+      .filter(({ target }) => !conflicting.has(target.versionId))
+      // Prioritize likely final indexes before potentially thousands of checkpoints. Names only
+      // order the existing bounded content probes; they never assign a format or grant access.
+      .sort((left, right) => {
+        const a = recordingProbePriority(left.resource.name)
+        const b = recordingProbePriority(right.resource.name)
+        return a === b ? 0 : a > b ? -1 : 1
+      })
+  )
 }
 
 const publisherBrowserIndex = (
@@ -91,7 +112,7 @@ const publisherBrowserIndex = (
 ): RecordingCandidate['browserIndex'] => {
   // Only our owner's UUID-based names participate. Arbitrary renamed/imported material remains
   // independently discoverable. This bounded header inspection confers no reader authority.
-  const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+  const uuid = publisherRecordingIdPattern
   let recordingId: unknown
   if (complete) {
     try {

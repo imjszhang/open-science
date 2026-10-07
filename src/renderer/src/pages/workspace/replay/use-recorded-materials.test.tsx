@@ -485,7 +485,7 @@ describe('useRecordedMaterials read-only ownership', () => {
   })
 })
 
-it('replaces discovered web checkpoints across pages without retaining duplicate catalog entries', async () => {
+it('prioritizes the final web index and keeps its catalog stable while checking later pages', async () => {
   const recordingId = 'fc7a7883-8c41-4c55-8b32-3a15ef8a7021'
   const document = documentFixture()
   document.resources = Array.from({ length: 34 }, (_, n) => ({
@@ -513,14 +513,12 @@ it('replaces discovered web checkpoints across pages without retaining duplicate
   }))
   const { result } = renderHook(() => useRecordingDiscovery(document))
   await waitFor(() =>
-    expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-0'])
+    expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-33'])
   )
   expect(result.current.unchecked).toBe(2)
   act(() => result.current.loadMore())
-  await waitFor(() =>
-    expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-33'])
-  )
-  expect(result.current.unchecked).toBe(0)
+  await waitFor(() => expect(result.current.unchecked).toBe(0))
+  expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-33'])
   expect(api.observations.openRecorded).not.toHaveBeenCalled()
 })
 
