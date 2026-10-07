@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { researchReplayTargetSchema } from '../../shared/research-replay'
 import {
   browserRecordingMomentSchema,
   browserRecordingStatusSchema,
@@ -78,7 +79,23 @@ const recordedContextSchema = liveContextSchema.extend({
   canCapture: z.literal(false).optional(),
   canRecord: z.literal(false).optional()
 })
-const contextSchema = z.union([liveContextSchema, recordedContextSchema])
+const researchContextSchema = z
+  .object({
+    viewerId: id,
+    mode: z.literal('research'),
+    target: researchReplayTargetSchema,
+    expiresAt: z.number().finite(),
+    presentation: z.enum(['desktop', 'browser']).optional(),
+    locale: z.enum(LOCALES).optional(),
+    canInteract: z.literal(false),
+    canCancel: z.literal(false),
+    canReadArtifacts: z.boolean(),
+    canCapture: z.literal(false).optional(),
+    canRecord: z.literal(false).optional()
+  })
+  .strict()
+const contextSchema = z.union([liveContextSchema, recordedContextSchema, researchContextSchema])
+export type ResearchReplayViewerContext = z.infer<typeof researchContextSchema>
 export type RecordedReplayViewerContext = z.infer<typeof recordedContextSchema>
 export type ReplayViewerContext = z.infer<typeof contextSchema>
 const historySchema = z
@@ -288,7 +305,7 @@ const imageTypes: Record<string, string> = {
 /** Fixed viewer-relative endpoints only. No token, destination URL or target scope enters a call. */
 export class ReplayViewerClient {
   constructor(private readonly fetcher: typeof fetch = (...args) => fetch(...args)) {}
-  private async request(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+  protected async request(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
     let response: Response
     try {
       response = await this.fetcher(path, {
@@ -312,7 +329,7 @@ export class ReplayViewerClient {
       )
     return response
   }
-  private async json<T>(
+  protected async json<T>(
     path: string,
     schema: z.ZodType<T>,
     body?: unknown,
@@ -709,7 +726,7 @@ export class ReplayViewerClient {
     )
     return this.resourceBytes(response, resource)
   }
-  private async resourceBytes(
+  protected async resourceBytes(
     response: Response,
     resource: ReplayResource
   ): Promise<{ content: string; mimeType: string; truncated: boolean }> {
@@ -737,7 +754,7 @@ export class ReplayViewerClient {
   async readResource(resource: ReplayResource): Promise<ReplayPreparedResource> {
     return this.prepareResource(resource, () => this.artifact(resource))
   }
-  private async prepareResource(
+  protected async prepareResource(
     resource: ReplayResource,
     read: () => Promise<{ content: string; mimeType: string; truncated: boolean }>
   ): Promise<ReplayPreparedResource> {

@@ -1,3 +1,4 @@
+import { RESEARCH_REPLAY_METHODS, type ResearchReplayMethod } from '../../shared/research-replay'
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
@@ -171,6 +172,7 @@ type WebServerOptions = {
         | 'callManagedExecution'
         | 'callRunObservation'
         | 'callProjectRecordings'
+        | 'callResearchReplay'
         | 'callSessionPackages'
         | 'getSessionPlan'
         | 'respondSessionPlan'
@@ -1069,6 +1071,39 @@ const handleTaskApiRequest = async (
           idempotencyOwnerScope,
           body,
           () => tasks.callSessionPackages!(method, body)
+        )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        json(response, 200, { data })
+        return true
+      }
+      const researchReplayMatch = url.pathname.match(/^\/api\/v1\/replays\/([^/]+)$/)
+      if (
+        researchReplayMatch &&
+        request.method === 'POST' &&
+        RESEARCH_REPLAY_METHODS.includes(researchReplayMatch[1] as ResearchReplayMethod)
+      ) {
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '') ?? ''
+        if (
+          callerContext.location !== 'local' ||
+          !(peer === '::1' || (isIP(peer) === 4 && peer.startsWith('127.')))
+        )
+          throw new ManagedExecutionExternalError(
+            'unsupported_location',
+            'Research replay is local to this device.'
+          )
+        if (!tasks.callResearchReplay)
+          throw new ManagedExecutionExternalError('unavailable', 'Research replay is unavailable.')
+        const body = await readJsonBody(
+          request,
+          response,
+          requestBodyBudgetRegistry,
+          requestBodyClientId
+        )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const data = await tasks.callResearchReplay(
+          researchReplayMatch[1] as ResearchReplayMethod,
+          body
         )
         assertExternalAuthorizationCurrent(externalAuthorization)
         json(response, 200, { data })

@@ -9,9 +9,12 @@ import {
   useRunObservationQuestionStore
 } from '@/stores/run-observation-question-store'
 import { useObservationQuestionRecovery } from './use-observation-question-recovery'
-import type { ReplayDocument } from '../../../../../shared/replay'
+import type { ReplayDocument, ReplayResource } from '../../../../../shared/replay'
 import type { RecordedBrowserPayload } from '../../../../../shared/browser-recording'
-import { createBrowserRecordingReplayTimeline } from '@/lib/replay/recorded-time'
+import {
+  createResearchReplayTimeline,
+  type ResearchReplayTimeline
+} from '@/lib/replay/recorded-time'
 import type {
   RecordedObservationPayload,
   RecordedProjectPayload
@@ -26,10 +29,14 @@ import {
   recordedMediaResource,
   authorizedRecordedResultsReader
 } from '@/lib/replay/recorded-results'
-import { readRecordedResource } from './results/recorded-resource-reader'
+import {
+  readRecordedResource,
+  type RecordedResourceReader
+} from './results/recorded-resource-reader'
 import { readReplayResource } from './replay-resources'
 import { ResultsPanel, type ReplayResultEntry } from './results/ResultsPanel'
 import { ProjectReplay } from './ProjectReplay'
+import { RecordedFootageStatus } from './RecordedFootageStatus'
 import type { RecordingDiscovery } from './use-recording-discovery'
 import type { RecordingCandidate } from './recording-discovery'
 import type { ReplayMaterialView } from './ReplayStage'
@@ -39,7 +46,8 @@ type Candidate = RecordingCandidate & { localHistory?: boolean }
 export function useRecordedMaterials(
   document: ReplayDocument | undefined,
   discovery: RecordingDiscovery,
-  legacySource?: ResearchDemoSource
+  legacySource?: ResearchDemoSource,
+  onAskSourceFile?: (resource: ReplayResource) => Promise<void> | void
 ): {
   views: ReplayMaterialView[]
   choose: (candidate: RecordingCandidate) => void
@@ -47,11 +55,14 @@ export function useRecordedMaterials(
   playbackDocument?: ReplayDocument
   recordedTimeOrigins?: Readonly<Record<string, number>>
   playbackKey?: string
+  timingReady: boolean
+  timelineCoverage?: ResearchReplayTimeline['timelineCoverage']
 } {
   const { t } = useTranslation()
   const sourceKey = JSON.stringify([
     document?.source.projectId,
     document?.source.sessionId,
+    document?.source.fingerprint,
     legacySource
   ])
   const askRequest = useRef<AbortController | undefined>(undefined)
@@ -62,6 +73,11 @@ export function useRecordedMaterials(
   const [request, setRequest] = useState<{ id: string; revision: number }>()
   const [payload, setPayload] = useState<RecordedObservationPayload | RecordedProjectPayload>()
   const [browserPayload, setBrowserPayload] = useState<RecordedBrowserPayload>()
+  const [timing, setTiming] = useState<{
+    sourceKey: string
+    timeline: ResearchReplayTimeline
+    recordings: RecordedBrowserPayload[]
+  }>()
   const [loadFailed, setLoadFailed] = useState(false)
   const [loadedSourceKey, setLoadedSourceKey] = useState(sourceKey)
   if (loadedSourceKey !== sourceKey) {
@@ -69,6 +85,7 @@ export function useRecordedMaterials(
     setSelected(undefined)
     setPayload(undefined)
     setBrowserPayload(undefined)
+    setTiming(undefined)
     setHistory(undefined)
     setHistoryFailed(false)
     setLoadFailed(false)
@@ -128,6 +145,60 @@ export function useRecordedMaterials(
     if (reveal)
       setRequest((previous) => ({ id: 'project', revision: (previous?.revision ?? 0) + 1 }))
   }, [])
+  // Resolve the research catalog before first playback. Individual headers are read in bounded
+  // pages; selecting a tab or a later local execution never rebuilds the source research clock.
+  const {
+    loading: discoveryLoading,
+    scanned: discoveryScanned,
+    unchecked: discoveryUnchecked,
+    recordings: discoveredRecordings,
+    supportingResourceIds: discoveredSupportingIds,
+    loadMore: discoverMore
+  } = discovery
+  useEffect(() => {
+    if (!document || timing?.sourceKey === sourceKey || discoveryLoading) return
+    if (discoveryScanned === false) return
+    if (discoveryUnchecked) {
+      discoverMore()
+      return
+    }
+    let disposed = false
+    const recordings: RecordedBrowserPayload[] = []
+    const candidates = discoveredRecordings.filter((item) => item.format === 'web-recording')
+    let index = 0
+    const worker = async (): Promise<void> => {
+      while (!disposed && index < candidates.length) {
+        const candidate = candidates[index++]
+        try {
+          const value = await window.api.projectRecordings.read({ target: candidate.target })
+          if (!disposed) recordings.push(value)
+        } catch {
+          // Missing footage does not block the original conversation and Notebook.
+        }
+      }
+    }
+    void Promise.all(Array.from({ length: Math.min(2, candidates.length) }, worker)).then(() => {
+      if (!disposed)
+        setTiming({
+          sourceKey,
+          timeline: createResearchReplayTimeline(document, recordings, discoveredSupportingIds),
+          recordings
+        })
+    })
+    return () => {
+      disposed = true
+    }
+  }, [
+    document,
+    sourceKey,
+    discoveryLoading,
+    discoveryScanned,
+    discoveryUnchecked,
+    discoveredRecordings,
+    discoveredSupportingIds,
+    discoverMore,
+    timing?.sourceKey
+  ])
   useEffect(() => {
     if (selected?.format !== 'web-recording') return
     let disposed = false
@@ -145,35 +216,7 @@ export function useRecordedMaterials(
       disposed = true
     }
   }, [selected])
-  const timed = useMemo(() => {
-    if (
-      !document ||
-      !browserPayload ||
-      selected?.format !== 'web-recording' ||
-      selected.localHistory
-    )
-      return undefined
-    const timelines = document.branches.flatMap((branch) => {
-      const timeline = createBrowserRecordingReplayTimeline(document, branch.id, browserPayload)
-      return timeline ? [timeline] : []
-    })
-    if (!timelines.length) return undefined
-    return {
-      document: {
-        ...document,
-        branches: document.branches.map(
-          (branch) =>
-            timelines
-              .find((timeline) => timeline.branchId === branch.id)
-              ?.document.branches.find((candidate) => candidate.id === branch.id) ?? branch
-        )
-      },
-      origins: Object.fromEntries(
-        timelines.map((timeline) => [timeline.branchId, timeline.startedAt])
-      ),
-      key: JSON.stringify(browserPayload.receiving)
-    }
-  }, [document, browserPayload, selected])
+  const timed = timing?.sourceKey === sourceKey ? timing.timeline : undefined
   useEffect(() => {
     if (!selected || selected.format === 'web-recording') return
     let disposed = false
@@ -218,24 +261,40 @@ export function useRecordedMaterials(
     },
     [payload]
   )
-  const results = useMemo<ReplayResultEntry[]>(
+  const results = useMemo<ReplayResultEntry[]>(() => {
+    const attachments = payload && !selected?.localHistory ? recordedResults(payload) : []
+    const mapped = new Set(attachments.map((entry) => entry.resource.versionId))
+    const supporting = new Set(timed?.supportingResourceIds)
+    return [
+      ...attachments,
+      ...(document?.resources ?? [])
+        .filter((resource) => !mapped.has(resource.versionId))
+        .map((resource) => ({
+          resource,
+          source: { kind: 'session-history' as const, id: document!.source.sessionId },
+          scope: { kind: 'recording' as const },
+          stage: 'unspecified' as const,
+          technical: supporting.has(resource.id)
+        }))
+    ]
+  }, [payload, document, selected?.localHistory, timed])
+  const readResults = useMemo<RecordedResourceReader>(
     () =>
       payload
-        ? recordedResults(payload)
-        : (document?.resources ?? []).map((resource) => ({
-            resource,
-            source: { kind: 'session-history', id: document!.source.sessionId },
-            scope: { kind: 'recording' },
-            stage: 'unspecified'
-          })),
-    [payload, document]
-  )
-  const readResults = useMemo(
-    () =>
-      payload
-        ? authorizedRecordedResultsReader(payload, readRecordedResource)
+        ? (resource, signal) => {
+            const sourceResource = document?.resources.find(
+              (item) =>
+                item.projectId === resource.projectId &&
+                item.sessionId === resource.sessionId &&
+                item.versionId === resource.versionId &&
+                item.checksum === resource.checksum
+            )
+            return sourceResource
+              ? readRecordedResource(sourceResource, signal)
+              : authorizedRecordedResultsReader(payload, readRecordedResource)(resource, signal)
+          }
         : readRecordedResource,
-    [payload]
+    [payload, document]
   )
   const askFile = async (mediaKey: string): Promise<void> => {
     if (!payload) return
@@ -345,106 +404,141 @@ export function useRecordedMaterials(
     ) : null
   return {
     playbackDocument: timed?.document,
-    recordedTimeOrigins: timed?.origins,
-    playbackKey: timed?.key,
+    recordedTimeOrigins: timed?.recordedTimeOrigins,
+    playbackKey: sourceKey,
+    timingReady: !!timed,
+    timelineCoverage: timed?.timelineCoverage,
     choose,
     request,
     views: [
       {
         id: 'project',
         label: t('Project replay'),
-        content: (active, playback) => (
-          <>
-            {catalog}
-            {selected &&
-            (selected.localHistory ||
-              (selected.format === 'web-recording' && browserPayload && !playback?.continuous)) ? (
-              <div className="shrink-0 px-3 py-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    showRecordedObservation(
-                      selected.target,
-                      selected.resource.name,
-                      selected.format
-                    )
+        content: (active, playback) => {
+          const browserAligned = Boolean(
+            !selected?.localHistory &&
+            browserPayload &&
+            playback?.continuous &&
+            playback.branchId &&
+            timed?.coverage[playback.branchId]?.some(
+              (item) => JSON.stringify(item.target) === JSON.stringify(browserPayload.receiving)
+            )
+          )
+          return (
+            <>
+              {catalog}
+              {selected &&
+              (selected.localHistory ||
+                (selected.format === 'web-recording' && browserPayload && !browserAligned)) ? (
+                <div className="shrink-0 px-3 py-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      showRecordedObservation(
+                        selected.target,
+                        selected.resource.name,
+                        selected.format
+                      )
+                    }
+                  >
+                    {t('Open recording separately')}
+                  </Button>
+                </div>
+              ) : null}
+              {browserPayload && browserAligned ? (
+                <RecordedFootageStatus
+                  recording={browserPayload.recording}
+                  recordedAt={playback?.recordedAt}
+                  onSeek={(at) => playback?.onSeekRecordedAt(at)}
+                  onShowNotebook={() =>
+                    setRequest((previous) => ({
+                      id: 'notebook',
+                      revision: (previous?.revision ?? 0) + 1
+                    }))
                   }
-                >
-                  {t('Open recording separately')}
-                </Button>
-              </div>
-            ) : null}
-            {selected?.format === 'web-recording' && loadFailed ? (
-              <ErrorNotice
-                inline
-                title={t('Could not read the recorded material.')}
-                primaryButton={{ label: t('Retry'), onClick: () => choose({ ...selected }) }}
-              />
-            ) : null}
-            {selected?.format === 'web-recording' ? (
-              <RunObservationPreview
-                mode="recorded"
-                format="web-recording"
-                target={selected.target}
-                title={selected.resource.name}
-                isActive={active}
-                questionRecovery={recovery}
-                playback={
-                  playback
-                    ? {
-                        ...playback,
-                        recordedAt: playback.continuous ? playback.recordedAt : undefined
-                      }
-                    : undefined
-                }
-                onAskBrowserMoment={(selection) => {
-                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
-                    throw new Error('Discussion unavailable')
-                }}
-              />
-            ) : (
-              (pending ??
-              (track ? (
-                <ProjectReplay
-                  active={active}
-                  transport={
+                />
+              ) : null}
+              {selected?.format === 'web-recording' && loadFailed ? (
+                <ErrorNotice
+                  inline
+                  title={t('Could not read the recorded material.')}
+                  primaryButton={{ label: t('Retry'), onClick: () => choose({ ...selected }) }}
+                />
+              ) : null}
+              {selected?.format === 'web-recording' ? (
+                <RunObservationPreview
+                  mode="recorded"
+                  format="web-recording"
+                  target={selected.target}
+                  title={selected.resource.name}
+                  isActive={active}
+                  questionRecovery={recovery}
+                  playback={
                     playback
                       ? {
                           ...playback,
-                          recordedAt:
-                            !selected?.localHistory &&
-                            payload?.receiving.projectId === document?.source.projectId &&
-                            payload?.receiving.sessionId === document?.source.sessionId
-                              ? playback.recordedAt
-                              : undefined
+                          recordedAt: browserAligned ? playback.recordedAt : undefined,
+                          playing: browserAligned && playback.playing
                         }
                       : undefined
                   }
-                  track={track}
-                  readImage={readImage}
-                  onAskFrame={(frame) => askFile(frame.mediaKey)}
+                  onAskBrowserMoment={(selection) => {
+                    if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                      throw new Error('Discussion unavailable')
+                  }}
                 />
               ) : (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('No project images were recorded. Other research materials remain available.')}
-                </p>
-              )))
-            )}
-          </>
-        )
+                (pending ??
+                (track ? (
+                  <ProjectReplay
+                    active={active}
+                    transport={
+                      playback
+                        ? {
+                            ...playback,
+                            recordedAt:
+                              !selected?.localHistory &&
+                              payload?.receiving.projectId === document?.source.projectId &&
+                              payload?.receiving.sessionId === document?.source.sessionId
+                                ? playback.recordedAt
+                                : undefined
+                          }
+                        : undefined
+                    }
+                    track={track}
+                    readImage={readImage}
+                    onAskFrame={(frame) => askFile(frame.mediaKey)}
+                  />
+                ) : (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t(
+                      'No project images were recorded. Other research materials remain available.'
+                    )}
+                  </p>
+                )))
+              )}
+            </>
+          )
+        }
       },
       {
         id: 'results',
         label: t('Results'),
-        content: (
+        content: (_active, playback) => (
           <>
             {catalog}
             {pending ?? (
               <ResultsPanel
                 entries={results}
+                recordedAt={playback?.continuous ? playback.recordedAt : undefined}
                 read={readResults}
-                onAskFile={payload ? (entry) => askFile(entry.mediaKey!) : undefined}
+                onAskFile={
+                  payload || onAskSourceFile
+                    ? (entry) =>
+                        entry.mediaKey ? askFile(entry.mediaKey) : onAskSourceFile?.(entry.resource)
+                    : undefined
+                }
               />
             )}
           </>

@@ -1,3 +1,6 @@
+import { ResearchReplayService } from '../research-replay/service'
+import { ResearchReplayHttpHost } from '../research-replay/http-host'
+import { createResearchReplayExternalPort } from '../research-replay/external-port'
 import { realpath } from 'node:fs/promises'
 import {
   createResearchRunInspectionPort,
@@ -783,6 +786,39 @@ export async function composeManagedExecution({
     viewers: observationViewers,
     reader: recordedObservations
   })
+  const researchReplayService = new ResearchReplayService({
+    reader: {
+      sessions: {
+        loadOne: ({ projectId, sessionId }) => sessions.readSessionSnapshot(projectId, sessionId)
+      },
+      notebook: {
+        runIndex: ({ projectId, sessionId }) =>
+          managedFiles.notebookRepository.readSessionRunIndex(projectId!, sessionId),
+        getReference: (request) => notebook.getSessionReference(request),
+        state: (request) => notebook.state(request)
+      },
+      artifacts: {
+        getLineage: (request) => managedFiles.artifactProvenanceRepository.getLineage(request)
+      },
+      reviewer: {
+        getForSession: async (request) => {
+          const owner = sessionAuthority.reviewerCommandOwnerRef.current
+          if (!owner) throw new Error('Review records are unavailable.')
+          return owner.getForSession(request)
+        }
+      }
+    },
+    recordings: recordedObservations,
+    immutable: managedFiles.immutableInputAuthority,
+    authorize: authorizeObservationScope,
+    readRun: ({ projectId, sessionId }, runId) =>
+      managedFiles.notebookRepository.readSessionRun(projectId, sessionId, runId)
+  })
+  const researchReplayHost = new ResearchReplayHttpHost(
+    researchReplayService,
+    createReplayViewerAssetReader()
+  )
+  external.replays = createResearchReplayExternalPort(researchReplayHost, assertOpen)
   let draining: Promise<void> | undefined
   const quiesce = (): Promise<void> => {
     held = true
@@ -822,6 +858,7 @@ export async function composeManagedExecution({
     recordingObserver.close()
     await observationViewers.close()
     viewerHost.close()
+    researchReplayHost.close()
     observation.close()
     projectViews.close()
   }

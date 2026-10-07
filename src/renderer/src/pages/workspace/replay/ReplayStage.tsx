@@ -3,6 +3,7 @@ import { GeneratedFileCard, artifactGalleryClassName } from '../GeneratedFileCar
 import { formatByteSize } from '@/lib/utils'
 import { isReviewerCorrectionAttribution } from '../../../../../shared/session-persistence'
 import { ReplayReviewRecord } from './ReplayReviewRecord'
+import { ReplayCurrentContext } from './ReplayCurrentContext'
 import {
   lazy,
   Suspense,
@@ -79,6 +80,8 @@ export type ReplayMaterialView = {
 
 /** Read-only material adapters share the owning Replay's clock, never each other's state. */
 export type ReplayMaterialPlayback = {
+  branchId?: string
+  positionMs?: number
   recordedAt?: number
   /** A compressed conversation step is an anchor, not an elapsed video clock. */
   continuous?: boolean
@@ -673,6 +676,8 @@ const ReplayStageContent = ({
   useLayoutEffect(() => {
     readyCallback.current = onReady
   }, [onReady])
+  const [fullHistory, setFullHistory] = useState(false)
+  const [historyPage, setHistoryPage] = useState(0)
   const [historyStart, setHistoryStart] = useState<number>()
   const [browsingConversation, setBrowsingConversation] = useState(false)
   const [returnRequest, setReturnRequest] = useState(0)
@@ -682,9 +687,14 @@ const ReplayStageContent = ({
     setPreviousFocusKey(focusKey)
     setHistoryStart(undefined)
     setBrowsingConversation(false)
+    setFullHistory(false)
   }
   const followingTranscript = useFollowScrollBottom(
-    fitContainer && followPrimary && (wide || !materialsOpen) && historyStart === undefined,
+    fitContainer &&
+      followPrimary &&
+      (wide || !materialsOpen) &&
+      historyStart === undefined &&
+      !fullHistory,
     {
       onFollowingChange: (following) => {
         setBrowsingConversation(!following)
@@ -728,6 +738,19 @@ const ReplayStageContent = ({
     }
   }, [replayDocument, scene.branchId])
   const active = scene.step
+  const branchSteps = useMemo(
+    () => replayDocument.branches.find((item) => item.id === scene.branchId)?.steps ?? [],
+    [replayDocument, scene.branchId]
+  )
+  const historicalMessages = useMemo(
+    () => branchSteps.filter((step) => step.message),
+    [branchSteps]
+  )
+  const lastHistoryPage = Math.max(
+    0,
+    Math.ceil(historicalMessages.length / REPLAY_TRANSCRIPT_STEP_LIMIT) - 1
+  )
+  const effectiveHistoryPage = Math.min(historyPage, lastHistoryPage)
   const transcriptSteps = useMemo(() => {
     const rows: ReplayStep[] = []
     const isGallery = (step: ReplayStep): boolean =>
@@ -738,7 +761,13 @@ const ReplayStageContent = ({
       !step.activities.length &&
       !step.runs.length &&
       !step.issues.length
-    for (const step of scene.visibleSteps.slice(transcriptStart)) {
+    const visible = fullHistory
+      ? historicalMessages.slice(
+          effectiveHistoryPage * REPLAY_TRANSCRIPT_STEP_LIMIT,
+          (effectiveHistoryPage + 1) * REPLAY_TRANSCRIPT_STEP_LIMIT
+        )
+      : scene.visibleSteps.slice(transcriptStart)
+    for (const step of visible) {
       const previous = rows.at(-1)
       if (previous && isGallery(previous) && isGallery(step)) {
         // A view-only grouping, preserving the active step's identity and reveal boundary.
@@ -749,13 +778,20 @@ const ReplayStageContent = ({
       } else rows.push(step)
     }
     return rows
-  }, [fitContainer, transcriptStart, scene.visibleSteps])
+  }, [
+    fitContainer,
+    transcriptStart,
+    scene.visibleSteps,
+    fullHistory,
+    effectiveHistoryPage,
+    historicalMessages
+  ])
   const materialStep = [...scene.visibleSteps]
     .reverse()
     .find((step) => step.runs.length || step.resourceIds.length)
   const inspecting = Boolean(selectedResource)
   const hasMaterial = Boolean(materialStep) || inspecting
-  const showMaterialPane = materialsOpen
+  const showMaterialPane = materialsOpen && !fullHistory
   const materialRuns =
     selectedResource && !fitContainer
       ? []
@@ -1093,14 +1129,79 @@ const ReplayStageContent = ({
           </span>
         </header>
       ) : null}
+      {fitContainer && !primaryContent ? (
+        <ReplayCurrentContext
+          scene={scene}
+          steps={branchSteps}
+          onHistory={() => {
+            onInspect?.()
+            setFullHistory(true)
+            setBrowsingConversation(true)
+            const index = historicalMessages.findIndex((step) => step.id === scene.step?.id)
+            setHistoryPage(Math.floor(Math.max(0, index) / REPLAY_TRANSCRIPT_STEP_LIMIT))
+          }}
+          onNotebook={
+            branchMaterials.notebook
+              ? () => {
+                  setFullHistory(false)
+                  onMaterialViewChange?.('notebook')
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {fitContainer && fullHistory ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-200 px-3 py-1 text-xs">
+          <span>{t('Browsing saved history; playback position is unchanged.')}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={effectiveHistoryPage === 0}
+            onClick={() => {
+              setHistoryPage(effectiveHistoryPage - 1)
+            }}
+          >
+            {t('Previous page')}
+          </Button>
+          <span>
+            {t('Page {{current}} of {{total}}', {
+              current: effectiveHistoryPage + 1,
+              total: lastHistoryPage + 1
+            })}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={effectiveHistoryPage === lastHistoryPage}
+            onClick={() => {
+              setHistoryPage(effectiveHistoryPage + 1)
+            }}
+          >
+            {t('Next page')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setFullHistory(false)
+              setHistoryStart(undefined)
+              setBrowsingConversation(false)
+              setReturnRequest((request) => request + 1)
+            }}
+          >
+            {t('Follow playback')}
+          </Button>
+        </div>
+      ) : null}
       <div
         className={
           fitContainer
-            ? `relative grid min-h-0 flex-1 grid-rows-1 ${wide && materialsOpen && !inspecting ? (filesOpen ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]') : wide && filesOpen ? 'grid-cols-[minmax(0,1fr)_16rem]' : 'grid-cols-1'}`
+            ? `relative grid min-h-0 flex-1 grid-rows-1 ${wide && showMaterialPane && !inspecting ? (filesOpen ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]') : wide && filesOpen ? 'grid-cols-[minmax(0,1fr)_16rem]' : 'grid-cols-1'}`
             : 'grid min-h-0 flex-1 grid-cols-[46%_54%]'
         }
       >
         <section
+          key={fullHistory ? `history:${historyPage}` : 'following'}
           ref={transcript}
           aria-label={primaryLabel ?? t('Historical conversation')}
           tabIndex={0}
@@ -1118,7 +1219,7 @@ const ReplayStageContent = ({
         >
           {primaryContent ?? (
             <div className={fitContainer ? 'space-y-1' : 'space-y-3'}>
-              {fitContainer && transcriptStart > 0 ? (
+              {fitContainer && !fullHistory && transcriptStart > 0 ? (
                 <div className="flex justify-center py-2 [overflow-anchor:none]">
                   <Button
                     variant="secondary"
@@ -1153,17 +1254,21 @@ const ReplayStageContent = ({
                   runDetails={runDetails}
                   key={step.id}
                   step={step}
-                  active={step.id === active?.id}
-                  messageCharacters={step.id === active?.id ? scene.messageCharacters : 0}
+                  active={!fullHistory && step.id === active?.id}
+                  messageCharacters={
+                    !fullHistory && step.id === active?.id ? scene.messageCharacters : 0
+                  }
                   showResults={
-                    materialPlayback?.continuous && materialPlayback.recordedAt !== undefined
-                      ? step.recordedEndAt === undefined ||
-                        step.recordedEndAt <= materialPlayback.recordedAt
-                      : step.id !== active?.id || scene.showResults
+                    fullHistory
+                      ? true
+                      : materialPlayback?.continuous && materialPlayback.recordedAt !== undefined
+                        ? step.recordedEndAt === undefined ||
+                          step.recordedEndAt <= materialPlayback.recordedAt
+                        : step.id !== active?.id || scene.showResults
                   }
                 />
               ))}
-              {fitContainer && browsingConversation ? (
+              {fitContainer && browsingConversation && !fullHistory ? (
                 <div className="sticky bottom-0 flex justify-center py-2 [overflow-anchor:none]">
                   <Button
                     variant="secondary"
@@ -1330,13 +1435,16 @@ const ReplayStageContent = ({
                         run={detail.run}
                         index={notebookIndices.get(index.runId) ?? runOffset}
                         showOutput={
-                          materialPlayback?.continuous && materialPlayback.recordedAt !== undefined
-                            ? index.endedAt !== undefined &&
-                              index.endedAt <= materialPlayback.recordedAt
-                            : fitContainer
-                              ? !active?.runs.some((run) => run.runId === index.runId) ||
-                                scene.showResults
-                              : showOutput
+                          fullHistory
+                            ? true
+                            : materialPlayback?.continuous &&
+                                materialPlayback.recordedAt !== undefined
+                              ? index.endedAt !== undefined &&
+                                index.endedAt <= materialPlayback.recordedAt
+                              : fitContainer
+                                ? !active?.runs.some((run) => run.runId === index.runId) ||
+                                  scene.showResults
+                                : showOutput
                         }
                         unavailableImages={unavailableImages}
                       />

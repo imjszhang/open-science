@@ -13,9 +13,13 @@ export type ReplayResultEntry = Readonly<{
   /** Never inferred from the filename, latest Version, terminal status, or selected step. */
   stage: 'intermediate' | 'final' | 'unspecified'
   mediaKey?: string
+  /** Exact publication time from saved evidence, never the receiver import timestamp. */
+  availableAt?: number
+  technical?: boolean
 }>
 export type ResultsPanelProps = {
   entries: readonly ReplayResultEntry[]
+  recordedAt?: number
   read: RecordedResourceReader
   onAskFile?: (entry: ReplayResultEntry) => Promise<void> | void
 }
@@ -33,12 +37,31 @@ const identity = (entry: ReplayResultEntry): string =>
   ])
 
 /** Independent immutable results catalog. No Notebook, runtime service, or observation is required. */
-export function ResultsPanel({ entries, read, onAskFile }: ResultsPanelProps): React.JSX.Element {
+export function ResultsPanel({
+  entries,
+  recordedAt,
+  read,
+  onAskFile
+}: ResultsPanelProps): React.JSX.Element {
   const { t } = useTranslation()
+  const [scope, setScope] = useState<'current' | 'all'>('current')
+  const [showTechnical, setShowTechnical] = useState(false)
   const [selectedId, setSelectedId] = useState<string>()
   const [asking, setAsking] = useState(false)
   const [askFailed, setAskFailed] = useState<string>()
-  const available = entries.filter((entry) => fixedReplayResource(entry.resource))
+  const fixed = entries.filter((entry) => fixedReplayResource(entry.resource))
+  const timestamp = (entry: ReplayResultEntry): number | undefined => {
+    const time = entry.availableAt ?? entry.resource.createdAt
+    return time !== undefined && Number.isFinite(time) ? time : undefined
+  }
+  const unknownTime = fixed.some((entry) => timestamp(entry) === undefined && !entry.technical)
+  const available = fixed.filter(
+    (entry) =>
+      (!entry.technical || showTechnical) &&
+      (scope === 'all' ||
+        recordedAt === undefined ||
+        (timestamp(entry) !== undefined && timestamp(entry)! <= recordedAt))
+  )
   const selected = available.find((entry) => identity(entry) === selectedId)
   const ask = async (): Promise<void> => {
     if (!selected || !onAskFile || asking) return
@@ -54,6 +77,50 @@ export function ResultsPanel({ entries, read, onAskFile }: ResultsPanelProps): R
   }
   return (
     <section aria-label={t('Results')} className="flex h-full min-h-0 min-w-0 flex-col">
+      {recordedAt !== undefined ? (
+        <div className="shrink-0 border-b border-border-200 p-2 text-xs">
+          <div role="group" aria-label={t('Result visibility')} className="flex flex-wrap gap-1">
+            <Button
+              size="sm"
+              variant={scope === 'current' ? 'secondary' : 'ghost'}
+              aria-pressed={scope === 'current'}
+              onClick={() => setScope('current')}
+            >
+              {t('Available at this moment')}
+            </Button>
+            <Button
+              size="sm"
+              variant={scope === 'all' ? 'secondary' : 'ghost'}
+              aria-pressed={scope === 'all'}
+              onClick={() => setScope('all')}
+            >
+              {t('All saved results')}
+            </Button>
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            {scope === 'all'
+              ? t('Showing results from the entire research, including later records.')
+              : t('Only results with a known publication time at or before this moment are shown.')}
+          </p>
+          {scope === 'current' && unknownTime ? (
+            <p className="mt-1 text-muted-foreground">
+              {t(
+                'Some results have no saved publication time. Use All saved results to inspect them.'
+              )}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {fixed.some((entry) => entry.technical) ? (
+        <label className="flex shrink-0 items-center gap-2 p-2 text-xs">
+          <input
+            type="checkbox"
+            checked={showTechnical}
+            onChange={(event) => setShowTechnical(event.currentTarget.checked)}
+          />
+          {t('Show technical attachments')}
+        </label>
+      ) : null}
       <div className="max-h-48 shrink-0 overflow-auto border-b border-border-200 p-2">
         {available.length ? (
           available.map((entry) => (
@@ -80,7 +147,9 @@ export function ResultsPanel({ entries, read, onAskFile }: ResultsPanelProps): R
           ))
         ) : (
           <p className="p-2 text-sm text-muted-foreground">
-            {t('No recorded results are available.')}
+            {fixed.length && recordedAt !== undefined && scope === 'current'
+              ? t('No results have a known publication time before this moment.')
+              : t('No recorded results are available.')}
           </p>
         )}
       </div>
@@ -93,6 +162,13 @@ export function ResultsPanel({ entries, read, onAskFile }: ResultsPanelProps): R
                 : selected.source.kind === 'project-recording'
                   ? t('Project recording')
                   : t('Archived observation')}
+            </span>
+            <span>
+              {timestamp(selected) === undefined
+                ? t('Publication time not recorded')
+                : t('Recorded time: {{time}}', {
+                    time: new Date(timestamp(selected)!).toLocaleString()
+                  })}
             </span>
             <code className="break-all">{selected.resource.versionId}</code>
             {onAskFile ? (

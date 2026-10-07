@@ -219,7 +219,7 @@ describe('SessionReplayPreview lifecycle', () => {
       observations: { openRecorded: vi.fn() }
     })
     render(<SessionReplayPreview item={item()} />)
-    await screen.findByTestId('replay-panel')
+    await screen.findByText('Preparing recorded material…')
     fireEvent.click(screen.getByRole('button', { name: 'Source files' }))
     await act(async () =>
       resolve({
@@ -236,7 +236,7 @@ describe('SessionReplayPreview lifecycle', () => {
   })
 
   it.each(['play', 'pointer-seek', 'seek-key', 'wheel'] as const)(
-    'retains the session process and playhead after %s while archive discovery is pending',
+    'initializes one clock before %s and retains it while inspecting discovered archives',
     async (interaction) => {
       let resolve!: (value: unknown) => void
       mocks.load.mockResolvedValue({
@@ -265,6 +265,16 @@ describe('SessionReplayPreview lifecycle', () => {
         observations: { openRecorded: vi.fn() }
       })
       render(<SessionReplayPreview item={item()} />)
+      await screen.findByText('Preparing recorded material…')
+      expect(screen.queryByTestId('replay-panel')).toBeNull()
+      await act(async () =>
+        resolve({
+          content: '{"format":"open-science-run-observation","version":1}',
+          encoding: 'utf8',
+          truncated: false,
+          size: 58
+        })
+      )
       const player = await screen.findByTestId('replay-panel')
       // Exercise each input path independently so a click cannot mask a missing keyboard,
       // pointer-seek or wheel capture handler. The player remains mounted at its own position.
@@ -278,14 +288,6 @@ describe('SessionReplayPreview lifecycle', () => {
         fireEvent.wheel(player, { deltaY: 80 })
       }
       const playhead = player.getAttribute('data-time-ms')
-      await act(async () =>
-        resolve({
-          content: '{"format":"open-science-run-observation","version":1}',
-          encoding: 'utf8',
-          truncated: false,
-          size: 58
-        })
-      )
       expect(
         screen.getByRole('button', { name: 'Session process' }).getAttribute('aria-pressed')
       ).toBe('true')
@@ -343,7 +345,7 @@ describe('SessionReplayPreview lifecycle', () => {
       observations: { openRecorded: vi.fn() }
     })
     const mounted = render(<SessionReplayPreview item={item()} />)
-    await screen.findByTestId('replay-panel')
+    await screen.findByText('Preparing recorded material…')
     mounted.rerender(<SessionReplayPreview item={item('other')} />)
     await waitFor(() => expect(props().document.source.sessionId).toBe('other'))
     await act(async () =>
@@ -589,7 +591,7 @@ describe('SessionReplayPreview lifecycle', () => {
   it('opens complete static step evidence and pauses until returning', async () => {
     render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')
-    act(() => props().onOpenEvidence(undefined, step))
+    act(() => props().onOpenEvidence?.(undefined, step))
     expect(screen.getByText('Complete original recorded question')).toBeTruthy()
     expect(props().active).toBe(false)
     const back = screen.getByRole('button', { name: 'Back to replay' })
@@ -616,7 +618,7 @@ describe('SessionReplayPreview lifecycle', () => {
     mocks.load.mockResolvedValue({ ...doc(), resources: [resource] })
     render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')
-    act(() => props().onOpenEvidence(resource, step))
+    act(() => props().onOpenEvidence?.(resource, step))
     expect(mocks.file.mock.lastCall![0]).toMatchObject({
       versionId: 'v1',
       artifactId: 'figure',
@@ -625,7 +627,7 @@ describe('SessionReplayPreview lifecycle', () => {
     expect(mocks.file.mock.lastCall![0].locator).not.toBe(resource.locator)
     expect(props().active).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Back to recording' }))
-    act(() => props().onOpenEvidence({ ...resource, versionId: undefined }, step))
+    act(() => props().onOpenEvidence?.({ ...resource, versionId: undefined }, step))
     expect(screen.getByText('The recorded evidence is unavailable.')).toBeTruthy()
   })
   it.each(['archive.zip', 'notes.txt'])(
@@ -645,7 +647,7 @@ describe('SessionReplayPreview lifecycle', () => {
       mocks.load.mockResolvedValue({ ...doc(), resources: [resource] })
       render(<SessionReplayPreview item={item()} />)
       await screen.findByTestId('replay-panel')
-      act(() => props().onOpenEvidence(resource, step))
+      act(() => props().onOpenEvidence?.(resource, step))
       expect(mocks.file.mock.lastCall![0]).toMatchObject({
         ...resource,
         locator: 'upload-version:project/original-upload-owner/uploaded-file/old-version'
@@ -699,7 +701,7 @@ describe('SessionReplayPreview lifecycle', () => {
       foreignProject,
       foreignArtifact
     ])
-      act(() => props().onOpenEvidence(invalid, step))
+      act(() => props().onOpenEvidence?.(invalid, step))
     expect(open).not.toHaveBeenCalled()
     expect(screen.getByText('The recorded evidence is unavailable.')).toBeTruthy()
     open.mockRestore()
@@ -710,7 +712,7 @@ it('keeps available history visible with a retryable Notebook error without savi
   mocks.load.mockResolvedValueOnce({ ...doc(), issues: [{ code: 'notebook-unavailable' }] })
   render(<SessionReplayPreview item={item()} />)
   expect(await screen.findByText('Recorded Notebook details are unavailable.')).toBeTruthy()
-  expect(screen.getByTestId('replay-panel')).toBeTruthy()
+  expect(await screen.findByTestId('replay-panel')).toBeTruthy()
   expect(mocks.panel.mock.lastCall?.[0].onViewChange).toBeUndefined()
   fireEvent.click(screen.getByRole('button', { name: /^Retry$/ }))
   await screen.findByTestId('replay-panel')

@@ -198,6 +198,7 @@ const openMaterials = (): void => {
 
 describe('research replay interaction', () => {
   it('owns the material clock, forwards pause/speed/seek, and restores the requested material after a timeline change', async () => {
+    const onMaterialViewChange = vi.fn()
     const doc = makeDocument()
     doc.resources = []
     doc.branches = [
@@ -219,6 +220,7 @@ describe('research replay interaction', () => {
         document={doc}
         {...callbacks()}
         materialViews={views}
+        onMaterialViewChange={onMaterialViewChange}
         materialViewRequest={{ id: 'project', revision: 1 }}
         recordedTimeOrigins={{ main: 10000 }}
       />
@@ -240,7 +242,17 @@ describe('research replay interaction', () => {
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
     ).toBe('500')
-    expect(playback).toMatchObject({ recordedAt: 10500, playing: false })
+    expect(playback).toMatchObject({
+      recordedAt: 10500,
+      playing: false,
+      branchId: 'main',
+      positionMs: 500
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Notebook' }))
+    expect(onMaterialViewChange).toHaveBeenLastCalledWith('notebook')
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe('500')
   })
 
   it('exposes the visible playhead during playback and captures its latest position on demand', () => {
@@ -1662,4 +1674,115 @@ it('keeps replay following delayed automatic scroll and resumes after manual bro
   )
   expect(returnButton()).toBeNull()
   expect(conversation.scrollTop).toBe(1800)
+})
+
+describe('portable research replay', () => {
+  it('does not publish a desktop playhead or consume desktop navigation in a browser host', async () => {
+    const nativePlayhead = { projectId: 'other', sourceSessionId: 'other', capture: vi.fn() }
+    useSessionReplayStore.setState({ playhead: nativePlayhead })
+    const view = render(<ReplayPanel document={makeDocument()} host={null} {...callbacks()} />)
+    expect(useSessionReplayStore.getState().playhead).toBe(nativePlayhead)
+    act(() =>
+      requestReplaySeek({ projectId: 'p', sourceSessionId: 's', branchId: 'main', stepId: 'three' })
+    )
+    expect(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow')).toBe('0')
+    view.unmount()
+    expect(useSessionReplayStore.getState().playhead).toBe(nativePlayhead)
+    useSessionReplayStore.setState({ playhead: undefined })
+  })
+  it('keeps original context beside narrow materials and allows saved history inspection without seeking', () => {
+    const document = makeDocument()
+    render(
+      <ReplayPanel
+        document={document}
+        host={null}
+        {...callbacks()}
+        materialViews={[
+          { id: 'project', label: 'Project replay', content: <div>Recorded project image</div> }
+        ]}
+        materialViewRequest={{ id: 'project', revision: 1 }}
+      />
+    )
+    expect(screen.getByTestId('replay-current-context').textContent).toContain(
+      'Initial observation'
+    )
+    expect(screen.getByText('Recorded project image')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Browse original conversation' }))
+    expect(screen.getByText('Browsing saved history; playback position is unchanged.')).toBeTruthy()
+    expect(screen.getAllByText('Final result').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow')).toBe('0')
+    fireEvent.click(screen.getByRole('button', { name: 'Follow playback' }))
+    expect(screen.queryByText('Browsing saved history; playback position is unchanged.')).toBeNull()
+    expect(screen.getByText('Recorded project image')).toBeTruthy()
+  })
+})
+
+describe('recorded clock checkpoint migration', () => {
+  it.each([
+    { saved: { stepId: 'two', stepOffsetMs: 250 }, expected: 1000 },
+    { saved: { anchor: { kind: 'message' as const, id: 'two' } }, expected: 1000 },
+    { saved: {}, expected: 0 }
+  ])(
+    'uses stable evidence rather than a legacy presentation offset: $saved',
+    ({ saved, expected }) => {
+      render(
+        <ReplayPanel
+          document={makeDocument()}
+          host={null}
+          {...callbacks()}
+          recordedTimeOrigins={{ main: 1000 }}
+          initialView={{
+            fingerprint: 'fp',
+            generatorVersion: 3,
+            presentationVersion: 2,
+            branchId: 'main',
+            timeMs: 1250,
+            rate: 1,
+            ...saved
+          }}
+        />
+      )
+      expect(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow')).toBe(
+        String(expected)
+      )
+      if (!expected)
+        expect(
+          screen.getByText('The saved step is unavailable. Replay starts at the beginning.')
+        ).toBeTruthy()
+    }
+  )
+  it('resumes a recorded checkpoint including its recorded offset and labels new saves', async () => {
+    const onViewChange = vi.fn()
+    render(
+      <ReplayPanel
+        document={makeDocument()}
+        host={null}
+        {...callbacks()}
+        onViewChange={onViewChange}
+        recordedTimeOrigins={{ main: 1000 }}
+        initialView={{
+          fingerprint: 'fp',
+          generatorVersion: 3,
+          branchId: 'main',
+          clock: 'recorded',
+          stepId: 'two',
+          stepOffsetMs: 250,
+          timeMs: 1250,
+          rate: 1
+        }}
+      />
+    )
+    expect(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow')).toBe('1250')
+    await waitFor(() =>
+      expect(onViewChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clock: 'recorded',
+          stepOffsetMs: 250,
+          branchPositions: expect.arrayContaining([
+            expect.objectContaining({ branchId: 'main', clock: 'recorded' })
+          ])
+        })
+      )
+    )
+  })
 })

@@ -39,6 +39,7 @@ export type ManagedExecutionExternalMethod = (typeof MANAGED_EXECUTION_EXTERNAL_
 export type ManagedExecutionExternalPort = {
   /** Optional additive viewing capability; execution dispatch stays on its existing path. */
   observation?: import('./run-observation-external-port').RunObservationExternalPort
+  replays?: import('./research-replay/external-port').ResearchReplayExternalPort
   projectRecordings?: import('./browser-recordings/external-port').BrowserRecordingExternalPort
   call(
     method: ManagedExecutionExternalMethod,

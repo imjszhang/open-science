@@ -13,6 +13,7 @@ import { selectionReference } from './selection-reference'
 import { BrowserArtifactPreview } from './BrowserArtifactPreview'
 import { ReferencePanel } from './ReferencePanel'
 import { RecordedViewerApp } from './RecordedViewerApp'
+import { ResearchReplayViewerApp } from './ResearchReplayViewerApp'
 import { useObservationRecordingStatus } from '../src/pages/workspace/replay/use-observation-recording-status'
 import { ObservationRecordingStatus } from '../src/pages/workspace/replay/ObservationRecordingStatus'
 import { BrowserRecordingControls } from './BrowserRecordingControls'
@@ -46,7 +47,14 @@ export const ViewerApp = ({
   const { t } = useTranslation()
   const [client] = useState(() => providedClient ?? new ReplayViewerClient())
   const [retry, setRetry] = useState(0)
-  const { context, history, recording, connection, error } = useViewerObservation(client, retry)
+  const {
+    context: viewerContext,
+    history,
+    recording,
+    connection,
+    error
+  } = useViewerObservation(client, retry)
+  const context = viewerContext?.mode === 'research' ? undefined : viewerContext
   const desktopLocale = context?.presentation === 'desktop' ? context.locale : undefined
   useEffect(() => {
     if (!desktopLocale || i18next.language === desktopLocale) return
@@ -215,6 +223,8 @@ export const ViewerApp = ({
         />
       </main>
     )
+  if (viewerContext?.mode === 'research')
+    return <ResearchReplayViewerApp key={viewerContext.viewerId} context={viewerContext} />
   if (context?.mode === 'recorded' && recording)
     return (
       <RecordedViewerApp

@@ -45,6 +45,10 @@ export function useViewerObservation(
             context = await client.context(signal)
             if (!signal.aborted) setState({ context, connection: 'reconnecting' })
           }
+          if (context.mode === 'research') {
+            if (!signal.aborted) setState({ context, connection: 'connected' })
+            return
+          }
           if (context.mode === 'recorded') {
             const recording = await client.recording(signal)
             const target = context.target

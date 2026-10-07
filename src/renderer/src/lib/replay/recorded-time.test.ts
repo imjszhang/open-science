@@ -6,7 +6,7 @@ import {
   type ReplayDocument,
   type ReplayStep
 } from '../../../../shared/replay'
-import { createBrowserRecordingReplayTimeline } from './recorded-time'
+import { createBrowserRecordingReplayTimeline, createResearchReplayTimeline } from './recorded-time'
 
 const step = (id: string, recordedAt?: number): ReplayStep => ({
   id,
@@ -60,6 +60,125 @@ const payload = (): Pick<RecordedBrowserPayload, 'receiving' | 'recording'> => (
 })
 
 describe('recorded research clock', () => {
+  it('keeps recording infrastructure as attachments without changing research duration or source', () => {
+    const source = document()
+    const technical = {
+      id: 'checkpoint',
+      name: 'checkpoint.json',
+      projectId: 'project',
+      sessionId: 'session',
+      artifactId: 'index',
+      versionId: 'checkpoint-version',
+      availability: 'recorded' as const
+    }
+    source.resources = [technical]
+    source.branches[0].steps[1] = {
+      ...step('checkpoint-step', 21000),
+      kind: 'artifact',
+      resourceIds: ['checkpoint']
+    }
+    const result = createResearchReplayTimeline(source, [], ['checkpoint'])
+    expect(result.document.branches[0].steps.map((item) => item.id)).toEqual(['first', 'last'])
+    expect(result.document.branches[0].durationMs).toBe(40000)
+    expect(result.document.resources).toEqual([technical])
+    expect(source.branches[0].steps).toHaveLength(3)
+  })
+  it('builds the research clock before any recording is selected', () => {
+    const source = document()
+    const result = createResearchReplayTimeline(source)
+    expect(result.recordedTimeOrigins).toEqual({ main: 1000 })
+    expect(result.document.branches[0].durationMs).toBe(40000)
+    expect(result.unalignedBranchIds).toEqual([])
+    expect(source.branches[0].durationMs).toBe(7500)
+  })
+
+  it('uses all associated coverage with no dependency on selection or catalog order', () => {
+    const first = payload()
+    const second = payload()
+    second.recording.recordingId = 'later'
+    second.recording.startedAt = 50000
+    second.recording.durationMs = 20000
+    second.recording.segments = [
+      {
+        segmentId: 'segment',
+        mediaKey: 'video',
+        startMs: 28,
+        endMs: 12000,
+        width: 952,
+        height: 626,
+        codec: 'vp8',
+        frameRate: 15
+      }
+    ]
+    const a = createResearchReplayTimeline(document(), [first, second])
+    const b = createResearchReplayTimeline(document(), [second, first])
+    expect(a.document).toEqual(b.document)
+    expect(a.document.branches[0].durationMs).toBe(69000)
+    expect(a.timelineCoverage.main).toEqual([{ startedAt: 50028, endedAt: 62000 }])
+  })
+
+  it('never extends source research with another local execution or ambiguous branch', () => {
+    const other = payload()
+    other.receiving.sessionId = 'local-copy'
+    other.recording.durationMs = 100000
+    const result = createResearchReplayTimeline(document(), [other])
+    expect(result.document.branches[0].durationMs).toBe(40000)
+    expect(result.coverage.main).toEqual([])
+  })
+
+  it('keeps missing-time branches in their original presentation mode', () => {
+    const source = document()
+    source.branches[0].steps[1].recordedAt = undefined
+    source.branches.push({
+      id: 'complete',
+      kind: 'conversation',
+      durationMs: 5000,
+      steps: [{ ...step('known', 1000), branchId: 'complete' }]
+    })
+    const result = createResearchReplayTimeline(source)
+    expect(result.document.branches[0]).toBe(source.branches[0])
+    expect(result.unalignedBranchIds).toEqual(['main'])
+    expect(result.recordedTimeOrigins).toEqual({ complete: 1000 })
+    expect(result.document.branches[1].durationMs).toBe(0)
+  })
+
+  it('preserves overlapping operations rather than serializing their actual end times', () => {
+    const source = document()
+    source.branches[0].steps[0].recordedEndAt = 35000
+    const result = createResearchReplayTimeline(source)
+    expect(result.document.branches[0].steps[0].endMs).toBe(34000)
+    expect(result.document.branches[0].steps[1].startMs).toBe(20000)
+  })
+
+  it('identifies only exact receiving media as supporting resources', () => {
+    const source = document()
+    const mediaResource = {
+      id: 'media',
+      name: 'part.webm',
+      projectId: 'project',
+      sessionId: 'session',
+      artifactId: 'media-artifact',
+      versionId: 'media-version',
+      availability: 'recorded' as const
+    }
+    source.resources = [mediaResource, { ...mediaResource, id: 'foreign', sessionId: 'other' }]
+    const recording = {
+      ...payload(),
+      media: [
+        {
+          mediaKey: 'm',
+          artifactId: 'media-artifact',
+          versionId: 'media-version',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 100
+        }
+      ]
+    }
+    expect(createResearchReplayTimeline(source, [recording]).supportingResourceIds).toEqual([
+      'media'
+    ])
+  })
+
   it('replaces compressed presentation durations with actual elapsed time without mutating evidence', () => {
     const source = document()
     const result = createBrowserRecordingReplayTimeline(source, 'main', payload())!

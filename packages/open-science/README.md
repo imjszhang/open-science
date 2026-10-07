@@ -583,3 +583,52 @@ the ordinary Artifact has been saved but its owning turn has not published it ye
 association with the initiating viewer's real observation, independent of the recording's private
 `stepKey`; other viewers' cursors must not be equated. `capture.startedAt` and `finishedAt` record
 actual acquisition time, while an unchanged observation may retain an earlier `observedAt`.
+
+### Read a complete research Replay
+
+`client.replays` opens the receiving Project/Session as a scoped, read-only browser view. It
+includes saved original conversation, Notebook records, recorded project footage, and saved
+results. It does not start a runtime, create a discussion Session, call a provider, or run any
+instructions contained in the historical conversation. Use the existing execution APIs only
+when the user separately requests a new run.
+
+```js
+const view = await client.replays.open({
+  target: { projectId: importedProjectId, sessionId: importedSessionId }
+})
+// Open view.url in your browser/Codex browser panel. The one-time bootstrap URL must not be shared.
+const overview = await client.replays.read({ viewerId: view.viewerId, query: { kind: 'overview' } })
+const page = await client.replays.read({
+  viewerId: view.viewerId,
+  query: { kind: 'steps', limit: 20 }
+})
+const step = await client.replays.read({
+  viewerId: view.viewerId,
+  query: { kind: 'step', branchId: page.branchId, stepId: page.steps[0].id }
+})
+// After the user chooses “Ask about this step/moment” in the browser:
+const selection = await client.replays.selection({ viewerId: view.viewerId })
+// selection.position and exact evidence versions remain fixed as playback continues.
+// Read Notebook details only for run IDs present in the chosen step (at most eight per request).
+// Read saved result bytes by resourceId, in chunks of at most 262144 bytes.
+await client.replays.revoke({ viewerId: view.viewerId })
+```
+
+Step pages accept `offset`/`limit` (maximum 50) and return `nextOffset`. Exact resource reads return
+`dataBase64` and `nextOffset`. Browser media uses authenticated range requests. Source identities
+always refer to the receiving import; source package identities cannot authorize unrelated local
+files. Missing, oversized, or unshared evidence is not substituted with a current file.
+
+Each viewer has its own frozen source snapshot and independent playback position. The viewer
+expires after two hours or when its originating authorization becomes invalid; reopening creates
+a new snapshot. Up to 16 recent selection snapshots remain addressable with `selectionId` for
+that viewer; copied references can be resolved while the viewer remains open. Selection does not
+send a message into Codex: the agent reads the chosen evidence when the user asks a question.
+
+For a step plus context exceeding 128 KiB, `read({query:{kind:'step',...}})` returns
+`step: null`, `contentTruncated: true`, and `contentQuery`. Follow that query with
+`kind: 'step-content'` to read the exact serialized step JSON in character chunks (maximum
+32768 per request); concatenate chunks using `nextOffset` before parsing. This avoids silently
+dropping an oversized historical message or injecting it into an agent prompt. Selected evidence
+respects the current playback phase: input-only selections exclude recorded outputs. Explicit
+saved-resource inspection is labeled separately from the material visible at the current time.

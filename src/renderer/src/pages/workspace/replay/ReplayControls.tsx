@@ -53,6 +53,8 @@ import {
 
 export type ReplayControlsProps = {
   playing: boolean
+  skipNoNewRecords?: boolean
+  onSkipNoNewRecords?: (skip: boolean) => void
   // Observation steps are recorded snapshots, without a reconstructed presentation clock.
   recordNavigation?: boolean
   ready: boolean
@@ -604,6 +606,16 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
           ) : null}
         </PopoverContent>
       </Popover>
+      {props.skipNoNewRecords !== undefined ? (
+        <label className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={props.skipNoNewRecords}
+            onChange={(event) => props.onSkipNoNewRecords?.(event.currentTarget.checked)}
+          />
+          {t('Skip intervals without new records')}
+        </label>
+      ) : null}
       <div
         className="flex shrink-0 items-center gap-1"
         role="group"

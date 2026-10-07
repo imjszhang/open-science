@@ -8,6 +8,9 @@ import {
 } from './recording-discovery'
 
 type DiscoveryState = {
+  supportingResourceIds?: string[]
+  source?: ReplayDocument
+  scanned?: boolean
   recordings: RecordingCandidate[]
   nextOffset: number
   unchecked: number
@@ -39,7 +42,7 @@ export const useRecordingDiscovery = (document: ReplayDocument | undefined): Rec
       if (request.current) return
       const reader = window.api?.artifacts?.readPreview
       if (!reader || !window.api?.observations?.openRecorded) {
-        setState({ ...emptyState(), supported: false })
+        setState({ ...emptyState(), source: document, scanned: true, supported: false })
         return
       }
       const generation = scope.current
@@ -51,6 +54,14 @@ export const useRecordingDiscovery = (document: ReplayDocument | undefined): Rec
         if (controller.signal.aborted || generation !== scope.current) return
         setState((previous) => ({
           ...page,
+          supportingResourceIds: [
+            ...new Set([
+              ...(reset ? [] : (previous.supportingResourceIds ?? [])),
+              ...(page.supportingResourceIds ?? [])
+            ])
+          ],
+          source: document,
+          scanned: true,
           recordings: mergeRecordingCandidates(reset ? [] : previous.recordings, page.recordings),
           unavailable: (reset ? 0 : previous.unavailable) + page.unavailable,
           loading: false,
@@ -60,7 +71,7 @@ export const useRecordingDiscovery = (document: ReplayDocument | undefined): Rec
         if (request.current === controller) request.current = undefined
       }
     },
-    [candidates]
+    [candidates, document]
   )
   useEffect(() => {
     scope.current += 1
@@ -80,9 +91,15 @@ export const useRecordingDiscovery = (document: ReplayDocument | undefined): Rec
       request.current = undefined
     }
   }, [document, scan])
+  const loadMore = useCallback(
+    () => void scan(state.nextOffset).catch(() => undefined),
+    [scan, state.nextOffset]
+  )
+  const retry = useCallback(() => void scan(0, true).catch(() => undefined), [scan])
   return {
     ...state,
-    loadMore: () => void scan(state.nextOffset).catch(() => undefined),
-    retry: () => void scan(0, true).catch(() => undefined)
+    scanned: Boolean(state.scanned && state.source === document),
+    loadMore,
+    retry
   }
 }

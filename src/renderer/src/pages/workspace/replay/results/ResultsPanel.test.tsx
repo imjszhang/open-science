@@ -143,3 +143,33 @@ describe('independent immutable Results', () => {
     expect(readPreview).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('result publication times', () => {
+  it('shows known results as of the playhead and explicitly offers later and unknown results', () => {
+    const early = { ...entry('early.html'), availableAt: 100 }
+    const later = { ...entry('later.html'), availableAt: 300 }
+    const unknown = entry('unknown.html')
+    const read = vi.fn()
+    const view = render(
+      <ResultsPanel entries={[early, later, unknown]} recordedAt={200} read={read} />
+    )
+    expect(screen.getByRole('button', { name: /early.html/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /later.html/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /unknown.html/ })).toBeNull()
+    expect(screen.getByText(/Some results have no saved publication time/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'All saved results' }))
+    expect(screen.getByRole('button', { name: /later.html/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /unknown.html/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Available at this moment' }))
+    view.rerender(<ResultsPanel entries={[early, later, unknown]} recordedAt={50} read={read} />)
+    expect(screen.queryByRole('button', { name: /early.html/ })).toBeNull()
+    expect(read).not.toHaveBeenCalled()
+  })
+  it('keeps supporting media files separate without inferring a final result', () => {
+    render(<ResultsPanel entries={[{ ...entry('clip.webm'), technical: true }]} read={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /clip.webm/ })).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show technical attachments' }))
+    expect(screen.getByRole('button', { name: /clip.webm/ })).toBeTruthy()
+    expect(screen.queryByText('Final result')).toBeNull()
+  })
+})

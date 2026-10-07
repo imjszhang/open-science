@@ -24,6 +24,8 @@ export const replayViewStateSchema = z
     fingerprint: z.string().min(1).max(1024),
     generatorVersion: z.number().int().positive(),
     presentationVersion: z.number().int().positive().optional(),
+    // Local viewing state only. Legacy checkpoints used reconstructed presentation time.
+    clock: z.enum(['presentation', 'recorded']).optional(),
     branchId: z.string().min(1).max(1024),
     stepId: z.string().min(1).max(2048).optional(),
     stepOffsetMs: z.number().finite().nonnegative().optional(),
@@ -47,6 +49,7 @@ export const replayViewStateSchema = z
         z
           .object({
             branchId: z.string().min(1).max(1024),
+            clock: z.enum(['presentation', 'recorded']).optional(),
             stepId: z.string().min(1).max(2048).optional(),
             stepOffsetMs: z.number().finite().nonnegative(),
             timeMs: z.number().finite().nonnegative()

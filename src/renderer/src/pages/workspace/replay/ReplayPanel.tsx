@@ -46,6 +46,8 @@ import {
 import { createReplayPresentation } from './replay-presentation'
 import { ReplayStage, type ReplayMaterialView } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
+import { advanceResearchReplay, type ReplayRecordedRange } from './replay-recorded-gaps'
+import { formatReplayTime } from './replay-navigation'
 import type {
   RunObservationExecutionContext,
   RunObservationSnapshot
@@ -105,11 +107,45 @@ export type ReplayRecordedSource = Pick<
   | 'historyTruncated'
 >
 
+/** Host effects are explicitly scoped. A browser uses null and supplies read-only readers. */
+export type ReplayPanelHost = {
+  subscribeSeek: (receive: (target: ReplaySeekTarget) => void) => () => void
+  consumeSeek: (projectId: string, sessionId: string) => ReplaySeekTarget | undefined
+  publishPlayhead: (playhead: {
+    projectId: string
+    sourceSessionId: string
+    capture: () => SessionDiscussionCapture
+  }) => () => void
+}
+const nativeReplayHost: ReplayPanelHost = {
+  subscribeSeek: subscribeReplaySeek,
+  consumeSeek: consumeReplaySeek,
+  publishPlayhead: (playhead) => {
+    useSessionReplayStore.setState({ playhead })
+    return () => {
+      if (useSessionReplayStore.getState().playhead === playhead)
+        useSessionReplayStore.setState({ playhead: undefined })
+    }
+  }
+}
+const unavailableResourceReader: ReplayResourceReader = async () => ({
+  status: 'unavailable',
+  reason: 'read-failed'
+})
+const unavailableNotebookReader: ReplayNotebookRunReader = async () => ({
+  status: 'unavailable',
+  reason: 'load-failed'
+})
+
 export type ReplayPanelProps = {
+  host?: ReplayPanelHost | null
+  /** Actual recording coverage; timestamps are absolute, never inferred activity durations. */
+  recordedCoverage?: Readonly<Record<string, readonly ReplayRecordedRange[]>>
   /** Present only for branches rebuilt from actual recorded timestamps. */
   recordedTimeOrigins?: Readonly<Record<string, number>>
   materialViews?: readonly ReplayMaterialView[]
   materialViewRequest?: { id: string; revision: number }
+  onMaterialViewChange?: (id: string) => void
   live?: ReplayLiveSource
   recorded?: ReplayRecordedSource
   document: ReplayDocument
@@ -121,7 +157,7 @@ export type ReplayPanelProps = {
   onAskStep: (context: SessionDiscussionCapture) => void
   onChooseConversation?: (context: SessionDiscussionCapture) => void
   discussionPending?: boolean
-  onOpenEvidence: (resource: ReplayResource | undefined, step: ReplayStep) => void
+  onOpenEvidence?: (resource: ReplayResource | undefined, step: ReplayStep) => void
   readResource?: ReplayResourceReader
   readNotebookRun?: ReplayNotebookRunReader
   renderResource?: (resource: ReplayResource, onClose: () => void) => React.ReactNode
@@ -129,13 +165,24 @@ export type ReplayPanelProps = {
 
 const restoredPosition = (
   document: ReplayDocument,
-  view?: ReplayViewState
-): { branchId: string; positionMs: number; speed: ReplaySpeed; relocated: boolean } => {
+  view?: ReplayViewState,
+  origins?: Readonly<Record<string, number>>
+): {
+  branchId: string
+  positionMs: number
+  stepOffsetMs: number
+  clock: 'presentation' | 'recorded'
+  speed: ReplaySpeed
+  relocated: boolean
+} => {
   const branch =
     document.branches.find((item) => item.id === view?.branchId) ??
     document.branches.find((item) => item.id === document.defaultBranchId) ??
     document.branches[0]
+  const clock = branch && origins?.[branch.id] !== undefined ? 'recorded' : 'presentation'
+  const matchingClock = (view?.clock ?? 'presentation') === clock
   const exact =
+    matchingClock &&
     view?.fingerprint === document.source.fingerprint &&
     view.generatorVersion === document.generatorVersion &&
     (view.presentationVersion === undefined ||
@@ -148,8 +195,12 @@ const restoredPosition = (
           (evidence) => evidence.kind === view.anchor?.kind && evidence.id === view.anchor.id
         ))
   )
-  const fallback = step ? step.startMs + Math.min(step.durationMs, view?.stepOffsetMs ?? 0) : 0
+  const stepOffsetMs =
+    step && matchingClock ? Math.min(step.durationMs, view?.stepOffsetMs ?? 0) : 0
+  const fallback = step ? step.startMs + stepOffsetMs : 0
   return {
+    clock,
+    stepOffsetMs,
     branchId: branch?.id ?? document.defaultBranchId,
     // Review records can arrive independently of the Session revision. Prefer the stable
     // step offset even when the Session fingerprint still matches.
@@ -171,9 +222,12 @@ const defaultNotebookReader: ReplayNotebookRunReader = (source, index, options) 
 
 const ReplayPanelContent = ({
   document: incomingDocument,
+  host = nativeReplayHost,
+  recordedCoverage,
   recordedTimeOrigins,
   materialViews,
   materialViewRequest,
+  onMaterialViewChange,
   live: liveSource,
   recorded,
   initialView,
@@ -185,9 +239,9 @@ const ReplayPanelContent = ({
   onChooseConversation,
   discussionPending = false,
   onOpenEvidence,
-  readResource,
+  readResource = host ? undefined : unavailableResourceReader,
   renderResource,
-  readNotebookRun = defaultNotebookReader
+  readNotebookRun = host ? defaultNotebookReader : unavailableNotebookReader
 }: ReplayPanelProps): React.JSX.Element => {
   const { t, i18n } = useTranslation()
   // Pick the narrow historical fields explicitly, even if an untyped caller supplies extras.
@@ -234,20 +288,35 @@ const ReplayPanelContent = ({
     )
   )
   const initial = useMemo(
-    () => restoredPosition(replayDocument, initialView),
-    [replayDocument, initialView]
+    () => restoredPosition(replayDocument, initialView, recordedTimeOrigins),
+    [replayDocument, initialView, recordedTimeOrigins]
   )
   const [branchPositions] = useState(
     () =>
       new Map(
         initialView?.branchPositions?.flatMap((position) => {
           if (!replayDocument.branches.some((branch) => branch.id === position.branchId)) return []
-          const restored = restoredPosition(replayDocument, {
-            ...initialView,
-            ...position,
-            anchor: undefined
-          })
-          return [[position.branchId, { ...position, timeMs: restored.positionMs }]]
+          const restored = restoredPosition(
+            replayDocument,
+            {
+              ...initialView,
+              ...position,
+              clock: position.clock,
+              anchor: undefined
+            },
+            recordedTimeOrigins
+          )
+          return [
+            [
+              position.branchId,
+              {
+                ...position,
+                clock: restored.clock,
+                stepOffsetMs: restored.stepOffsetMs,
+                timeMs: restored.positionMs
+              }
+            ]
+          ]
         })
       )
   )
@@ -256,6 +325,9 @@ const ReplayPanelContent = ({
   const [positionMs, setPositionMs] = useState(initial.positionMs)
   const [speed, setSpeed] = useState<ReplaySpeed>(initial.speed)
   const [playing, setPlaying] = useState(false)
+  const [skipNoNewRecords, setSkipNoNewRecords] = useState(false)
+  const [skipped, setSkipped] = useState<{ from: number; to: number }>()
+  const skippedFrame = useRef<{ from: number; to: number } | undefined>(undefined)
   const [ready, setReady] = useState(false)
   const [wide, setWide] = useState(false)
   const [liveProjectTabActive, setLiveProjectTabActive] = useState(false)
@@ -408,6 +480,7 @@ const ReplayPanelContent = ({
     fingerprint: replayDocument.source.fingerprint,
     generatorVersion: replayDocument.generatorVersion,
     presentationVersion: replayDocument.presentationVersion,
+    clock: recordedTimeOrigins?.[scene.branchId] === undefined ? 'presentation' : 'recorded',
     branchId: scene.branchId,
     stepId: scene.step?.id,
     stepOffsetMs: scene.step ? scene.positionMs - scene.step.startMs : 0,
@@ -420,6 +493,7 @@ const ReplayPanelContent = ({
       .filter((position) => position.branchId !== scene.branchId)
       .slice(-511)
       .concat({
+        clock: recordedTimeOrigins?.[scene.branchId] === undefined ? 'presentation' : 'recorded',
         branchId: scene.branchId,
         stepId: scene.step?.id,
         stepOffsetMs: scene.step ? scene.positionMs - scene.step.startMs : 0,
@@ -429,7 +503,12 @@ const ReplayPanelContent = ({
   useLayoutEffect(() => {
     viewRef.current = viewSnapshot
     for (const position of viewSnapshot.branchPositions ?? [])
-      branchPositions.set(position.branchId, position)
+      branchPositions.set(position.branchId, {
+        ...position,
+        clock:
+          position.clock ??
+          (recordedTimeOrigins?.[position.branchId] === undefined ? 'presentation' : 'recorded')
+      })
   })
   const checkpoint = useCallback(() => {
     if (viewRef.current) onViewChangeRef.current?.(structuredClone(viewRef.current))
@@ -468,16 +547,46 @@ const ReplayPanelContent = ({
     let frame = 0
     let previous: number | undefined
     const advance = (time: number): void => {
-      if (previous !== undefined)
-        setPositionMs((position) =>
-          Math.min(scene.durationMs, position + Math.min(250, time - previous!) * speed)
-        )
+      if (previous !== undefined) {
+        setPositionMs((position) => {
+          const next = advanceResearchReplay({
+            positionMs: position,
+            elapsedMs: Math.min(250, time - previous!) * speed,
+            durationMs: scene.durationMs,
+            origin: recordedTimeOrigins?.[scene.branchId],
+            steps: branch?.steps ?? [],
+            ranges: recordedCoverage?.[scene.branchId] ?? [],
+            skip: skipNoNewRecords
+          })
+          if (next.skipped) skippedFrame.current = next.skipped
+          return next.positionMs
+        })
+      }
       previous = time
       frame = requestAnimationFrame(advance)
     }
     frame = requestAnimationFrame(advance)
     return () => cancelAnimationFrame(frame)
-  }, [playing, active, ready, speed, scene.durationMs, scene.ended])
+  }, [
+    playing,
+    active,
+    ready,
+    speed,
+    scene.durationMs,
+    scene.ended,
+    scene.branchId,
+    recordedTimeOrigins,
+    recordedCoverage,
+    branch,
+    skipNoNewRecords
+  ])
+
+  useEffect(() => {
+    if (skippedFrame.current) {
+      setSkipped(skippedFrame.current)
+      skippedFrame.current = undefined
+    }
+  }, [positionMs])
 
   if (playing && (!active || scene.ended)) setPlaying(false)
 
@@ -601,6 +710,7 @@ const ReplayPanelContent = ({
       setPlaying(false)
       setSelectedResourceId(undefined)
       setPositionMs(position)
+      setSkipped(undefined)
       setConversationFocusRequest((request) => request + 1)
       setNotebookFollowing(true)
 
@@ -610,14 +720,14 @@ const ReplayPanelContent = ({
     [setPlaying, setPositionMs, setSelectedResourceId, inspect]
   )
   useEffect(() => {
-    if (live) return
+    if (live || !host) return
     const receive = (target: ReplaySeekTarget): void => {
       if (
         target.projectId !== replayDocument.source.projectId ||
         target.sourceSessionId !== replayDocument.source.sessionId
       )
         return
-      consumeReplaySeek(target.projectId, target.sourceSessionId)
+      host.consumeSeek(target.projectId, target.sourceSessionId)
       setPlaying(false)
       const targetBranch = replayDocument.branches.find((item) => item.id === target.branchId)
       const step = targetBranch?.steps.find((item) => item.id === target.stepId)
@@ -630,14 +740,14 @@ const ReplayPanelContent = ({
       const offset = Number.isFinite(target.stepOffsetMs) ? target.stepOffsetMs! : 0
       seek(step.startMs + Math.max(0, Math.min(step.durationMs, offset)))
     }
-    const unsubscribe = subscribeReplaySeek(receive)
-    const pending = consumeReplaySeek(
+    const unsubscribe = host.subscribeSeek(receive)
+    const pending = host.consumeSeek(
       replayDocument.source.projectId,
       replayDocument.source.sessionId
     )
     if (pending) receive(pending)
     return unsubscribe
-  }, [replayDocument, seek, live])
+  }, [replayDocument, seek, live, host])
 
   // The live frame is available to replay consumers; explicit Ask actions capture their own snapshot.
   const captureCurrent = useRef(() =>
@@ -649,18 +759,14 @@ const ReplayPanelContent = ({
   })
   const hasStep = !!scene.step
   useEffect(() => {
-    if (!active || !hasStep || live) return
+    if (!active || !hasStep || live || !host) return
     const playhead = {
       projectId: replayDocument.source.projectId,
       sourceSessionId: replayDocument.source.sessionId,
       capture: () => captureCurrent.current()
     }
-    useSessionReplayStore.setState({ playhead })
-    return () => {
-      if (useSessionReplayStore.getState().playhead === playhead)
-        useSessionReplayStore.setState({ playhead: undefined })
-    }
-  }, [active, hasStep, replayDocument, live])
+    return host.publishPlayhead(playhead)
+  }, [active, hasStep, replayDocument, live, host])
 
   const ask = (): void => {
     pause()
@@ -811,7 +917,11 @@ const ReplayPanelContent = ({
                   ? t(
                       'Only observed records are shown. Earlier activity may not have been captured.'
                     )
-                  : t('Presentation timing is reconstructed; recorded results are unchanged.')}
+                  : recordedTimeOrigins?.[scene.branchId] !== undefined
+                    ? t(
+                        'Playback follows recorded research timestamps; gaps do not imply inactivity.'
+                      )
+                    : t('Presentation timing is reconstructed; recorded results are unchanged.')}
               </p>
               {replayDocument.source.packageOrigin ? (
                 <div className="border-t border-border pt-3">
@@ -1208,6 +1318,8 @@ const ReplayPanelContent = ({
           materialsId={materialsId}
           materialViews={materialViews}
           materialPlayback={{
+            branchId: scene.branchId,
+            positionMs: scene.positionMs,
             recordedAt:
               recordedTimeOrigins?.[scene.branchId] !== undefined
                 ? recordedTimeOrigins[scene.branchId] + scene.positionMs
@@ -1238,6 +1350,7 @@ const ReplayPanelContent = ({
           onMaterialViewChange={(id) => {
             pause()
             setMaterialViewId(id)
+            onMaterialViewChange?.(id)
           }}
           filesOpen={filesOpen}
           filesId={filesId}
@@ -1317,7 +1430,24 @@ const ReplayPanelContent = ({
           ) : null}
         </div>
       ) : null}
+      {skipped ? (
+        <p
+          role="status"
+          className="shrink-0 border-t border-border-200 px-3 py-1 text-xs text-text-300"
+        >
+          {t('Skipped an interval without new records: {{from}} → {{to}}', {
+            from: formatReplayTime(skipped.from),
+            to: formatReplayTime(skipped.to)
+          })}
+        </p>
+      ) : null}
       <ReplayControls
+        skipNoNewRecords={
+          recordedTimeOrigins?.[scene.branchId] !== undefined && !live
+            ? skipNoNewRecords
+            : undefined
+        }
+        onSkipNoNewRecords={setSkipNoNewRecords}
         key={scene.branchId}
         playing={playing}
         recordNavigation={Boolean(live)}
@@ -1328,7 +1458,9 @@ const ReplayPanelContent = ({
         steps={branch?.steps ?? EMPTY_STEPS}
         resources={replayDocument.resources}
         onPause={pause}
-        onOpenEvidence={(step) => (live ? seek(step.startMs) : onOpenEvidence(undefined, step))}
+        onOpenEvidence={(step) =>
+          live || !onOpenEvidence ? seek(step.startMs) : onOpenEvidence(undefined, step)
+        }
         speed={speed}
         onToggle={toggle}
         onPrevious={() => seek(branch?.steps[Math.max(0, scene.stepIndex - 1)]?.startMs ?? 0)}

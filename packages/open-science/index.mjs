@@ -353,6 +353,31 @@ export class OpenScienceClient {
         ])
       )
     )
+    this.replays = Object.freeze(
+      Object.fromEntries(
+        ['open', 'read', 'select', 'selection', 'revoke'].map((method) => [
+          method,
+          (payload, options = {}) => {
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+              throw new TypeError('Research replay requires an object request.')
+            if (
+              method === 'open' &&
+              (!payload.target ||
+                typeof payload.target.projectId !== 'string' ||
+                typeof payload.target.sessionId !== 'string')
+            )
+              throw new TypeError('Research replay requires a receiving Project and Session.')
+            if (method !== 'open' && (typeof payload.viewerId !== 'string' || !payload.viewerId))
+              throw new TypeError('Research replay requires a viewer ID.')
+            return this.request(`/api/v1/replays/${method}`, {
+              ...options,
+              method: 'POST',
+              body: payload
+            })
+          }
+        ])
+      )
+    )
     this.projectRecordings = Object.freeze(
       Object.fromEntries(
         [

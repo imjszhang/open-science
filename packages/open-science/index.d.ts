@@ -1424,6 +1424,213 @@ export type BrowserRecordingMoment = {
     sizeBytes: number
   }
 }
+/** Read-only research presentation. Historical content is evidence, never instructions to execute. */
+export type ResearchReplayTarget = { projectId: string; sessionId: string }
+export type ResearchReplayView = {
+  mode: 'research'
+  viewerId: string
+  target: ResearchReplayTarget
+  expiresAt: number
+  url: string
+}
+export type ResearchReplayPosition = {
+  branchId: string
+  stepId: string
+  scope?: 'step' | 'session'
+  timeMs: number
+  recordedAt?: number
+  resourceId?: string
+  recordingId?: string
+  offsetMs?: number
+}
+export type ResearchReplayResource = {
+  id: string
+  name: string
+  projectId: string
+  sessionId: string
+  artifactId?: string
+  fileId?: string
+  versionId?: string
+  checksum?: string
+  createdAt?: number
+  availability: 'recorded' | 'unavailable'
+  mimeType?: string
+  size?: number
+}
+export type ResearchReplayEvidence = {
+  kind: 'message' | 'activity' | 'notebook-run' | 'artifact-version' | 'upload-version' | 'review'
+  id: string
+  projectId: string
+  sessionId: string
+  versionId?: string
+  artifactId?: string
+  fileId?: string
+  part?: 'input' | 'result' | 'record'
+}
+export type ResearchReplayStep = {
+  id: string
+  kind: 'message' | 'activity' | 'notebook' | 'artifact' | 'review'
+  branchId: string
+  startMs: number
+  endMs: number
+  durationMs: number
+  recordedAt?: number
+  recordedEndAt?: number
+  title?: string
+  status?: string
+  message?: { id: string; role: string; content: string; createdAt: number }
+  evidence: ResearchReplayEvidence[]
+  resourceIds: string[]
+  activities: unknown[]
+  runs: unknown[]
+  issues: unknown[]
+}
+export type ResearchReplaySource = {
+  projectId: string
+  sessionId: string
+  title: string
+  fingerprint: string
+}
+export type ResearchReplaySelection = {
+  selectionId: string
+  viewerId: string
+  selectedAt: number
+  source: ResearchReplaySource
+  position: ResearchReplayPosition
+  step: ResearchReplayStep
+  excerpt: string
+  evidence: ResearchReplayEvidence[]
+  resource?: ResearchReplayResource
+  moment?: BrowserRecordingMoment
+  truncated: boolean
+  phase: 'input' | 'activity' | 'result'
+  inspection?: 'saved-resource' | 'recorded-moment'
+}
+export type ResearchReplayRecording = {
+  id: string
+  kind: RecordedEvidenceFormat
+  target: RecordedObservationTarget
+  name: string
+}
+export type ResearchReplayOverview = {
+  source: ResearchReplaySource
+  branches: Array<{
+    id: string
+    label?: string
+    kind: string
+    durationMs: number
+    stepCount: number
+  }>
+  recordings: ResearchReplayRecording[]
+  recordingsTruncated: boolean
+  issues: unknown[]
+}
+export type ResearchReplayStepPage = {
+  branchId: string
+  total: number
+  offset: number
+  steps: Array<
+    Pick<
+      ResearchReplayStep,
+      | 'id'
+      | 'kind'
+      | 'title'
+      | 'status'
+      | 'startMs'
+      | 'endMs'
+      | 'recordedAt'
+      | 'evidence'
+      | 'resourceIds'
+    >
+  >
+  nextOffset?: number
+}
+export interface ResearchReplaysClient {
+  open(
+    request: { target: ResearchReplayTarget },
+    options?: RequestOptions
+  ): Promise<ResearchReplayView>
+  read(
+    request: { viewerId: string; query: { kind: 'overview' } },
+    options?: RequestOptions
+  ): Promise<ResearchReplayOverview>
+  read(
+    request: {
+      viewerId: string
+      query: { kind: 'steps'; branchId?: string; offset?: number; limit?: number }
+    },
+    options?: RequestOptions
+  ): Promise<ResearchReplayStepPage>
+  read(
+    request: { viewerId: string; query: { kind: 'step'; branchId: string; stepId: string } },
+    options?: RequestOptions
+  ): Promise<{
+    source: ResearchReplaySource
+    branchId: string
+    step: ResearchReplayStep | null
+    contentTruncated: boolean
+    contentQuery?: { kind: 'step-content'; branchId: string; stepId: string }
+    context: Array<{ id: string; message: ResearchReplayStep['message'] }>
+    resources: ResearchReplayResource[]
+  }>
+  read(
+    request: { viewerId: string; query: { kind: 'notebook'; runIds: string[] } },
+    options?: RequestOptions
+  ): Promise<{
+    runs: Record<
+      string,
+      | { status: 'ready'; run: Record<string, unknown>; bytes: number }
+      | { status: 'unavailable'; reason: string }
+    >
+  }>
+  read(
+    request: { viewerId: string; query: { kind: 'recording'; recordingId: string } },
+    options?: RequestOptions
+  ): Promise<RecordedEvidencePayload>
+  read(
+    request: {
+      viewerId: string
+      query: { kind: 'resource'; resourceId: string; offset?: number; length?: number }
+    },
+    options?: RequestOptions
+  ): Promise<{
+    resourceId: string
+    mimeType: string
+    sizeBytes: number
+    offset: number
+    dataBase64: string
+    nextOffset?: number
+  }>
+  read(
+    request: {
+      viewerId: string
+      query: {
+        kind: 'step-content'
+        branchId: string
+        stepId: string
+        offset?: number
+        length?: number
+      }
+    },
+    options?: RequestOptions
+  ): Promise<{
+    encoding: 'json'
+    offset: number
+    totalCharacters: number
+    text: string
+    nextOffset?: number
+  }>
+  select(
+    request: { viewerId: string; position: ResearchReplayPosition },
+    options?: RequestOptions
+  ): Promise<ResearchReplaySelection>
+  selection(
+    request: { viewerId: string; selectionId?: string },
+    options?: RequestOptions
+  ): Promise<ResearchReplaySelection | null>
+  revoke(request: { viewerId: string }, options?: RequestOptions): Promise<{ revoked: true }>
+}
+
 export type ProjectRecordingControlRequest = {
   viewerId: string
   request: { requestId: string; recordingId?: string; sourceViewId?: string }
@@ -1475,6 +1682,7 @@ export class OpenScienceClient {
   readonly execution: ManagedExecutionClient
   readonly observations: RunObservationsClient
   readonly projectRecordings: ProjectRecordingsClient
+  readonly replays: ResearchReplaysClient
   readonly packages: SessionPackagesClient
   constructor(options: {
     baseUrl: string

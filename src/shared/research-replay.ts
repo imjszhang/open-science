@@ -1,0 +1,93 @@
+import { z } from 'zod'
+import type { ReplayDocument, ReplayStep, ReplayResource, ReplayNotebookRunDetails } from './replay'
+import type { RecordedEvidencePayload, RecordedObservationTarget } from './run-observation-recorded'
+import type { BrowserRecordingMoment } from './browser-recording'
+
+// Application read model only: no change to the .science package protocol.
+const id = z.string().min(1).max(256)
+export const researchReplayTargetSchema = z.object({ projectId: id, sessionId: id }).strict()
+export type ResearchReplayTarget = z.infer<typeof researchReplayTargetSchema>
+export const researchReplayPositionSchema = z
+  .object({
+    branchId: id,
+    stepId: id,
+    scope: z.enum(['step', 'session']).optional(),
+    timeMs: z.number().finite().nonnegative(),
+    recordedAt: z.number().finite().nonnegative().optional(),
+    resourceId: id.optional(),
+    recordingId: id.optional(),
+    offsetMs: z.number().finite().nonnegative().optional()
+  })
+  .strict()
+export type ResearchReplayPosition = z.infer<typeof researchReplayPositionSchema>
+export const researchReplayReadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('overview') }).strict(),
+  z
+    .object({
+      kind: z.literal('steps'),
+      branchId: id.optional(),
+      offset: z.number().int().nonnegative().optional(),
+      limit: z.number().int().min(1).max(50).optional()
+    })
+    .strict(),
+  z.object({ kind: z.literal('step'), branchId: id, stepId: id }).strict(),
+  z
+    .object({
+      kind: z.literal('step-content'),
+      branchId: id,
+      stepId: id,
+      offset: z.number().int().nonnegative().optional(),
+      length: z.number().int().min(1).max(32768).optional()
+    })
+    .strict(),
+  z.object({ kind: z.literal('notebook'), runIds: z.array(id).min(1).max(8) }).strict(),
+  z.object({ kind: z.literal('recording'), recordingId: id }).strict(),
+  z
+    .object({
+      kind: z.literal('resource'),
+      resourceId: id,
+      offset: z.number().int().nonnegative().optional(),
+      length: z.number().int().min(1).max(262144).optional()
+    })
+    .strict()
+])
+export type ResearchReplayRead = z.infer<typeof researchReplayReadSchema>
+export type ResearchReplayRecording = {
+  id: string
+  kind: 'web-recording' | 'project-recording' | 'run-observation'
+  target: RecordedObservationTarget
+  name: string
+}
+export type ResearchReplayDocument = {
+  document: ReplayDocument
+  supportingResourceIds?: string[]
+  recordings: ResearchReplayRecording[]
+  recordingsTruncated: boolean
+  unavailableRecordingIds: string[]
+}
+export type ResearchReplaySelection = {
+  selectionId: string
+  viewerId: string
+  selectedAt: number
+  source: ReplayDocument['source']
+  position: ResearchReplayPosition
+  step: ReplayStep
+  excerpt: string
+  evidence: ReplayStep['evidence']
+  resource?: ReplayResource
+  moment?: BrowserRecordingMoment
+  truncated: boolean
+  phase: 'input' | 'activity' | 'result'
+  inspection?: 'saved-resource' | 'recorded-moment'
+}
+export type ResearchReplayAccess = {
+  mode: 'research'
+  viewerId: string
+  target: ResearchReplayTarget
+  expiresAt: number
+  url: string
+}
+export type ResearchReplayNotebook = { runs: Record<string, ReplayNotebookRunDetails> }
+export type ResearchReplayRecordingPayload = RecordedEvidencePayload
+export const RESEARCH_REPLAY_METHODS = ['open', 'read', 'select', 'selection', 'revoke'] as const
+export type ResearchReplayMethod = (typeof RESEARCH_REPLAY_METHODS)[number]

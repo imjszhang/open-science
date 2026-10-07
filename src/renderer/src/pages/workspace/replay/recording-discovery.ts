@@ -36,6 +36,7 @@ export type RecordingCandidate = {
   browserIndex?: { recordingId: string; checkpoint: number | null }
 }
 export type RecordingDiscoveryPage = {
+  supportingResourceIds?: string[]
   recordings: RecordingCandidate[]
   nextOffset: number
   unchecked: number
@@ -244,6 +245,7 @@ export const discoverRecordingPage = async (
   await Promise.all(Array.from({ length: Math.min(2, page.length) }, worker))
   const nextOffset = start + page.length
   return {
+    supportingResourceIds: [...found.values()].map((candidate) => candidate.resource.id),
     recordings: mergeRecordingCandidates(
       [...found.entries()].sort(([left], [right]) => left - right).map(([, value]) => value)
     ),

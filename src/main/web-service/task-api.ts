@@ -281,6 +281,16 @@ class HeadlessTaskApi {
     return result
   }
 
+  async callResearchReplay(
+    method: import('../../shared/research-replay').ResearchReplayMethod,
+    payload: unknown
+  ): Promise<unknown> {
+    const port = this.ports.managedExecution?.replays
+    if (!port)
+      throw new ManagedExecutionExternalError('unavailable', 'Research replay is unavailable.')
+    return port.call(method, payload, this.currentCallerContext())
+  }
+
   async callProjectRecordings(
     method: import('../browser-recordings/external-port').BrowserRecordingExternalMethod,
     payload: unknown
