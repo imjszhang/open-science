@@ -5,6 +5,7 @@ import {
   runObservationChangesRequestSchema,
   runObservationSelectionRequestSchema,
   runObservationSnapshotSchema,
+  runObservationDemoViewingSchema,
   runObservationTargetSchema,
   type RunObservationArtifact,
   type RunObservationExecutionContext,
@@ -342,7 +343,15 @@ export class RunObservationOwner {
           : {}),
         conditionChanges: (source.executionContext?.conditionChanges ?? [])
           .slice(0, 32)
-          .map((text) => redact(text).slice(0, 2048))
+          .map((text) => redact(text).slice(0, 2048)),
+        ...(source.executionContext?.purpose === 'offline-demo' &&
+        source.executionContext.demoViewing
+          ? {
+              demoViewing: runObservationDemoViewingSchema.parse(
+                source.executionContext.demoViewing
+              )
+            }
+          : {})
       }
     }
     const fingerprint = createHash('sha256').update(JSON.stringify(projection)).digest('hex')

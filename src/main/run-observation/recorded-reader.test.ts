@@ -539,7 +539,7 @@ describe('receiving-session recorded observation reader', () => {
     }
   }, 60000)
 
-  it('attests native duplicate-content Versions through the exact Main publication and preserves them through .science', async () => {
+  const attestNativeContext = async (purpose: 'research' | 'offline-demo'): Promise<void> => {
     const h = await setup()
     const runTarget = {
       ...scope,
@@ -653,19 +653,33 @@ describe('receiving-session recorded observation reader', () => {
       })
       const target = { ...scope, artifactId: artifact.artifactId, versionId: artifact.versionId }
       const executionContext = {
-        purpose: 'research' as const,
-        profileName: 'Small external baseline',
-        conditionChanges: ['Two steps instead of the original full benchmark']
+        purpose,
+        ...(purpose === 'research' ? { profileName: 'Small external baseline' } : {}),
+        conditionChanges:
+          purpose === 'research' ? ['Two steps instead of the original full benchmark'] : [],
+        ...(purpose === 'offline-demo'
+          ? {
+              demoViewing: {
+                mode: 'until-stop-or-timeout' as const,
+                timeoutMs: 600000,
+                endReason: 'process-exited' as const
+              }
+            }
+          : {})
       }
       const collectionReceipt = {
         kind: 'managed-research-execution',
         version: 1,
         purpose: executionContext.purpose,
-        executionProfile: {
-          displayName: executionContext.profileName,
-          conditionChanges: executionContext.conditionChanges,
-          variables: { PRIVATE_IGNORED: 'not-part-of-viewer' }
-        },
+        ...(purpose === 'research'
+          ? {
+              executionProfile: {
+                displayName: executionContext.profileName,
+                conditionChanges: executionContext.conditionChanges,
+                variables: { PRIVATE_IGNORED: 'not-part-of-viewer' }
+              }
+            }
+          : { demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 600000 } }),
         result: {
           runId: runTarget.runId,
           executionInvocationId: runTarget.executionInvocationId,
@@ -697,7 +711,13 @@ describe('receiving-session recorded observation reader', () => {
       const conflicting = await writePublished({
         filename: 'another-name.json',
         contentType: 'application/json',
-        source: { content: JSON.stringify({ ...collectionReceipt, purpose: 'offline-demo' }) }
+        source: {
+          content: JSON.stringify({
+            ...collectionReceipt,
+            purpose: purpose === 'research' ? 'offline-demo' : 'research',
+            demoViewing: undefined
+          })
+        }
       })
       expect((await h.reader.read(target)).executionContext?.purpose).toBe('unknown')
       await h.fixture.client.artifactVersion.update({
@@ -1041,5 +1061,10 @@ describe('receiving-session recorded observation reader', () => {
       await exporter.close()
       await importer.close()
     }
-  }, 60000)
+  }
+  it.each(['research', 'offline-demo'] as const)(
+    'attests native duplicate-content Versions and preserves %s context through .science',
+    attestNativeContext,
+    60000
+  )
 })

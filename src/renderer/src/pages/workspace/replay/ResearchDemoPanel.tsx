@@ -17,6 +17,7 @@ import type {
 } from '../../../../../shared/research-demo'
 import { RunObservationPreview } from '../RunObservationPreview'
 import { useObservationQuestionRecovery } from './use-observation-question-recovery'
+import { DemoViewingNotice } from './DemoViewingNotice'
 
 const researchDemoIsActive = (state: ResearchDemoState): boolean =>
   ['preparing', 'starting', 'running', 'saving', 'recovery-pending'].includes(state)
@@ -413,6 +414,16 @@ const ResearchDemoPanelContent = ({ source, isActive }: Props): React.JSX.Elemen
               </label>
               {candidate?.description ? (
                 <p className="text-sm text-text-200">{candidate.description}</p>
+              ) : null}
+              {candidate?.status === 'ready' ? (
+                <DemoViewingNotice
+                  context={{
+                    purpose: 'offline-demo',
+                    conditionChanges: [],
+                    demoViewing: candidate.demoViewing
+                  }}
+                  phase="preparing"
+                />
               ) : null}
               {candidate?.substitutions.length ? (
                 <div className="space-y-1 text-xs text-text-300">

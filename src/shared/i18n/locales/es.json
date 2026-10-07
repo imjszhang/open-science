@@ -7516,6 +7516,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "Demostración del proyecto sin conexión. No reproduce el experimento original.",
     "A research execution is not, by itself, evidence of successful reproduction.": "La ejecución de una investigación no constituye, por sí sola, una prueba de reproducción exitosa.",
     "Execution conditions": "Condiciones de ejecución",
-    "Recorded configuration: {{name}}": "Configuración registrada: {{name}}"
+    "Recorded configuration: {{name}}": "Configuración registrada: {{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Esta demostración mantiene abierta la página del proyecto después de completar sus acciones. Detenga la demostración cuando termine de verla.",
+    "This demo’s project page closes when its program exits.": "La página del proyecto de esta demostración se cierra cuando finaliza su programa.",
+    "The viewing time limit was not recorded for this demo.": "No se registró el límite de tiempo de visualización de esta demostración.",
+    "The viewing time limit was reached.": "Se alcanzó el límite de tiempo de visualización.",
+    "The run was stopped.": "La ejecución se detuvo.",
+    "The run failed.": "La ejecución falló.",
+    "The run was interrupted.": "La ejecución se interrumpió.",
+    "The run has ended.": "La ejecución ha finalizado.",
+    "The run timed out.": "Se agotó el tiempo de ejecución.",
+    "The live project page is closed.": "La página del proyecto en tiempo real está cerrada.",
+    "Result files recorded at this step": "Archivos de resultados registrados en este paso",
+    "No result files were recorded at this step.": "No se registraron archivos de resultados en este paso.",
+    "Evidence from the selected step": "Evidencia del paso seleccionado",
+    "This is a recorded image, not a live project page.": "Esta es una imagen guardada, no una página del proyecto en tiempo real.",
+    "Source step: {{step}}": "Paso de origen: {{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Tiempo máximo de ejecución de la demostración: {{minutes}} min. El programa puede finalizar antes."
   }
 }

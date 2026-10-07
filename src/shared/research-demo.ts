@@ -2,7 +2,11 @@ import { z } from 'zod'
 import { isPortableResearchReproductionPath } from './research-reproduction'
 import { managedOutputSelectionSchema } from './managed-execution'
 import { runtimeViewLaunchSchema } from './runtime-view'
-import type { RunObservationSelection, RunObservationTarget } from './run-observation'
+import type {
+  RunObservationDemoViewingAdmission,
+  RunObservationSelection,
+  RunObservationTarget
+} from './run-observation'
 import type { RecordedObservationTarget } from './run-observation-recorded'
 
 export const RESEARCH_DEMO_FORMAT = 'open-science-replay-demo'
@@ -34,6 +38,11 @@ export const researchDemoDescriptionSchema = z
       .max(64)
       .default([]),
     timeoutMs: z.number().int().min(1000).max(600_000),
+    // The author keeps the same process serving after its demonstration actions finish.
+    viewing: z
+      .object({ mode: z.literal('until-stop-or-timeout') })
+      .strict()
+      .optional(),
     outputs: z.array(managedOutputSelectionSchema).max(100).default([]),
     localServicePort: z.number().int().min(1024).max(65535).optional(),
     projectView: runtimeViewLaunchSchema.optional()
@@ -41,6 +50,9 @@ export const researchDemoDescriptionSchema = z
   .strict()
   .refine((value) => !value.projectView || value.localServicePort !== undefined, {
     message: 'A project view requires an owned local service.'
+  })
+  .refine((value) => !value.viewing || value.projectView !== undefined, {
+    message: 'A viewing lifetime requires a project view.'
   })
 export type ResearchDemoDescription = z.infer<typeof researchDemoDescriptionSchema>
 
@@ -141,6 +153,7 @@ export type ResearchDemoCandidate = {
   status: 'ready' | 'blocked'
   blockers: ResearchDemoBlockReason[]
   substitutions: string[]
+  demoViewing?: RunObservationDemoViewingAdmission
 }
 export type ResearchDemoInspection = {
   source: ResearchDemoSource & { identity: string; title?: string }
@@ -163,6 +176,7 @@ export type ResearchDemoReceipt = {
   title: string
   substitutions: string[]
   purpose: 'offline-demo'
+  demoViewing?: RunObservationDemoViewingAdmission
   sessionId?: string
   operationRequestId?: string
   runTarget?: RunObservationTarget

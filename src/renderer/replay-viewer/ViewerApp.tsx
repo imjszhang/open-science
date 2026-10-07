@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '../src/components/error-notice'
 import { Button } from '../src/components/ui/button'
 import { LiveReplayView } from '../src/pages/workspace/replay/LiveReplayView'
-import { observationSourceIdentity } from '../src/lib/replay/live-source'
+import { observationRecordId, observationSourceIdentity } from '../src/lib/replay/live-source'
 import type { ReplayResource } from '../../shared/replay'
 import type { RunObservationSelection, RunObservationSnapshot } from '../../shared/run-observation'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
@@ -337,26 +337,11 @@ export const ViewerApp = ({
             context.canInteract ? { opening, onOpen: () => void openProject() } : undefined
           }
           renderRecordedSurface={(record) => {
-            // The Run owner releases its live image cache at cleanup. Absence from that cache
-            // after completion is not evidence that no image was recorded in the archive.
-            if (snapshot.run?.status !== 'running' && snapshot.run?.status !== 'queued')
-              return (
-                <div className="p-4 text-sm text-muted-foreground">
-                  {recordingStatus ? (
-                    <ObservationRecordingStatus
-                      status={recordingStatus}
-                      onOpenArchive={archiveAction}
-                      openingArchive={archiveOpening}
-                    />
-                  ) : (
-                    <p role="status">{t('Recording status is unavailable.')}</p>
-                  )}
-                </div>
-              )
             const frames = capturesForObservation(captured.captures, record)
-            return frames.length ? (
+            const images = frames.length ? (
               <RecordedProjectImages
                 key={`${record.cursor.epoch}:${record.cursor.sequence}`}
+                sourceStep={observationRecordId(record)}
                 images={frames.map((frame) => ({
                   id: frame.captureId,
                   capture: frame.capture,
@@ -365,6 +350,28 @@ export const ViewerApp = ({
                 readImage={captured.readImage}
               />
             ) : undefined
+            // The Run owner releases its live image cache at cleanup. Absence from that cache
+            // after completion is not evidence that no image was recorded in the archive.
+            const ended = snapshot.run?.status !== 'running' && snapshot.run?.status !== 'queued'
+            if (!images && !ended) return undefined
+            // Keep the frame selector mounted when completion adds the archive controls.
+            // A terminal update must not reset a user's selected image within the same step.
+            return (
+              <div className="space-y-3 text-sm text-muted-foreground">
+                {images}
+                {ended ? (
+                  recordingStatus ? (
+                    <ObservationRecordingStatus
+                      status={recordingStatus}
+                      onOpenArchive={archiveAction}
+                      openingArchive={archiveOpening}
+                    />
+                  ) : (
+                    <p role="status">{t('Recording status is unavailable.')}</p>
+                  )
+                ) : null}
+              </div>
+            )
           }}
           renderLiveActions={
             context.canCapture

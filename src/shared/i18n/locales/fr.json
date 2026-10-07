@@ -7516,6 +7516,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "Démonstration du projet hors ligne. Elle ne reproduit pas l’expérience d’origine.",
     "A research execution is not, by itself, evidence of successful reproduction.": "L’exécution d’une recherche ne constitue pas, à elle seule, une preuve de reproduction réussie.",
     "Execution conditions": "Conditions d’exécution",
-    "Recorded configuration: {{name}}": "Configuration enregistrée : {{name}}"
+    "Recorded configuration: {{name}}": "Configuration enregistrée : {{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Cette démo garde la page du projet ouverte après la fin de ses actions. Arrêtez la démo lorsque vous avez terminé la consultation.",
+    "This demo’s project page closes when its program exits.": "La page du projet de cette démo se ferme lorsque son programme se termine.",
+    "The viewing time limit was not recorded for this demo.": "Aucune limite de durée de consultation n’a été enregistrée pour cette démo.",
+    "The viewing time limit was reached.": "La limite de durée de consultation a été atteinte.",
+    "The run was stopped.": "L’exécution a été arrêtée.",
+    "The run failed.": "L’exécution a échoué.",
+    "The run was interrupted.": "L’exécution a été interrompue.",
+    "The run has ended.": "L’exécution est terminée.",
+    "The run timed out.": "Le délai d’exécution a été dépassé.",
+    "The live project page is closed.": "La page du projet en direct est fermée.",
+    "Result files recorded at this step": "Fichiers de résultats enregistrés à cette étape",
+    "No result files were recorded at this step.": "Aucun fichier de résultats n’a été enregistré à cette étape.",
+    "Evidence from the selected step": "Éléments de preuve de l’étape sélectionnée",
+    "This is a recorded image, not a live project page.": "Il s’agit d’une image enregistrée, et non d’une page du projet en direct.",
+    "Source step: {{step}}": "Étape source : {{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Durée maximale d’exécution de la démo : {{minutes}} min. Le programme peut se terminer plus tôt."
   }
 }

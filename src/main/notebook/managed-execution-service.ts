@@ -35,7 +35,11 @@ import {
   type ManagedRuntimeDiagnostics
 } from '../../shared/managed-execution'
 import type { NotebookRunInputFile, NotebookRunRecord } from '../../shared/notebook'
-import type { RunObservationTarget } from '../../shared/run-observation'
+import {
+  runObservationDemoViewingAdmissionSchema,
+  type RunObservationDemoViewingAdmission,
+  type RunObservationTarget
+} from '../../shared/run-observation'
 import type { RunObservationRecordingStatus } from '../../shared/run-observation-recording-status'
 import type {
   RunObservationRecorder,
@@ -169,6 +173,7 @@ const journalSchema = z
     projectView: runtimeViewLaunchSchema.optional(),
     recordObservation: z.boolean().optional(),
     purpose: z.enum(['offline-demo', 'research']).optional(),
+    demoViewing: runObservationDemoViewingAdmissionSchema.optional(),
     supplementalInputs: z
       .array(
         z
@@ -205,6 +210,7 @@ const journalSchema = z
     result: resultSchema.optional()
   })
   .strict()
+  .refine((journal) => !journal.demoViewing || journal.purpose === 'offline-demo')
 type Journal = z.infer<typeof journalSchema>
 
 const inspectionTargetSchema = z
@@ -230,6 +236,7 @@ export type ManagedExecutionInspection = {
   requestId: string
   state: Journal['state']
   purpose?: Journal['purpose']
+  demoViewing?: Journal['demoViewing']
   executionProfile?: Pick<
     NonNullable<Journal['executionProfile']>,
     'displayName' | 'conditionChanges'
@@ -550,6 +557,9 @@ export class ManagedExecutionService {
       requestId: journal.requestId,
       state: journal.state,
       purpose: journal.purpose,
+      ...(journal.purpose === 'offline-demo' && journal.demoViewing
+        ? { demoViewing: journal.demoViewing }
+        : {}),
       ...(journal.executionProfile
         ? {
             executionProfile: {
@@ -1570,6 +1580,7 @@ export class ManagedExecutionService {
               runtime: publicRuntime(environment.runtime),
               environmentFingerprint: environment.fingerprint,
               purpose: journal.purpose,
+              demoViewing: journal.demoViewing,
               executionProfile: journal.executionProfile,
               transport: collection.transport,
               collectedWithoutExecution: recovery,
@@ -1600,17 +1611,19 @@ export class ManagedExecutionService {
   /** Main-only Replay entry. Public schemas cannot request this purpose or inject its policy. */
   async executeDemo(
     value: unknown,
-    options: { inputVersionIds?: string[] } = {}
+    options: { inputVersionIds?: string[]; demoViewing?: RunObservationDemoViewingAdmission } = {}
   ): ReturnType<SessionOperationOwner['start']> {
-    return this.startExecution(value, 'offline-demo', options.inputVersionIds)
+    return this.startExecution(value, 'offline-demo', options.inputVersionIds, options.demoViewing)
   }
 
   private async startExecution(
     value: unknown,
     purpose: 'research' | 'offline-demo',
-    inputVersionIds?: string[]
+    inputVersionIds?: string[],
+    demoViewing?: RunObservationDemoViewingAdmission
   ): ReturnType<SessionOperationOwner['start']> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
+    demoViewing = this.validateDemoViewing(request, purpose, demoViewing)
     if (purpose === 'offline-demo' && request.profileId)
       throw new Error('Offline demos cannot use research profiles.')
     if (request.projectView && !this.dependencies.registerProjectService)
@@ -1643,6 +1656,7 @@ export class ManagedExecutionService {
               JSON.stringify({
                 request,
                 purpose,
+                ...(demoViewing ? { demoViewing } : {}),
                 ...(inputVersionIds?.length ? { inputVersionIds } : {})
               })
             ),
@@ -1652,7 +1666,10 @@ export class ManagedExecutionService {
         try {
           result =
             purpose === 'offline-demo'
-              ? await this.executeDemoInTurn(request, context, signal, { inputVersionIds })
+              ? await this.executeDemoInTurn(request, context, signal, {
+                  inputVersionIds,
+                  demoViewing
+                })
               : await this.executeInTurn(request, context, signal)
         } catch (error) {
           if (!(error instanceof ManagedEnvironmentCancelledError)) throw error
@@ -1718,15 +1735,32 @@ export class ManagedExecutionService {
     value: unknown,
     admittedContext: ManagedExecutionTurnContext,
     signal?: AbortSignal,
-    options: { inputVersionIds?: string[] } = {}
+    options: { inputVersionIds?: string[]; demoViewing?: RunObservationDemoViewingAdmission } = {}
   ): Promise<ManagedExecutionResult> {
     return this.executeWithPurpose(
       value,
       admittedContext,
       signal,
       'offline-demo',
-      options.inputVersionIds
+      options.inputVersionIds,
+      options.demoViewing
     )
+  }
+
+  private validateDemoViewing(
+    request: z.output<typeof executeManagedEnvironmentRequestSchema>,
+    purpose: 'research' | 'offline-demo',
+    value: RunObservationDemoViewingAdmission | undefined
+  ): RunObservationDemoViewingAdmission | undefined {
+    if (value === undefined) return undefined
+    const admitted = runObservationDemoViewingAdmissionSchema.parse(value)
+    if (
+      purpose !== 'offline-demo' ||
+      admitted.timeoutMs !== request.timeoutMs ||
+      (admitted.mode === 'until-stop-or-timeout' && !request.projectView)
+    )
+      throw new Error('Demo viewing does not match the admitted offline execution.')
+    return admitted
   }
 
   private async executeWithPurpose(
@@ -1734,9 +1768,11 @@ export class ManagedExecutionService {
     admittedContext: ManagedExecutionTurnContext,
     signal: AbortSignal | undefined,
     purpose: 'research' | 'offline-demo',
-    inputVersionIds?: string[]
+    inputVersionIds?: string[],
+    demoViewing?: RunObservationDemoViewingAdmission
   ): Promise<ManagedExecutionResult> {
     const request = executeManagedEnvironmentRequestSchema.parse(value)
+    demoViewing = this.validateDemoViewing(request, purpose, demoViewing)
     if (request.projectView && !this.dependencies.registerProjectService)
       throw new Error('Interactive project viewing is not available in this runtime.')
     const context: ManagedExecutionTurnContext = Object.freeze({
@@ -1769,7 +1805,12 @@ export class ManagedExecutionService {
     if (purpose === 'offline-demo' && request.profileId)
       throw new Error('Offline demos cannot use research profiles.')
     const fingerprint = digest(
-      JSON.stringify({ request, purpose, ...(inputVersionIds?.length ? { inputVersionIds } : {}) })
+      JSON.stringify({
+        request,
+        purpose,
+        ...(demoViewing ? { demoViewing } : {}),
+        ...(inputVersionIds?.length ? { inputVersionIds } : {})
+      })
     )
     const existing = this.active.get(key)
     if (existing) {
@@ -1784,7 +1825,8 @@ export class ManagedExecutionService {
       key,
       fingerprint,
       purpose,
-      inputVersionIds
+      inputVersionIds,
+      demoViewing
     )
     this.active.set(key, { fingerprint, completion })
     try {
@@ -1801,7 +1843,8 @@ export class ManagedExecutionService {
     key: string,
     fingerprint: string,
     purpose: 'research' | 'offline-demo',
-    inputVersionIds?: string[]
+    inputVersionIds?: string[],
+    demoViewing?: RunObservationDemoViewingAdmission
   ): Promise<ManagedExecutionResult> {
     const existing = await this.readJournal(key)
     if (existing) {
@@ -1840,6 +1883,16 @@ export class ManagedExecutionService {
       key,
       fingerprint,
       purpose,
+      ...(purpose === 'offline-demo'
+        ? {
+            demoViewing:
+              demoViewing ??
+              runObservationDemoViewingAdmissionSchema.parse({
+                mode: 'process-lifetime',
+                timeoutMs: request.timeoutMs
+              })
+          }
+        : {}),
       ...(supplementalInputs.length ? { supplementalInputs } : {}),
       ...(credentialLease
         ? {

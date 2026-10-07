@@ -76,6 +76,36 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe('RunObservationOwner', () => {
+  it('retains verified demo viewing facts through snapshot, delta and exact-step selection', async () => {
+    const h = harness()
+    const before = await h.owner.snapshot(target, viewer)
+    const demoViewing = {
+      mode: 'until-stop-or-timeout' as const,
+      timeoutMs: 600000,
+      endReason: 'time-limit' as const
+    }
+    h.setSource({
+      ...h.source,
+      phase: 'timeout',
+      run: { ...run(), status: 'timeout' },
+      executionContext: {
+        purpose: 'offline-demo',
+        conditionChanges: [],
+        demoViewing
+      }
+    })
+    const after = applyRunObservationChanges(
+      before,
+      await h.owner.changes({ ...target, cursor: before.cursor }, viewer)
+    )
+    expect(after.executionContext?.demoViewing).toEqual(demoViewing)
+    const selected = await h.owner.select(
+      { ...target, cursor: after.cursor, stepId: after.stepId },
+      viewer
+    )
+    expect(selected.snapshot.executionContext?.demoViewing).toEqual(demoViewing)
+    expect(after.phase).toBe('timeout')
+  })
   it('projects declared execution intent and condition differences through deltas with private redaction', async () => {
     const h = harness()
     const before = await h.owner.snapshot(target, viewer)

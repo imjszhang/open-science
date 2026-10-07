@@ -15,6 +15,7 @@ import {
 } from '../../shared/research-demo'
 import {
   runObservationTargetSchema,
+  runObservationDemoViewingAdmissionSchema,
   type RunObservationSelection
 } from '../../shared/run-observation'
 import { recordedObservationTargetSchema } from '../../shared/run-observation-recorded'
@@ -42,6 +43,7 @@ const receiptSchema = z
     title: z.string().max(4096),
     substitutions: z.array(z.string().max(4096)).max(32),
     purpose: z.literal('offline-demo'),
+    demoViewing: runObservationDemoViewingAdmissionSchema.optional(),
     sessionId: identity.optional(),
     operationRequestId: identity.optional(),
     runTarget: runObservationTargetSchema.optional(),
@@ -409,6 +411,7 @@ export class ResearchDemoOwner {
             requestId: request.requestId,
             demoVersionId: request.demoVersionId,
             purpose: 'offline-demo',
+            demoViewing: demo.candidate.demoViewing,
             title: demo.candidate.title,
             substitutions: demo.candidate.substitutions,
             createdAt: Date.now(),
@@ -504,7 +507,13 @@ export class ResearchDemoOwner {
             'Start the selected Replay offline demonstration. This is not scientific reproduction.\n' +
             demo.description.substitutions.join('\n').slice(0, 15000)
         },
-        { inputVersionIds: [record.receipt.demoVersionId] }
+        {
+          inputVersionIds: [record.receipt.demoVersionId],
+          demoViewing: {
+            mode: demo.description.viewing?.mode ?? 'process-lifetime',
+            timeoutMs: demo.description.timeoutMs
+          }
+        }
       )
       record = await this.update(record.key, (next) => {
         next.operationId = operation.operationId

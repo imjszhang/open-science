@@ -1,7 +1,13 @@
 import { z } from 'zod'
 import { redactSensitiveText } from '../../shared/diagnostic-redaction'
 import type { RunObservationArchive } from '../../shared/run-observation-archive'
-import type { RunObservationExecutionContext } from '../../shared/run-observation'
+import {
+  runObservationDemoViewingAdmissionSchema,
+  type RunObservationDemoViewing,
+  type RunObservationDemoViewingAdmission,
+  type RunObservationExecutionContext,
+  type RunObservationRun
+} from '../../shared/run-observation'
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
 // Collection receipts are ordinary JSON Artifacts. Parse only this public projection; never copy
@@ -10,6 +16,7 @@ const receiptSchema = z.object({
   kind: z.literal('managed-research-execution'),
   version: z.literal(1),
   purpose: z.enum(['offline-demo', 'research']).optional(),
+  demoViewing: runObservationDemoViewingAdmissionSchema.optional(),
   executionProfile: z
     .object({
       displayName: z.string().max(160),
@@ -27,6 +34,31 @@ export const unknownExecutionContext = (): RunObservationExecutionContext => ({
   conditionChanges: []
 })
 
+/** Only verified admission facts and an actual observed Run determine this public summary. */
+export function projectDemoViewing(
+  admission: RunObservationDemoViewingAdmission | undefined,
+  run: Pick<RunObservationRun, 'status'> | null | undefined
+): RunObservationDemoViewing | undefined {
+  if (!admission) return undefined
+  const admitted = runObservationDemoViewingAdmissionSchema.parse(admission)
+  const endReason: RunObservationDemoViewing['endReason'] =
+    run?.status === 'completed'
+      ? 'process-exited'
+      : run?.status === 'timeout'
+        ? 'time-limit'
+        : run?.status === 'cancelled'
+          ? 'stopped'
+          : run?.status === 'failed'
+            ? 'failed'
+            : run?.status === 'interrupted'
+              ? 'interrupted'
+              : undefined
+  return {
+    ...admitted,
+    ...(endReason ? { endReason } : {})
+  }
+}
+
 /** Caller must first verify immutable bytes, receiving scope and shared native Artifact Run. */
 export function readCollectionExecutionContext(
   bytes: Uint8Array,
@@ -40,6 +72,7 @@ export function readCollectionExecutionContext(
   } catch {
     return undefined
   }
+  if (receipt.demoViewing && receipt.purpose !== 'offline-demo') return undefined
   if (receipt.result.observation?.recordingId !== archive.recordingId) return undefined
   const runs = archive.records.filter((record) => record.run !== null)
   if (
@@ -68,6 +101,9 @@ export function readCollectionExecutionContext(
       : {}),
     conditionChanges: (receipt.executionProfile?.conditionChanges ?? []).map((text) =>
       redact(text).slice(0, 2048)
-    )
+    ),
+    ...(receipt.demoViewing
+      ? { demoViewing: projectDemoViewing(receipt.demoViewing, archive.records.at(-1)?.run) }
+      : {})
   }
 }

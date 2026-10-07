@@ -12,6 +12,7 @@ describe('explicit offline demonstration discovery', () => {
         demoVersionId: 'demo',
         status: 'ready',
         descriptorVersionId: 'descriptor',
+        demoViewing: { mode: 'process-lifetime', timeoutMs: 10000 },
         blockers: []
       })
     ])
@@ -26,6 +27,29 @@ describe('explicit offline demonstration discovery', () => {
       (await inspectResearchDemos(demoSource, fixture.authority, fixture.runtimes)).inspection
         .candidates
     ).toEqual([])
+  })
+  it('projects only a validated author viewing contract and its bounded execution budget', async () => {
+    const fixture = demoFixture({
+      editDemo: (demo) => {
+        demo.localServicePort = 4173
+        demo.projectView = { title: 'Project' }
+        demo.viewing = { mode: 'until-stop-or-timeout' }
+        demo.timeoutMs = 600000
+      }
+    })
+    const result = await inspectResearchDemos(demoSource, fixture.authority, fixture.runtimes)
+    expect(result.inspection.candidates[0]).toMatchObject({
+      status: 'ready',
+      demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 600000 }
+    })
+    for (const invalid of [
+      { ...fixture.demo, projectView: undefined },
+      { ...fixture.demo, timeoutMs: 600001 },
+      { ...fixture.demo, viewing: { mode: 'forever' } },
+      { ...fixture.demo, viewing: { mode: 'until-stop-or-timeout', deadlineAt: 1 } },
+      { ...fixture.demo, viewing: { mode: 'until-stop-or-timeout', endReason: 'time-limit' } }
+    ])
+      expect(parseResearchDemoDescription(JSON.stringify(invalid)).status).toBe('invalid')
   })
   it.each([
     [

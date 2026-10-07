@@ -69,6 +69,105 @@ afterEach(() => {
 })
 
 describe('shared live Replay viewer', () => {
+  it.each([
+    ['process-exited', 'completed', 'The run has ended.'],
+    ['time-limit', 'timeout', 'The viewing time limit was reached.'],
+    ['stopped', 'cancelled', 'The run was stopped.'],
+    ['failed', 'failed', 'The run failed.'],
+    ['interrupted', 'interrupted', 'The run was interrupted.']
+  ] as const)(
+    'keeps selected-step evidence visible after a demo ends: %s',
+    (endReason, status, message) => {
+      const before = snapshot(1)
+      const completed: RunObservationSnapshot = {
+        ...snapshot(2),
+        phase: status,
+        run: { ...snapshot(2).run!, status, endedAt: 1200 },
+        artifacts: [{ name: 'result.json', versionId: 'result-version' }],
+        executionContext: {
+          purpose: 'offline-demo',
+          conditionChanges: [],
+          demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 60000, endReason }
+        }
+      }
+      const first = props(before)
+      const view = render(<LiveReplayView {...first} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      view.rerender(
+        <LiveReplayView {...first} snapshot={completed} history={[before, completed]} />
+      )
+      expect(screen.getByText(message)).toBeTruthy()
+      expect(screen.getByText('The live project page is closed.')).toBeTruthy()
+      const evidence = screen.getByRole('region', { name: 'Evidence from the selected step' })
+      expect(within(evidence).getByText('output 2')).toBeTruthy()
+      expect(within(evidence).getByText('result.json')).toBeTruthy()
+      expect(document.querySelector('iframe')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Stop demo' })).toBeNull()
+    }
+  )
+
+  it('updates the end notice without replacing an inspected step, its files or its question', async () => {
+    const earlier = {
+      ...snapshot(1, 'earlier evidence'),
+      artifacts: [{ name: 'earlier.json', versionId: 'earlier-version' }]
+    }
+    const latest = snapshot(2)
+    const first = props(latest)
+    const view = render(<LiveReplayView {...first} history={[earlier, latest]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+    const terminal: RunObservationSnapshot = {
+      ...snapshot(3, 'final output'),
+      phase: 'completed',
+      run: { ...snapshot(3, 'final output').run!, status: 'completed' },
+      artifacts: [{ name: 'final.json', versionId: 'final-version' }]
+    }
+    view.rerender(
+      <LiveReplayView {...first} snapshot={terminal} history={[earlier, latest, terminal]} />
+    )
+    expect(screen.getByTestId('replay-live-record').dataset.observationRecord).toBe('epoch:1')
+    expect(screen.getByText('The live project page is closed.')).toBeTruthy()
+    const evidence = screen.getByRole('region', { name: 'Evidence from the selected step' })
+    expect(within(evidence).getByText('earlier evidence')).toBeTruthy()
+    expect(within(evidence).getByText('earlier.json')).toBeTruthy()
+    expect(within(evidence).queryByText('final.json')).toBeNull()
+    expect(within(evidence).queryByText('final output')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this step' }))
+    await waitFor(() => expect(first.onAskSelection).toHaveBeenCalledExactlyOnceWith(earlier))
+    expect(first.onStop).not.toHaveBeenCalled()
+  })
+
+  it('uses the ordinary run timeout outcome without claiming a demo viewing limit or ending on disconnect', () => {
+    const first = props()
+    const view = render(<LiveReplayView {...first} connection="disconnected" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+    expect(screen.queryByTestId('project-run-ended')).toBeNull()
+    view.rerender(
+      <LiveReplayView
+        {...first}
+        snapshot={{
+          ...snapshot(2),
+          phase: 'timeout',
+          run: { ...snapshot(2).run!, status: 'timeout' }
+        }}
+      />
+    )
+    expect(screen.getByText('The run timed out.')).toBeTruthy()
+    expect(screen.queryByText('The viewing time limit was reached.')).toBeNull()
+    expect(screen.getByText('No result files were recorded at this step.')).toBeTruthy()
+  })
+
+  it('labels the existing stop action as a demo only for a verified offline purpose', () => {
+    const first = props({
+      ...snapshot(1),
+      executionContext: { purpose: 'offline-demo', conditionChanges: [] }
+    })
+    render(<LiveReplayView {...first} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop demo' }))
+    expect(first.onStop).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
+  })
+
   it('keeps legacy purpose unknown even when a completed run or title suggests reproduction', () => {
     render(
       <LiveReplayView

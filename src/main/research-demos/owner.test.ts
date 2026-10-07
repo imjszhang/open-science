@@ -46,8 +46,8 @@ type Fixture = {
   dependencies: FixtureDependencies
   setStatus(next: string): void
 }
-async function fixture(): Promise<Fixture> {
-  const materials = demoFixture()
+async function fixture(options: Parameters<typeof demoFixture>[0] = {}): Promise<Fixture> {
+  const materials = demoFixture(options)
   vi.mocked(createResearchMaterialInspectionAuthority).mockResolvedValue(materials.authority)
   const dataRoot = await mkdtemp(join(tmpdir(), 'research-demo-owner-'))
   cleanups.push(() => rm(dataRoot, { recursive: true, force: true }))
@@ -137,6 +137,29 @@ async function fixture(): Promise<Fixture> {
 }
 
 describe('Replay demo orchestration', () => {
+  it('retains the verified viewing budget in the receipt and only passes it through the Main demo entry', async () => {
+    const f = await fixture({
+      editDemo: (demo) => {
+        demo.localServicePort = 4173
+        demo.projectView = { title: 'Project' }
+        demo.viewing = { mode: 'until-stop-or-timeout' }
+      }
+    })
+    expect(await f.owner.start(f.request)).toMatchObject({
+      demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 10000 }
+    })
+    await vi.waitFor(() => expect(f.service.executeDemo).toHaveBeenCalledOnce())
+    expect(f.service.executeDemo).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 10000, projectView: { title: 'Project' } }),
+      {
+        inputVersionIds: ['demo'],
+        demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 10000 }
+      }
+    )
+    expect(await f.owner.get({ ...demoSource, requestId: f.request.requestId })).toMatchObject({
+      demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 10000 }
+    })
+  })
   it('inspection creates no Session, environment or execution', async () => {
     const f = await fixture()
     expect((await f.owner.inspect(demoSource)).candidates[0].status).toBe('ready')
@@ -155,7 +178,7 @@ describe('Replay demo orchestration', () => {
         recordObservation: true,
         command: 'node "$OPEN_SCIENCE_INPUT_DIR"/\'demo.mjs\''
       }),
-      { inputVersionIds: ['demo'] }
+      { inputVersionIds: ['demo'], demoViewing: { mode: 'process-lifetime', timeoutMs: 10000 } }
     )
     expect(await f.owner.carriers({ projectId: 'project' })).toEqual([
       { sessionId: 'carrier', source: demoSource }

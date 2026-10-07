@@ -7188,6 +7188,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "プロジェクトのオフラインデモです。元の実験の再現ではありません。",
     "A research execution is not, by itself, evidence of successful reproduction.": "研究を実行しただけでは、再現に成功した証拠にはなりません。",
     "Execution conditions": "実行条件",
-    "Recorded configuration: {{name}}": "記録された設定：{{name}}"
+    "Recorded configuration: {{name}}": "記録された設定：{{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "このデモは処理が終わった後もプロジェクトページを開いたままにします。閲覧が終わったらデモを停止してください。",
+    "This demo’s project page closes when its program exits.": "このデモのプログラムが終了すると、プロジェクトページが閉じます。",
+    "The viewing time limit was not recorded for this demo.": "このデモの閲覧時間の上限は記録されていません。",
+    "The viewing time limit was reached.": "閲覧時間の上限に達しました。",
+    "The run was stopped.": "実行が停止されました。",
+    "The run failed.": "実行に失敗しました。",
+    "The run was interrupted.": "実行が中断されました。",
+    "The run has ended.": "実行が終了しました。",
+    "The run timed out.": "実行がタイムアウトしました。",
+    "The live project page is closed.": "ライブのプロジェクトページは閉じられました。",
+    "Result files recorded at this step": "このステップに記録された結果ファイル",
+    "No result files were recorded at this step.": "このステップには結果ファイルが記録されていません。",
+    "Evidence from the selected step": "選択したステップの証拠",
+    "This is a recorded image, not a live project page.": "これは保存された画像であり、ライブのプロジェクトページではありません。",
+    "Source step: {{step}}": "記録元のステップ：{{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "デモの最長実行時間：{{minutes}} 分。プログラムはそれより前に終了する場合があります。"
   }
 }

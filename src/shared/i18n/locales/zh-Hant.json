@@ -7188,6 +7188,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "離線專案示範。這不代表重現了原始實驗。",
     "A research execution is not, by itself, evidence of successful reproduction.": "執行研究本身並不能證明重現成功。",
     "Execution conditions": "執行條件",
-    "Recorded configuration: {{name}}": "記錄中的設定：{{name}}"
+    "Recorded configuration: {{name}}": "記錄中的設定：{{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "此演示在動作結束後仍會保持專案頁面開啟。觀看完畢後可停止演示。",
+    "This demo’s project page closes when its program exits.": "此演示的程式結束時，專案頁面將關閉。",
+    "The viewing time limit was not recorded for this demo.": "此演示未記錄觀看時限。",
+    "The viewing time limit was reached.": "已達到觀看時限。",
+    "The run was stopped.": "執行已停止。",
+    "The run failed.": "執行失敗。",
+    "The run was interrupted.": "執行已中斷。",
+    "The run has ended.": "執行已結束。",
+    "The run timed out.": "執行已逾時。",
+    "The live project page is closed.": "即時專案頁面已關閉。",
+    "Result files recorded at this step": "此步驟記錄的結果檔案",
+    "No result files were recorded at this step.": "此步驟未記錄結果檔案。",
+    "Evidence from the selected step": "所選步驟的證據",
+    "This is a recorded image, not a live project page.": "這是已儲存的影像，並非即時專案頁面。",
+    "Source step: {{step}}": "來源步驟：{{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最長執行時間：{{minutes}} 分鐘。程式可能提前結束。"
   }
 }

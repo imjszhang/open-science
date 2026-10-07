@@ -484,3 +484,35 @@ displays the captured project image and acquisition interval. The terminal obser
 frame and retains the explicit missing-frame notice; captures remain step-specific. Test is left
 on the saved image at 2/4. `verification.json` in the regression evidence directory records both
 the native live checks and the archive readback. No push was performed.
+
+## Follow-up: bounded viewing and readable completion (2026-10-07)
+
+An offline demonstration may declare `viewing: { mode: 'until-stop-or-timeout' }` in its ordinary
+`research-demo.json` Artifact. The declaration requires a project view. The author must keep the
+same local service running after its actions finish; Main does not restart a process that has
+exited. The admitted `timeoutMs` remains the process execution time limit (at most ten minutes).
+Older declarations keep their process lifetime behavior. This changes neither `.science` v1 nor
+the strict observation archive format.
+
+Main carries the validated mode and budget through its private demo execution path and ordinary
+collection receipt. The public execution API cannot supply this authority. Live and verified
+recorded context may expose `demoViewing` with the admitted execution time limit and a reason
+derived from the observed Run status. Queueing and preparation precede the actual process timer,
+so no absolute deadline is inferred from the Notebook start timestamp. A normal earlier exit is
+not labelled as a viewing timeout, and no terminal status attests scientific success. Unknown legacy context has no
+invented deadline. Replay explains the policy before launch and shows the execution time limit
+while the demonstration is active.
+
+When the live project page closes, the project tab retains a readable result: actual end status,
+selected-step evidence, available images and their source/capture time, logs and recorded result
+file names. Explicit archive controls remain available. The selected historical step and Ask
+reference are not changed by completion. The browser only retains bounded image bytes already read
+and verified in that viewer; it does not gain Electron capture authority, create synthetic frames,
+or claim that missing temporary bytes mean no archived image exists.
+
+The next Tuanzi material version removes the pre-action waiting period. It performs the same four
+bounded offline actions, writes its results, then offers an eight-minute viewing window within a
+ten-minute process execution limit. Its ordinary HTML result is derived from exported states and
+labelled as a result visualization, not a screen recording. Original source bytes, old packages and earlier
+research records remain intact. Installation and real client/browser acceptance are recorded after
+verification below.

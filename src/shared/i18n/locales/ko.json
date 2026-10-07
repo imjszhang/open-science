@@ -7186,6 +7186,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "프로젝트의 오프라인 데모입니다. 원래 실험을 재현하는 것은 아닙니다.",
     "A research execution is not, by itself, evidence of successful reproduction.": "연구 실행 자체만으로는 재현에 성공했다는 증거가 되지 않습니다.",
     "Execution conditions": "실행 조건",
-    "Recorded configuration: {{name}}": "기록된 구성: {{name}}"
+    "Recorded configuration: {{name}}": "기록된 구성: {{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "이 데모는 작업이 끝난 뒤에도 프로젝트 페이지를 열어 둡니다. 확인을 마치면 데모를 중지하세요.",
+    "This demo’s project page closes when its program exits.": "이 데모의 프로그램이 종료되면 프로젝트 페이지가 닫힙니다.",
+    "The viewing time limit was not recorded for this demo.": "이 데모의 열람 시간 제한은 기록되지 않았습니다.",
+    "The viewing time limit was reached.": "열람 시간 제한에 도달했습니다.",
+    "The run was stopped.": "실행이 중지되었습니다.",
+    "The run failed.": "실행에 실패했습니다.",
+    "The run was interrupted.": "실행이 중단되었습니다.",
+    "The run has ended.": "실행이 종료되었습니다.",
+    "The run timed out.": "실행 시간이 초과되었습니다.",
+    "The live project page is closed.": "실시간 프로젝트 페이지가 닫혔습니다.",
+    "Result files recorded at this step": "이 단계에 기록된 결과 파일",
+    "No result files were recorded at this step.": "이 단계에 기록된 결과 파일이 없습니다.",
+    "Evidence from the selected step": "선택한 단계의 증거",
+    "This is a recorded image, not a live project page.": "실시간 프로젝트 페이지가 아닌 저장된 이미지입니다.",
+    "Source step: {{step}}": "출처 단계: {{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "데모 최대 실행 시간: {{minutes}}분. 프로그램이 더 일찍 종료될 수 있습니다."
   }
 }

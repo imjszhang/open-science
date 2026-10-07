@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildRunObservationArchive } from './archive'
-import { readCollectionExecutionContext } from './execution-context'
+import { projectDemoViewing, readCollectionExecutionContext } from './execution-context'
+import { runObservationExecutionContextSchema } from '../../shared/run-observation'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 
 const snapshot: RunObservationSnapshot = {
@@ -44,6 +45,72 @@ const receipt = {
 const read = (value: unknown): ReturnType<typeof readCollectionExecutionContext> =>
   readCollectionExecutionContext(Buffer.from(JSON.stringify(value)), archive)
 describe('recorded public collection context', () => {
+  it.each([
+    ['completed', 'process-exited'],
+    ['timeout', 'time-limit'],
+    ['cancelled', 'stopped'],
+    ['failed', 'failed'],
+    ['interrupted', 'interrupted'],
+    ['running', undefined],
+    ['queued', undefined]
+  ] as const)(
+    'reports %s from actual Run status without interpreting duration as completion',
+    (status, endReason) => {
+      const admitted = { mode: 'until-stop-or-timeout' as const, timeoutMs: 600000 }
+      const run = { ...snapshot.run!, status }
+      const result = projectDemoViewing(admitted, run)
+      expect(result).toEqual({
+        ...admitted,
+        ...(endReason ? { endReason } : {})
+      })
+      expect(projectDemoViewing(undefined, run)).toBeUndefined()
+      expect(projectDemoViewing(admitted, null)).toEqual(admitted)
+      const stopped = buildRunObservationArchive({
+        recordingId: 'recording',
+        capturedAt: 20,
+        history: {
+          coverage: 'process-local',
+          truncated: false,
+          snapshots: [{ ...snapshot, phase: status, run }]
+        },
+        stopReason: ['running', 'queued'].includes(status) ? 'manual' : 'run-ended'
+      })
+      const restored = readCollectionExecutionContext(
+        Buffer.from(JSON.stringify({ ...receipt, demoViewing: admitted })),
+        stopped
+      )
+      expect(restored?.demoViewing).toEqual(result)
+      expect(stopped.version).toBe(1)
+      expect(stopped.records[0]).not.toHaveProperty('executionContext')
+    }
+  )
+
+  it('rejects forged outcomes, unsafe budgets and research use of offline viewing metadata', () => {
+    for (const demoViewing of [
+      { mode: 'until-stop-or-timeout', timeoutMs: 600001 },
+      { mode: 'until-stop-or-timeout', timeoutMs: 10000, deadlineAt: 1 },
+      { mode: 'until-stop-or-timeout', timeoutMs: 10000, endReason: 'time-limit' },
+      { mode: 'forever', timeoutMs: 10000 }
+    ])
+      expect(read({ ...receipt, demoViewing })).toBeUndefined()
+    const demoViewing = { mode: 'process-lifetime', timeoutMs: 10000 }
+    expect(
+      runObservationExecutionContextSchema.safeParse({
+        purpose: 'offline-demo',
+        conditionChanges: [],
+        demoViewing: { ...demoViewing, deadlineAt: 1 }
+      }).success
+    ).toBe(false)
+    expect(read({ ...receipt, purpose: 'research', demoViewing })).toBeUndefined()
+    expect(read({ ...receipt, purpose: undefined, demoViewing })).toBeUndefined()
+    expect(
+      runObservationExecutionContextSchema.safeParse({
+        purpose: 'research',
+        conditionChanges: [],
+        demoViewing
+      }).success
+    ).toBe(false)
+  })
   it('leaves archive v1 unchanged and does not interpret process completion as research success', () => {
     expect(archive.records[0]).not.toHaveProperty('executionContext')
     expect(archive.version).toBe(1)

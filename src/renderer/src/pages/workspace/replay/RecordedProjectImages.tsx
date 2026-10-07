@@ -13,10 +13,12 @@ export type RecordedProjectImage = {
 /** One immutable frame is loaded at a time. Multiple captures may share one evidence cursor. */
 export const RecordedProjectImages = ({
   images,
-  readImage
+  readImage,
+  sourceStep
 }: {
   images: readonly RecordedProjectImage[]
   readImage: (id: string) => Promise<string | null>
+  sourceStep?: string
 }): React.JSX.Element => {
   const { t } = useTranslation()
   const [selectedId, setSelectedId] = useState(images[0]?.id)
@@ -55,6 +57,14 @@ export const RecordedProjectImages = ({
           end: new Date(current.capture.finishedAt).toISOString()
         })}
       </p>
+      <p className="text-xs text-muted-foreground">
+        {t('This is a recorded image, not a live project page.')}
+      </p>
+      {sourceStep ? (
+        <p className="break-words text-xs text-muted-foreground">
+          {t('Source step: {{step}}', { step: sourceStep })}
+        </p>
+      ) : null}
       {current.publication === 'awaiting-publication' ? (
         <p className="text-xs text-status-warning-foreground">
           {t('This captured image is awaiting archive publication.')}

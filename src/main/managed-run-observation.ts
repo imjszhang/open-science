@@ -4,6 +4,7 @@ import type {
   ManagedExecutionInspection
 } from './notebook/managed-execution-service'
 import type { RunObservationSource } from './run-observation/owner'
+import { projectDemoViewing } from './run-observation/execution-context'
 
 function phase(source: ManagedExecutionInspection): RunObservationPhase {
   const status = source.run?.status
@@ -30,7 +31,10 @@ export const createManagedRunObservationReader =
       executionContext: {
         purpose: source.purpose ?? 'unknown',
         ...(source.executionProfile ? { profileName: source.executionProfile.displayName } : {}),
-        conditionChanges: source.executionProfile?.conditionChanges ?? []
+        conditionChanges: source.executionProfile?.conditionChanges ?? [],
+        ...(source.purpose === 'offline-demo' && source.demoViewing
+          ? { demoViewing: projectDemoViewing(source.demoViewing, source.run) }
+          : {})
       },
       artifacts: source.artifacts
         .filter(

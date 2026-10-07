@@ -102,7 +102,11 @@ export async function inspectResearchDemos(
       title: demo.title,
       description: demo.description,
       planKey: demo.planKey,
-      substitutions: demo.substitutions
+      substitutions: demo.substitutions,
+      demoViewing: {
+        mode: demo.viewing?.mode ?? 'process-lifetime',
+        timeoutMs: demo.timeoutMs
+      }
     })
     const descriptors = authority.versions.filter(
       (item) =>

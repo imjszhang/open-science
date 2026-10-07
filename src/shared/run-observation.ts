@@ -75,14 +75,35 @@ export type RunObservationArtifact = Readonly<{
   checksum?: string
   sizeBytes?: number
 }>
+/** Main-admitted demo lifetime; the driver still owns whether its service stays alive. */
+export const runObservationDemoViewingAdmissionSchema = z
+  .object({
+    mode: z.enum(['process-lifetime', 'until-stop-or-timeout']),
+    timeoutMs: z.number().int().min(1000).max(600_000)
+  })
+  .strict()
+export type RunObservationDemoViewingAdmission = z.infer<
+  typeof runObservationDemoViewingAdmissionSchema
+>
+export const runObservationDemoViewingSchema = runObservationDemoViewingAdmissionSchema
+  .extend({
+    endReason: z
+      .enum(['process-exited', 'time-limit', 'stopped', 'failed', 'interrupted'])
+      .optional()
+  })
+  .strict()
+export type RunObservationDemoViewing = z.infer<typeof runObservationDemoViewingSchema>
+
 /** Recorded intent and declared condition differences, never scientific success or live authority. */
 export const runObservationExecutionContextSchema = z
   .object({
     purpose: z.enum(['offline-demo', 'research', 'unknown']),
     profileName: z.string().max(160).optional(),
-    conditionChanges: z.array(z.string().max(2048)).max(32)
+    conditionChanges: z.array(z.string().max(2048)).max(32),
+    demoViewing: runObservationDemoViewingSchema.optional()
   })
   .strict()
+  .refine((context) => context.demoViewing === undefined || context.purpose === 'offline-demo')
 export type RunObservationExecutionContext = Readonly<
   Omit<z.infer<typeof runObservationExecutionContextSchema>, 'conditionChanges'> & {
     conditionChanges: readonly string[]

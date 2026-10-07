@@ -1,5 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor
+} from '@testing-library/react'
+import { createHash, webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
@@ -8,6 +17,8 @@ import { ReplayViewerClient } from './client'
 import { staticHtml } from './static-html'
 import { ReferencePanel } from './ReferencePanel'
 import { setI18nLocale } from '../src/i18n'
+import type { ObservationViewerCapture } from '../../shared/run-observation-capture'
+import { useViewerCaptures } from './use-viewer-captures'
 const snapshot: RunObservationSnapshot = {
   identity: { projectId: 'p', sessionId: 's', operationId: 'op', runId: 'run' },
   cursor: { epoch: 'epoch', sequence: 1 },
@@ -36,6 +47,31 @@ const context = {
   canCancel: false,
   canReadArtifacts: false
 }
+const captureFixture = (captureId = 'frame'): ObservationViewerCapture => ({
+  captureId,
+  recordingId: 'recording',
+  stepKey: 'durable-step',
+  artifactId: 'image',
+  versionId: `image-${captureId}`,
+  checksum: 'a'.repeat(64),
+  sizeBytes: 5,
+  mimeType: 'image/png',
+  publication: 'published',
+  capture: {
+    source: 'project-export',
+    association: 'current-observation',
+    startedAt: 1100,
+    finishedAt: 1200,
+    observedAt: snapshot.observedAt,
+    width: 1,
+    height: 1
+  },
+  viewerEvidence: {
+    cursor: snapshot.cursor,
+    observedAt: snapshot.observedAt,
+    stepId: snapshot.stepId
+  }
+})
 const projectAccess: RuntimeViewAccess = {
   url: `http://rv-view.localhost:1234/__open_science_view?grant=${'a'.repeat(64)}`,
   view: {
@@ -103,8 +139,66 @@ afterEach(() => {
   setI18nLocale('en')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 describe('standalone browser viewer', () => {
+  it('keeps the selected second image and its evidence when the live process ends', async () => {
+    const client = makeClient()
+    vi.mocked(client.context).mockResolvedValue({
+      ...context,
+      canCapture: true,
+      canReadArtifacts: true
+    })
+    vi.spyOn(client, 'captureOptions').mockResolvedValue({ hostView: false, projectExports: [] })
+    vi.spyOn(client, 'captures').mockResolvedValue([
+      captureFixture('first'),
+      {
+        ...captureFixture('second'),
+        capture: { ...captureFixture().capture, startedAt: 1300, finishedAt: 1400 }
+      }
+    ])
+    const image = vi
+      .spyOn(client, 'captureImage')
+      .mockResolvedValue('data:image/png;base64,cGl4ZWw=')
+    const project = vi.spyOn(client, 'projectView')
+    let ended = false
+    const terminal: RunObservationSnapshot = {
+      ...snapshot,
+      cursor: { epoch: 'epoch', sequence: 2 },
+      observedAt: 2000,
+      phase: 'completed',
+      run: { ...snapshot.run!, status: 'completed', endedAt: 1900 }
+    }
+    vi.mocked(client.changes).mockImplementation(async (previous) => ({
+      kind: 'delta',
+      from: previous.cursor,
+      cursor: ended ? terminal.cursor : previous.cursor,
+      changes: ended && previous.cursor.sequence < 2 ? [terminal] : []
+    }))
+    render(<ViewerApp client={client} />)
+    await screen.findByText('actual browser host output')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause following' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+    await screen.findByRole('img', { name: 'Recorded project image' })
+    fireEvent.click(screen.getByRole('button', { name: 'Next image' }))
+    const secondImage = await screen.findByRole('img', { name: 'Recorded project image' })
+    expect(screen.getByText('Recorded project image 2 of 2')).toBeTruthy()
+    ended = true
+    await screen.findByText('The live project page is closed.', {}, { timeout: 3000 })
+    expect(await screen.findByRole('img', { name: 'Recorded project image' })).toBe(secondImage)
+    expect(screen.getByText('Recorded project image 2 of 2')).toBeTruthy()
+    expect(
+      screen.getByText('Captured from 1970-01-01T00:00:01.300Z to 1970-01-01T00:00:01.400Z.')
+    ).toBeTruthy()
+    expect(screen.getByText('Source step: observation:epoch:1')).toBeTruthy()
+    expect(screen.getByText('This is a recorded image, not a live project page.')).toBeTruthy()
+    expect(screen.getByText('actual browser host output')).toBeTruthy()
+    expect(screen.getByTestId('replay-live-record').dataset.observationRecord).toBe('epoch:1')
+    expect(image.mock.calls.map(([frame]) => frame.captureId)).toEqual(['first', 'second'])
+    expect(project).not.toHaveBeenCalled()
+    expect(document.querySelector('iframe')).toBeNull()
+  })
+
   it('applies the desktop language after an initial bootstrap context read failed', async () => {
     const client = makeClient()
     vi.mocked(client.context)
@@ -231,6 +325,8 @@ describe('standalone browser viewer', () => {
       await screen.findByText('Observation archive saved')
       fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
       fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(screen.getByText('The live project page is closed.')).toBeTruthy()
+      expect(screen.getByText('actual browser host output')).toBeTruthy()
       expect(
         screen.queryByText(
           'No project screen was recorded for this step. The current live page is not historical evidence.'
@@ -500,5 +596,90 @@ describe('standalone browser viewer', () => {
     expect(html).not.toContain('https://')
     expect(html).not.toContain('<iframe')
     expect(html).not.toContain('action=')
+  })
+})
+
+describe('viewer-local retained capture images', () => {
+  it('retains only exact checksum-validated bytes and does not fetch uncached images after completion', async () => {
+    vi.stubGlobal('crypto', webcrypto)
+    const bytes = Buffer.from('verified image bytes')
+    const frame = {
+      ...captureFixture(),
+      sizeBytes: bytes.byteLength,
+      checksum: createHash('sha256').update(bytes).digest('hex')
+    }
+    const corrupt = { ...frame, captureId: 'corrupt', checksum: 'b'.repeat(64) }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(bytes))
+    const client = new ReplayViewerClient(fetcher)
+    vi.spyOn(client, 'captures').mockResolvedValue([frame, corrupt])
+    const { result, rerender } = renderHook(({ active }) => useViewerCaptures(client, active), {
+      initialProps: { active: true }
+    })
+    await waitFor(() => expect(result.current.captures).toHaveLength(2))
+    await expect(result.current.readImage('frame')).resolves.toBe(
+      `data:image/png;base64,${bytes.toString('base64')}`
+    )
+    await expect(result.current.readImage('corrupt')).resolves.toBeNull()
+    rerender({ active: false })
+    await expect(result.current.readImage('frame')).resolves.toBe(
+      `data:image/png;base64,${bytes.toString('base64')}`
+    )
+    await expect(result.current.readImage('corrupt')).resolves.toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps at most four opened images, with no retention across viewer clients', async () => {
+    const client = makeClient()
+    vi.spyOn(client, 'captures').mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => captureFixture(`image-${i}`))
+    )
+    const read = vi
+      .spyOn(client, 'captureImage')
+      .mockResolvedValue('data:image/png;base64,cGl4ZWw=')
+    const { result, rerender } = renderHook(
+      ({ client, active }) => useViewerCaptures(client, active),
+      { initialProps: { client, active: true } }
+    )
+    await waitFor(() => expect(result.current.captures).toHaveLength(5))
+    for (let i = 0; i < 5; i++) await result.current.readImage(`image-${i}`)
+    rerender({ client, active: false })
+    await expect(result.current.readImage('image-0')).resolves.toBeNull()
+    await expect(result.current.readImage('image-1')).resolves.not.toBeNull()
+    expect(read).toHaveBeenCalledTimes(5)
+    rerender({ client: makeClient(), active: false })
+    expect(result.current.captures).toHaveLength(0)
+    await expect(result.current.readImage('image-1')).resolves.toBeNull()
+  })
+
+  it('does not retain an image larger than the eight MiB string budget', async () => {
+    const client = makeClient()
+    vi.spyOn(client, 'captures').mockResolvedValue([captureFixture()])
+    const src = `data:image/png;base64,${'A'.repeat(4 * 1024 * 1024)}`
+    const read = vi.spyOn(client, 'captureImage').mockResolvedValue(src)
+    const { result, rerender } = renderHook(({ active }) => useViewerCaptures(client, active), {
+      initialProps: { active: true }
+    })
+    await waitFor(() => expect(result.current.captures).toHaveLength(1))
+    await expect(result.current.readImage('frame')).resolves.toBe(src)
+    rerender({ active: false })
+    await expect(result.current.readImage('frame')).resolves.toBeNull()
+    expect(read).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the cached frame association when Main clears captures before the terminal observation', async () => {
+    vi.useFakeTimers()
+    const client = makeClient()
+    vi.spyOn(client, 'captures').mockResolvedValueOnce([captureFixture()]).mockResolvedValue([])
+    vi.spyOn(client, 'captureImage').mockResolvedValue('data:image/png;base64,cGl4ZWw=')
+    const { result, rerender } = renderHook(({ active }) => useViewerCaptures(client, active), {
+      initialProps: { active: true }
+    })
+    await act(async () => undefined)
+    expect(result.current.captures).toHaveLength(1)
+    await result.current.readImage('frame')
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    expect(result.current.captures).toHaveLength(1)
+    rerender({ active: false })
+    await expect(result.current.readImage('frame')).resolves.not.toBeNull()
   })
 })

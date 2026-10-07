@@ -46,7 +46,10 @@ import {
 import { createReplayPresentation } from './replay-presentation'
 import { ReplayStage } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
-import type { RunObservationSnapshot } from '../../../../../shared/run-observation'
+import type {
+  RunObservationExecutionContext,
+  RunObservationSnapshot
+} from '../../../../../shared/run-observation'
 import {
   isObservationTerminal,
   observationRecordId,
@@ -76,6 +79,7 @@ import {
 export type ReplayLiveSource = {
   sourceIdentity: string
   snapshot: RunObservationSnapshot
+  executionContext?: RunObservationExecutionContext
   // Actual retained observations only. Hosts must disclose missing/restarted history.
   history?: readonly RunObservationSnapshot[]
   connection: 'connected' | 'reconnecting' | 'disconnected'
@@ -1054,7 +1058,12 @@ const ReplayPanelContent = ({
           ) : null}
           {live.onStop && !live.recorded && !isObservationTerminal(live.snapshot) ? (
             <Button variant="outline" size="sm" disabled={live.stopping} onClick={live.onStop}>
-              {live.stopping ? t('Waiting for the run to stop…') : t('Stop run')}
+              {live.stopping
+                ? t('Waiting for the run to stop…')
+                : (live.executionContext ?? live.snapshot.executionContext)?.purpose ===
+                    'offline-demo'
+                  ? t('Stop demo')
+                  : t('Stop run')}
             </Button>
           ) : null}
           {inspection ? (
@@ -1108,6 +1117,8 @@ const ReplayPanelContent = ({
             live && currentObservation ? (
               <ReplayLiveRecord
                 snapshot={currentObservation}
+                latestSnapshot={live.snapshot}
+                executionContext={live.executionContext ?? live.snapshot.executionContext}
                 mode={observationMode!}
                 recordedSurface={live.renderRecordedSurface?.(currentObservation)}
                 historyTruncated={live.historyTruncated}

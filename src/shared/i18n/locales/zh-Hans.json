@@ -7188,6 +7188,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "离线项目演示。这不代表复现了原始实验。",
     "A research execution is not, by itself, evidence of successful reproduction.": "执行研究本身并不能证明复现成功。",
     "Execution conditions": "执行条件",
-    "Recorded configuration: {{name}}": "记录中的配置：{{name}}"
+    "Recorded configuration: {{name}}": "记录中的配置：{{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "此演示在动作结束后仍会保持项目页面打开。观看完毕后可停止演示。",
+    "This demo’s project page closes when its program exits.": "此演示的程序退出时，项目页面将关闭。",
+    "The viewing time limit was not recorded for this demo.": "此演示未记录观看时限。",
+    "The viewing time limit was reached.": "已达到观看时限。",
+    "The run was stopped.": "运行已停止。",
+    "The run failed.": "运行失败。",
+    "The run was interrupted.": "运行已中断。",
+    "The run has ended.": "运行已结束。",
+    "The run timed out.": "运行已超时。",
+    "The live project page is closed.": "实时项目页面已关闭。",
+    "Result files recorded at this step": "此步骤记录的结果文件",
+    "No result files were recorded at this step.": "此步骤未记录结果文件。",
+    "Evidence from the selected step": "所选步骤的证据",
+    "This is a recorded image, not a live project page.": "这是已保存的图像，并非实时项目页面。",
+    "Source step: {{step}}": "来源步骤：{{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最长执行时间：{{minutes}} 分钟。程序可能提前结束。"
   }
 }

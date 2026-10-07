@@ -305,7 +305,14 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       })
       source = {
         ...source,
-        executionContext: { purpose: 'offline-demo', conditionChanges: [] },
+        executionContext: {
+          purpose: 'offline-demo',
+          conditionChanges: [],
+          demoViewing: {
+            mode: 'until-stop-or-timeout',
+            timeoutMs: 600_000
+          }
+        },
         run: {
           ...source.run!,
           text: { ...source.run!.text, stdout: `${startupOutput}\nlater output` }
@@ -328,6 +335,9 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       ).toBe(startupOutput)
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
       await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
+      await expect(page.getByTestId('demo-viewing-notice')).toContainText(
+        'Maximum demo execution time: 10 min.'
+      )
       await expect(projectFrame.locator('output')).toHaveText('1')
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       expect(await frame?.evaluate((node) => node.isConnected)).toBe(true)
@@ -338,6 +348,37 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       expect(projectLoads).toBe(1)
       await page.screenshot({ path: join(evidence, 'replay-viewer-narrow.png') })
+      // Exercise the actual terminal projection in the same project tab. Completion must
+      // remove live authority while leaving the observed result readable without a screenshot.
+      source = {
+        ...source,
+        phase: 'completed',
+        executionContext: {
+          ...source.executionContext!,
+          demoViewing: { ...source.executionContext!.demoViewing!, endReason: 'process-exited' }
+        },
+        artifacts: [{ artifactId: 'result', versionId: 'result-version', name: 'result.json' }],
+        run: {
+          ...source.run!,
+          status: 'completed',
+          endedAt: Date.now(),
+          exitCode: 0,
+          text: { ...source.run!.text, stdout: 'Offline actions complete; project viewing ended.' }
+        }
+      }
+      await expect(
+        page.getByText('The live project page is closed.', { exact: true })
+      ).toBeVisible()
+      await expect(page.locator('iframe[title="Interactive project"]')).toHaveCount(0)
+      await expect(
+        page.getByText('Offline actions complete; project viewing ended.', { exact: true })
+      ).toBeVisible()
+      await expect(
+        page.getByTestId('replay-live-record').getByText('result.json', { exact: true })
+      ).toBeVisible()
+      await expect(page.getByTestId('demo-viewing-notice')).toHaveCount(0)
+      await expect(page.getByTestId('open-project-interface')).toHaveCount(0)
+      await page.screenshot({ path: join(evidence, 'replay-viewer-ended.png') })
       await writeFile(
         join(evidence, 'result.json'),
         JSON.stringify(
@@ -347,6 +388,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
             projectLoads,
             projectViewRequests,
             projectMarginInteractionsPreserved: true,
+            terminalProjectResultsVisible: true,
             manualInspectionPreserved: longLogs,
             errors
           },

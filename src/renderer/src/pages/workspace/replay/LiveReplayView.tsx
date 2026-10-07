@@ -16,6 +16,7 @@ import type { ReplayResourceReader } from './replay-resources'
 import type { ReplayProjectActivation, ReplayRuntimeSurface } from './ReplayLiveRecord'
 import { ReplayPanel } from './ReplayPanel'
 import { ExecutionPurposeNotice } from './ExecutionPurposeNotice'
+import { DemoViewingNotice } from './DemoViewingNotice'
 
 export type LiveReplayViewProps = {
   title: string
@@ -105,6 +106,11 @@ const LiveReplayViewContent = (props: LiveReplayViewProps): React.JSX.Element =>
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="live-replay-view">
       <ExecutionPurposeNotice context={props.executionContext ?? props.snapshot.executionContext} />
+      <DemoViewingNotice
+        context={props.executionContext ?? props.snapshot.executionContext}
+        phase={props.snapshot.phase}
+        recorded={props.recorded}
+      />
       {error ? (
         <ErrorNotice
           inline
@@ -138,6 +144,7 @@ const LiveReplayViewContent = (props: LiveReplayViewProps): React.JSX.Element =>
           discussionPending={asking}
           live={{
             sourceIdentity: props.sourceIdentity,
+            executionContext: props.executionContext ?? props.snapshot.executionContext,
             snapshot: props.snapshot,
             history: projected.history,
             connection: props.connection,

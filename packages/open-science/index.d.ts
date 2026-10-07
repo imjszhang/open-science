@@ -866,11 +866,18 @@ export type RunObservationArtifact = Readonly<{
   checksum?: string
   sizeBytes?: number
 }>
+export type RunObservationDemoViewing = Readonly<{
+  mode: 'process-lifetime' | 'until-stop-or-timeout'
+  /** Admitted maximum execution time, not an absolute page-closing deadline. */
+  timeoutMs: number
+  endReason?: 'process-exited' | 'time-limit' | 'stopped' | 'failed' | 'interrupted'
+}>
 /** Declared execution intent; neither a successful process nor this label proves reproduction. */
 export type RunObservationExecutionContext = Readonly<{
   purpose: 'offline-demo' | 'research' | 'unknown'
   profileName?: string
   conditionChanges: readonly string[]
+  demoViewing?: RunObservationDemoViewing
 }>
 export type RunObservationSnapshot = Readonly<{
   identity: RunObservationIdentity

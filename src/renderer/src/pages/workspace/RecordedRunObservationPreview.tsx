@@ -177,7 +177,12 @@ export const RecordedRunObservationPreview = (
           renderRecordedSurface={(snapshot) => {
             const images = imagesByStep.get(snapshot.stepId)
             return images?.length ? (
-              <RecordedProjectImages key={snapshot.stepId} images={images} readImage={readImage} />
+              <RecordedProjectImages
+                key={snapshot.stepId}
+                images={images}
+                readImage={readImage}
+                sourceStep={snapshot.stepId}
+              />
             ) : undefined
           }}
           renderResource={

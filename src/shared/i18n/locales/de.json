@@ -7348,6 +7348,22 @@
     "Offline project demonstration. This does not reproduce the original experiment.": "Offline-Demonstration des Projekts. Das ursprüngliche Experiment wird dabei nicht reproduziert.",
     "A research execution is not, by itself, evidence of successful reproduction.": "Die Ausführung einer Forschung ist für sich genommen kein Beleg für eine erfolgreiche Reproduktion.",
     "Execution conditions": "Ausführungsbedingungen",
-    "Recorded configuration: {{name}}": "Aufgezeichnete Konfiguration: {{name}}"
+    "Recorded configuration: {{name}}": "Aufgezeichnete Konfiguration: {{name}}",
+    "This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.": "Diese Demo hält die Projektseite nach Abschluss ihrer Aktionen geöffnet. Stoppen Sie die Demo, wenn Sie mit der Ansicht fertig sind.",
+    "This demo’s project page closes when its program exits.": "Die Projektseite dieser Demo wird geschlossen, wenn das Programm beendet wird.",
+    "The viewing time limit was not recorded for this demo.": "Für diese Demo wurde keine zeitliche Begrenzung der Ansicht aufgezeichnet.",
+    "The viewing time limit was reached.": "Die Zeitbegrenzung für die Ansicht wurde erreicht.",
+    "The run was stopped.": "Der Lauf wurde gestoppt.",
+    "The run failed.": "Der Lauf ist fehlgeschlagen.",
+    "The run was interrupted.": "Der Lauf wurde unterbrochen.",
+    "The run has ended.": "Der Lauf ist beendet.",
+    "The run timed out.": "Das Zeitlimit für den Lauf wurde überschritten.",
+    "The live project page is closed.": "Die Live-Projektseite ist geschlossen.",
+    "Result files recorded at this step": "In diesem Schritt aufgezeichnete Ergebnisdateien",
+    "No result files were recorded at this step.": "Für diesen Schritt wurden keine Ergebnisdateien aufgezeichnet.",
+    "Evidence from the selected step": "Belege aus dem ausgewählten Schritt",
+    "This is a recorded image, not a live project page.": "Dies ist ein aufgezeichnetes Bild, keine Live-Projektseite.",
+    "Source step: {{step}}": "Quellschritt: {{step}}",
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Maximale Ausführungszeit der Demo: {{minutes}} Min. Das Programm kann früher enden."
   }
 }

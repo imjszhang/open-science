@@ -37,6 +37,7 @@ import { parseRunObservationArchive } from '../../shared/run-observation-archive
 import { saveAuxiliaryOutput } from '../run-observation/auxiliary-output'
 import { ObservationMediaCollector } from '../run-observation/media-collector'
 import { readObservationProjectExport } from '../run-observation/project-export-reader'
+import { createManagedRunObservationReader } from '../managed-run-observation'
 
 const roots: string[] = []
 const observationOwners: RunObservationRecorder[] = []
@@ -2120,6 +2121,86 @@ it('keeps Replay purpose Main-owned and rejects switching the same request into 
   expect(
     h.savedOutputs.find((output) => output.filename.startsWith('execution-'))?.content
   ).toContain('"purpose": "offline-demo"')
+})
+
+it('keeps the demo viewing budget Main-only, binds retries and persists it without extending process lifetime', async () => {
+  const h = await setup()
+  h.request.timeoutMs = 10000
+  h.request.projectView = { title: 'Project' }
+  h.request.localServicePort = 4173
+  h.dependencies.registerProjectService = vi.fn(() => () => undefined)
+  const demoViewing = { mode: 'until-stop-or-timeout' as const, timeoutMs: 10000 }
+  for (const untrusted of [{ demoViewing }, { viewing: { mode: 'until-stop-or-timeout' } }])
+    await expect(
+      h.service.executeInTurn({ ...h.request, ...untrusted }, h.context)
+    ).rejects.toThrow()
+  await expect(
+    h.service.executeDemoInTurn(h.request, h.context, undefined, {
+      demoViewing: { ...demoViewing, timeoutMs: 20000 }
+    })
+  ).rejects.toThrow('does not match')
+  await expect(
+    h.service.executeDemoInTurn(h.request, h.context, undefined, {
+      demoViewing: { ...demoViewing, endReason: 'time-limit' } as never
+    })
+  ).rejects.toThrow()
+  expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
+
+  const result = await h.service.executeDemoInTurn(h.request, h.context, undefined, { demoViewing })
+  expect(result.status).toBe('completed')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledWith(
+    expect.objectContaining({ timeoutMs: 10000 }),
+    expect.anything(),
+    expect.anything(),
+    undefined
+  )
+  const restarted = new ManagedExecutionService(h.dependencies)
+  expect(
+    await restarted.executeDemoInTurn(h.request, h.context, undefined, { demoViewing })
+  ).toEqual(result)
+  await expect(
+    restarted.executeDemoInTurn(h.request, h.context, undefined, {
+      demoViewing: { ...demoViewing, mode: 'process-lifetime' }
+    })
+  ).rejects.toThrow('conflict')
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+  expect(
+    (await restarted.inspectExecution({ ...scope, operationId: 'operation' }))?.demoViewing
+  ).toEqual(demoViewing)
+  const observed = await createManagedRunObservationReader(restarted)({
+    ...scope,
+    operationId: 'operation'
+  })
+  expect(observed?.executionContext?.demoViewing).toEqual({
+    ...demoViewing,
+    endReason: 'process-exited'
+  })
+  const receipt = JSON.parse(
+    h.savedOutputs.find((output) => output.filename.startsWith('execution-'))!.content
+  )
+  expect(receipt.demoViewing).toEqual(demoViewing)
+  expect(receipt.demoViewing).not.toHaveProperty('endReason')
+})
+
+it('does not invent viewing facts when replaying a legacy demo journal', async () => {
+  const h = await setup()
+  const result = await h.service.executeDemoInTurn(h.request, h.context)
+  const key = sha(
+    JSON.stringify([scope.projectId, scope.sessionId, h.context.operationId, h.request.requestId])
+  )
+  const path = join(h.root, 'managed-execution-requests', key + '.json')
+  const legacy = JSON.parse(await readFile(path, 'utf8'))
+  delete legacy.demoViewing
+  await writeFile(path, JSON.stringify(legacy))
+  const restarted = new ManagedExecutionService(h.dependencies)
+  expect(await restarted.executeDemoInTurn(h.request, h.context)).toEqual(result)
+  const observed = await createManagedRunObservationReader(restarted)({
+    ...scope,
+    operationId: 'operation'
+  })
+  expect(observed?.executionContext?.purpose).toBe('offline-demo')
+  expect(observed?.executionContext?.demoViewing).toBeUndefined()
+  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
 })
 
 it('verifies supplemental demo Versions against the source and records their dependency without restoring caller paths', async () => {

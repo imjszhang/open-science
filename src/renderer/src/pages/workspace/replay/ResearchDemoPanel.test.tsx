@@ -102,6 +102,26 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
+it('shows the inspected viewing policy before starting without launching a run', async () => {
+  mocks.inspect.mockResolvedValue({
+    ...inspection,
+    candidates: inspection.candidates.map((candidate) => ({
+      ...candidate,
+      demoViewing: { mode: 'until-stop-or-timeout', timeoutMs: 600_000 }
+    }))
+  })
+  render(<ResearchDemoPanel source={source} isActive />)
+  expect(
+    await screen.findByText('Maximum demo execution time: 10 min. The program may finish earlier.')
+  ).toBeTruthy()
+  expect(
+    screen.getByText(
+      'This demo keeps the project page open after its actions finish. Stop the demo when you are done viewing.'
+    )
+  ).toBeTruthy()
+  expect(mocks.start).not.toHaveBeenCalled()
+})
+
 const selectedEvidence = (): RunObservationSelection => ({
   selectionId: 'selected-step',
   identity: { projectId: 'project', sessionId: 'carrier', runId: 'exact-run' },
