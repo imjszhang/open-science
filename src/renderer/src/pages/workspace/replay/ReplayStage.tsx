@@ -80,6 +80,8 @@ export type ReplayStageProps = {
   primaryLabel?: string
   followPrimary?: boolean
   primaryMode?: 'record' | 'project'
+  // Only the host following a running project can exempt its whole viewport from inspection.
+  liveProjectActive?: boolean
   renderResource?: (resource: ReplayResource, onClose: () => void) => React.ReactNode
   wide?: boolean
   followNotebook?: boolean
@@ -591,6 +593,7 @@ const ReplayStageContent = ({
   primaryLabel,
   followPrimary = true,
   primaryMode,
+  liveProjectActive = false,
   renderResource,
   scene,
   resources = {},
@@ -980,6 +983,9 @@ const ReplayStageContent = ({
     })
   }
   const style = replayPresentationStyle(presentation)
+  const isLiveInteraction = (target: EventTarget): boolean =>
+    (target instanceof Element && Boolean(target.closest('[data-replay-live-interaction]'))) ||
+    (liveProjectActive && target instanceof Node && Boolean(transcript.current?.contains(target)))
   return (
     <div
       ref={stage}
@@ -994,13 +1000,13 @@ const ReplayStageContent = ({
       data-replay-branch={scene.branchId}
       className="@container/replay flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden bg-bg-000 text-text-100"
       onWheelCapture={(event) => {
-        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
+        if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         onInspect?.()
       }}
       onPointerDownCapture={(event) => {
-        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
+        if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         onInspect?.()
@@ -1008,7 +1014,7 @@ const ReplayStageContent = ({
           onCloseFiles?.()
       }}
       onKeyDownCapture={(event) => {
-        if ((event.target as Element).closest?.('[data-replay-live-interaction]')) return
+        if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
         if (event.key === 'Escape' && inspecting) {

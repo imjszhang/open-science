@@ -235,6 +235,41 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
       await expect(projectFrame.locator('output')).toHaveText('1')
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
       const frame = await page.locator('iframe[title="Interactive project"]').elementHandle()
+      // Project interaction includes the surrounding viewport padding and the gap below its
+      // controls. These real pointer/wheel/key events must not freeze the live timeline.
+      const projectRegion = page.getByRole('region', { name: 'Execution record', exact: true })
+      const projectBounds = (await projectRegion.boundingBox())!
+      const margin = { x: projectBounds.x + 2, y: projectBounds.y + projectBounds.height / 2 }
+      await page.mouse.click(margin.x, margin.y)
+      await expect(page.getByRole('button', { name: 'Pause following', exact: true })).toBeVisible()
+      await expect(projectFrame.locator('output')).toBeVisible()
+      await page.mouse.move(margin.x, margin.y)
+      await page.mouse.wheel(0, -120)
+      await page.keyboard.press('PageDown')
+      const projectControls = (await page
+        .getByRole('group', { name: 'Run view', exact: true })
+        .boundingBox())!
+      await page.mouse.click(
+        projectControls.x + projectControls.width / 2,
+        projectControls.y + projectControls.height + 3
+      )
+      await expect(page.getByRole('button', { name: 'Pause following', exact: true })).toBeVisible()
+      await expect(projectFrame.locator('output')).toHaveText('1')
+      const beforeProjectUpdate = await page
+        .locator('[data-observation-record]')
+        .getAttribute('data-observation-record')
+      startupOutput += '\nupdate while interacting with project margins'
+      source = {
+        ...source,
+        run: { ...source.run!, text: { ...source.run!.text, stdout: startupOutput } }
+      }
+      await expect
+        .poll(() =>
+          page.locator('[data-observation-record]').getAttribute('data-observation-record')
+        )
+        .not.toBe(beforeProjectUpdate)
+      expect(await frame?.evaluate((node) => node.isConnected)).toBe(true)
+      expect(projectLoads).toBe(1)
       await page.getByRole('button', { name: 'Execution record', exact: true }).click()
       await expect(page.locator('iframe[title="Interactive project"]')).toBeHidden()
       await page.getByRole('button', { name: 'Project interface', exact: true }).click()
@@ -311,6 +346,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
             beforeProjectClick,
             projectLoads,
             projectViewRequests,
+            projectMarginInteractionsPreserved: true,
             manualInspectionPreserved: longLogs,
             errors
           },

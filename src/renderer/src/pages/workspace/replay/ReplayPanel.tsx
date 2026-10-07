@@ -1096,6 +1096,13 @@ const ReplayPanelContent = ({
             !live || (!live.recorded && !inspection && active && !liveProjectTabActive)
           }
           primaryMode={liveProjectTabActive ? 'project' : 'record'}
+          liveProjectActive={
+            liveProjectTabActive &&
+            observationMode === 'follow' &&
+            live?.connection === 'connected' &&
+            live.snapshot.phase === 'running' &&
+            live.snapshot.run?.status === 'running'
+          }
           primaryLabel={live ? t('Execution record') : undefined}
           primaryContent={
             live && currentObservation ? (

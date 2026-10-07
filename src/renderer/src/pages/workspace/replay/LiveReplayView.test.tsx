@@ -175,6 +175,72 @@ describe('shared live Replay viewer', () => {
     expect(first.onStop).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['edge', 'pointer'],
+    ['edge', 'wheel'],
+    ['edge', 'keyboard'],
+    ['gap', 'pointer'],
+    ['gap', 'wheel'],
+    ['gap', 'keyboard']
+  ] as const)(
+    'keeps the live project visible after %s %s interaction and still pauses when browsing logs',
+    (location, interaction) => {
+      const first = props()
+      const surface = {
+        runId: 'run',
+        content: <iframe title="Current project" src="about:blank" />
+      }
+      const view = render(<LiveReplayView {...first} runtimeSurface={surface} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      const frame = screen.getByTitle('Current project')
+      const interact = (target: HTMLElement): void => {
+        if (interaction === 'pointer') fireEvent.pointerDown(target)
+        else if (interaction === 'wheel') fireEvent.wheel(target, { deltaY: -10 })
+        else fireEvent.keyDown(target, { key: 'PageUp' })
+      }
+      interact(
+        location === 'edge'
+          ? screen.getByRole('region', { name: 'Execution record' })
+          : screen.getByTestId('replay-live-record')
+      )
+      expect(screen.getByText('Following live')).toBeTruthy()
+      expect(frame.closest('[hidden], [inert]')).toBeNull()
+      view.rerender(
+        <LiveReplayView
+          {...first}
+          snapshot={snapshot(2)}
+          history={[first.snapshot, snapshot(2)]}
+          runtimeSurface={surface}
+        />
+      )
+      expect(screen.getByTestId('replay-live-record').getAttribute('data-observation-record')).toBe(
+        'epoch:2'
+      )
+      expect(screen.getByTitle('Current project')).toBe(frame)
+      expect(frame.closest('[hidden], [inert]')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Execution record' }))
+      interact(screen.getByRole('region', { name: 'Execution record' }))
+      expect(screen.getByRole('button', { name: 'Back to live' })).toBeTruthy()
+      expect(screen.getByText('Inspecting recorded evidence')).toBeTruthy()
+      expect(first.onStop).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['recorded', 'completed'] as const)(
+    'still inspects project-pane history when the observation is %s',
+    (state) => {
+      const record =
+        state === 'completed' ? { ...snapshot(1), phase: 'completed' as const } : snapshot(1)
+      render(<LiveReplayView {...props(record)} recorded={state === 'recorded'} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
+      expect(screen.getByText('Run history')).toBeTruthy()
+      fireEvent.pointerDown(screen.getByRole('region', { name: 'Execution record' }))
+      expect(screen.getByText('Inspecting recorded evidence')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Show latest record' })).toBeTruthy()
+    }
+  )
+
   it('keeps a live project page mounted across revisions and blocks it during inspection, disconnect and completion', () => {
     const first = props()
     const surface = { runId: 'run', content: <iframe title="Current project" src="about:blank" /> }
