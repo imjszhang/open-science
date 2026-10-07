@@ -80,3 +80,28 @@ Tuanzi acceptance materials are maintained outside this repository in a fresh re
 using source commit `b6d5810fef3baac1195c980fe728ce7a8a69408b`. Engineering offline runs do not
 establish scientific reproduction of the external-model experiment. The installed Test release
 and actual sandbox/export/import validation are recorded separately after execution.
+
+## Installed acceptance, 2026-10-07
+
+The isolated Test client executed the fixed Tuanzi rule/local plan in ordinary writable Sessions
+through the SDK. Both bounded runs completed and their environments were explicitly released.
+The first pass saved one screenshot; its two-frame acceptance failed and was retained. The second
+pass saved two actual host-view screenshots (the final Canvas world and diagnostics), six declared
+states and four declared state-change events. These screenshots are not a continuous recording of
+the four actions, and the derived HTML report is not a captured project frame. External provider
+calls were zero; scientific reproduction remains `NOT_EVALUATED`.
+
+The second result package was exported and imported into a new Project/Session. Both recording
+formats, media and results resolved to new receiving Versions with byte-identical checksums.
+The SDK read/view/file-selection checks left environment, operation and Notebook metadata
+unchanged. This checks the persistent execution boundary; no global in-memory service census API
+is available. The package SHA-256 is
+`e22a6aa68869b02ed516e3ceca360962117a0e06d4e3ef327e334cb69c394384`.
+
+The Codex browser displayed the archived Canvas image after service shutdown, switched between
+the two frames, and displayed the saved HTML as inert content. Asking about that HTML produced
+an exact `recorded-observation-file` selection readable by the SDK. A real narrow-browser check
+also exposed a first-click loss when the inspection banner moved the material tabs; the regression
+uses an actual pointer press/release and verifies a single click selects Project Replay or Results.
+Local receipts and the final installed release are retained in the fresh Tuanzi acceptance
+directory, outside the source repository. No upstream submission is part of this acceptance.
