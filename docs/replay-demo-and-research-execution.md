@@ -462,5 +462,25 @@ After rebuilding the viewer, all three browser scenarios pass, including preserv
 continued observation updates, real pointer/wheel/keyboard interactions, explicit pause/resume and
 manual inspection of logs. All 777 locale guards, Web types, lint, formatting and diff checks pass.
 Evidence is retained in `tuanzi-v056-demo-and-research-20261007/project-margin-fix-20261007/`.
-The independent Test update and post-install native verification are in progress; these are not
-established by the isolated browser tests. No external model was invoked for this regression.
+The fix and the Files-overlay correction are installed from source `9538b493d612359cc1f62c6d3eff2c1c17391331`
+as `0.35.1-test.9538b493d612.2`, release `20261007T043653Z-9538b493d612`, with pre-install backup
+`20261007T043935Z-0d396651`. Deep signature verification passed; installed `app.asar` SHA-256 is
+`0cabec58cf39bcf26cfaef02e372bede0879ab7343abad0889a4f9d671ed2ab0`. Startup completed without a
+blocking keychain prompt, and the existing imported research opened normally.
+
+Native post-install verification used a new offline demonstration from source Session #87. The
+same padding click, wheel, Page Down and internal project scrolling all preserved live following
+and the visible Tuanzi page. Opening the orchard experiment remained interactive. Clicking outside
+the narrow Files overlay closed it without pausing; explicit pause entered inspection and Back to
+live restored the same project URL. A project capture was accepted for archive publication. These
+checks were performed in the installed Test through its UI, separately from the browser test suite.
+Automatic observation advanced from 1/1 to 2/2 and the visible Tuanzi page updated to four
+completed offline actions, with zero actual external requests. The demonstration then completed
+naturally after its declared viewing windows. No external model was invoked. Production app and
+original input archive hashes remain unchanged.
+
+The installed UI also verified archive publication after natural completion: observation 2/4
+displays the captured project image and acquisition interval. The terminal observation 4/4 has no
+frame and retains the explicit missing-frame notice; captures remain step-specific. Test is left
+on the saved image at 2/4. `verification.json` in the regression evidence directory records both
+the native live checks and the archive readback. No push was performed.
