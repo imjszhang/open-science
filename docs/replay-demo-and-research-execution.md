@@ -438,3 +438,29 @@ showing the author report. `installed-author-ui-01/client-upgrade-receipt.json` 
 `token-budget-delivery.json` record the completed checks; no new paid requests were made. All
 required implementation and bounded acceptance items above are now complete, subject to the
 explicit scientific, recording and platform boundaries. No upstream or fork push was performed.
+
+## Follow-up: live project viewport interactions (2026-10-07)
+
+On installed source `188bf72ab`, a native click in the Tuanzi project viewport's left padding
+immediately switched Replay from following to inspecting. The experiment remained running, but
+the live iframe became hidden and the selected observation had no saved frame. **Back to live**
+restored the same iframe without restarting the experiment. The user's demonstration later
+completed naturally after its declared viewing windows.
+
+Commit `cbcdbf0bb` allows the host to identify a connected, running project being followed live.
+Only that project's viewport, including padding and internal gaps, is exempt from automatic
+inspection on pointer, wheel and navigation-key events. Explicit pause, timeline/step selection,
+execution-log browsing and historical/terminal views retain their existing behavior. The generic
+scroll-follow hook and ordinary conversation surfaces are unchanged; no new renderer strings or
+`.science` format changes are introduced.
+
+Six new unit cases failed before the fix and passed afterward. Two additional regression cases
+verify that project-edge pointer and Escape interactions still dismiss the narrow Files overlay
+without pausing the project. All 115 adjacent renderer cases pass.
+Both real-browser short/overflowing-log scenarios failed on the same padding click before the fix.
+After rebuilding the viewer, all three browser scenarios pass, including preserved iframe identity,
+continued observation updates, real pointer/wheel/keyboard interactions, explicit pause/resume and
+manual inspection of logs. All 777 locale guards, Web types, lint, formatting and diff checks pass.
+Evidence is retained in `tuanzi-v056-demo-and-research-20261007/project-margin-fix-20261007/`.
+The independent Test update and post-install native verification are in progress; these are not
+established by the isolated browser tests. No external model was invoked for this regression.

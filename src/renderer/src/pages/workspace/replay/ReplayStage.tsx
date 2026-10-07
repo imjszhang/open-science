@@ -984,8 +984,10 @@ const ReplayStageContent = ({
   }
   const style = replayPresentationStyle(presentation)
   const isLiveInteraction = (target: EventTarget): boolean =>
-    (target instanceof Element && Boolean(target.closest('[data-replay-live-interaction]'))) ||
-    (liveProjectActive && target instanceof Node && Boolean(transcript.current?.contains(target)))
+    target instanceof Element && Boolean(target.closest('[data-replay-live-interaction]'))
+  // Viewport padding must still handle host dismissal while leaving the project live.
+  const isLiveProjectViewportInteraction = (target: EventTarget): boolean =>
+    liveProjectActive && target instanceof Node && Boolean(transcript.current?.contains(target))
   return (
     <div
       ref={stage}
@@ -1003,13 +1005,13 @@ const ReplayStageContent = ({
         if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
-        onInspect?.()
+        if (!isLiveProjectViewportInteraction(event.target)) onInspect?.()
       }}
       onPointerDownCapture={(event) => {
         if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
-        onInspect?.()
+        if (!isLiveProjectViewportInteraction(event.target)) onInspect?.()
         if (filesOpen && !wide && !filesPane.current?.contains(event.target as Node))
           onCloseFiles?.()
       }}
@@ -1030,7 +1032,10 @@ const ReplayStageContent = ({
           event.stopPropagation()
           onCloseMaterials?.()
         }
-        if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key))
+        if (
+          !isLiveProjectViewportInteraction(event.target) &&
+          ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)
+        )
           onInspect?.()
       }}
     >

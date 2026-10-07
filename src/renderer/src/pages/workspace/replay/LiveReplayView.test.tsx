@@ -241,6 +241,42 @@ describe('shared live Replay viewer', () => {
     }
   )
 
+  it.each(['pointer', 'Escape'] as const)(
+    'dismisses the narrow files overlay with a project-edge %s interaction without pausing the project',
+    (interaction) => {
+      const first = props()
+      render(
+        <LiveReplayView
+          {...first}
+          runtimeSurface={{
+            runId: 'run',
+            content: <iframe title="Current project" src="about:blank" />
+          }}
+        />
+      )
+      const projectButton = screen.getByRole('button', { name: 'Project interface' })
+      fireEvent.click(projectButton)
+      const frame = screen.getByTitle('Current project')
+      const filesButton = screen.getByRole('button', { name: 'View files' })
+      fireEvent.click(filesButton)
+      expect(screen.getByRole('button', { name: 'Close files' })).toBeTruthy()
+      // Existing marked project controls retain their own event handling.
+      fireEvent.pointerDown(projectButton)
+      expect(filesButton.getAttribute('aria-expanded')).toBe('true')
+
+      const viewport = screen.getByRole('region', { name: 'Execution record' })
+      if (interaction === 'pointer') fireEvent.pointerDown(viewport)
+      else fireEvent.keyDown(viewport, { key: 'Escape' })
+
+      expect(filesButton.getAttribute('aria-expanded')).toBe('false')
+      expect(screen.queryByRole('button', { name: 'Close files' })).toBeNull()
+      expect(screen.getByText('Following live')).toBeTruthy()
+      expect(screen.getByTitle('Current project')).toBe(frame)
+      expect(frame.closest('[hidden], [inert]')).toBeNull()
+      expect(first.onStop).not.toHaveBeenCalled()
+    }
+  )
+
   it('keeps a live project page mounted across revisions and blocks it during inspection, disconnect and completion', () => {
     const first = props()
     const surface = { runId: 'run', content: <iframe title="Current project" src="about:blank" /> }
