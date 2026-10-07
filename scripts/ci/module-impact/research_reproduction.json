@@ -253,7 +253,11 @@
       "src/main/notebook/research-acceptance.test.ts",
       "src/main/notebook/research-acceptance-resume.test.ts",
       "src/main/project-recordings/managed-adapter.test.ts",
-      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/main/browser-recordings/external-port.test.ts",
+      "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx"
     ]
   },
   "capabilityOverlays": [],

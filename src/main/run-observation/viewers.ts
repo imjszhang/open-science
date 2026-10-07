@@ -8,6 +8,12 @@ import {
 } from '../../shared/run-observation'
 import type { RunObservationOwner, RunObservationViewer } from './owner'
 import {
+  recordedBrowserPayloadSchema,
+  browserRecordingMomentSchema,
+  type RecordedBrowserPayload,
+  type BrowserRecordingMoment
+} from '../../shared/browser-recording'
+import {
   recordedObservationTargetSchema,
   recordedObservationPayloadSchema,
   recordedProjectPayloadSchema,
@@ -65,6 +71,11 @@ export type ObservationViewersDependencies = Readonly<{
     authorizeScope(target: RecordedObservationTarget): Promise<void>
     read(target: RecordedObservationTarget): Promise<RecordedObservationPayload>
     readProject?(target: RecordedObservationTarget): Promise<RecordedProjectPayload>
+    readBrowser?(target: RecordedObservationTarget): Promise<RecordedBrowserPayload>
+    selectBrowserMoment?(
+      target: RecordedObservationTarget,
+      offsetMs: number
+    ): Promise<BrowserRecordingMoment>
     selectFile?(
       target: RecordedObservationTarget,
       mediaKey: string,
@@ -90,6 +101,7 @@ type ViewerRecord = {
   caller: CallerContext
   selection?: RecordedRunObservationSelection
   fileSelection?: RecordedObservationFileSelection
+  momentSelection?: BrowserRecordingMoment
   grants: Set<string>
   capabilities: Set<string>
   expiry: ReturnType<typeof setTimeout>
@@ -303,6 +315,20 @@ export class ObservationViewers {
   private async readRecording(record: ViewerRecord): Promise<RecordedEvidencePayload> {
     if (record.descriptor.mode !== 'recorded' || !this.dependencies.recorded)
       throw new ObservationViewerError('unavailable', 'This viewer does not reference a recording.')
+    if (record.descriptor.format === 'web-recording') {
+      if (!this.dependencies.recorded.readBrowser)
+        throw new ObservationViewerError('unavailable', 'Browser recordings are unavailable.')
+      const payload = recordedBrowserPayloadSchema.parse(
+        await this.dependencies.recorded.readBrowser(structuredClone(record.descriptor.target))
+      )
+      if (
+        Object.entries(record.descriptor.target).some(
+          ([key, value]) => payload.receiving[key as keyof RecordedObservationTarget] !== value
+        )
+      )
+        throw new ObservationViewerError('unavailable', 'The recording identity changed.')
+      return payload
+    }
     const project = record.descriptor.format === 'project-recording'
     if (project && !this.dependencies.recorded.readProject)
       throw new ObservationViewerError('unavailable', 'Project recordings are unavailable.')
@@ -556,6 +582,8 @@ export class ObservationViewers {
     mediaKey: string
   ): Promise<RecordedObservationFileSelection> {
     const payload = await this.readRecording(record)
+    if ('indexChecksum' in payload)
+      throw new ObservationViewerError('unavailable', 'Select a recorded browser moment instead.')
     if (!this.dependencies.recorded?.selectFile)
       throw new ObservationViewerError('unavailable', 'Recorded file selection is unavailable.')
     const expected = recordedFileSelectionForPayload(payload, mediaKey)
@@ -600,6 +628,69 @@ export class ObservationViewers {
           'The selected immutable file is unavailable.'
         )
       return structuredClone(record.fileSelection)
+    })
+  }
+  private async readMoment(
+    record: ViewerRecord,
+    offsetMs: number
+  ): Promise<BrowserRecordingMoment> {
+    const payload = await this.readRecording(record)
+    if (!('indexChecksum' in payload) || !this.dependencies.recorded?.selectBrowserMoment)
+      throw new ObservationViewerError('unavailable', 'Browser recording selection is unavailable.')
+    const selected = browserRecordingMomentSchema.parse(
+      await this.dependencies.recorded.selectBrowserMoment(payload.receiving, offsetMs)
+    )
+    const segment = payload.recording.segments.find((item) => item.segmentId === selected.segmentId)
+    const media = payload.recording.media.find((item) => item.mediaKey === selected.mediaKey)
+    const resolved = payload.media.find((item) => item.mediaKey === selected.mediaKey)
+    if (
+      !segment ||
+      !media ||
+      !resolved ||
+      selected.offsetMs !== offsetMs ||
+      selected.indexChecksum !== payload.indexChecksum ||
+      selected.recordingId !== payload.recording.recordingId ||
+      JSON.stringify(selected.receiving) !== JSON.stringify(payload.receiving) ||
+      offsetMs < segment.startMs ||
+      offsetMs >= segment.endMs ||
+      selected.segmentOffsetMs !== offsetMs - segment.startMs ||
+      segment.mediaKey !== media.mediaKey ||
+      selected.resource.artifactId !== resolved.artifactId ||
+      selected.resource.versionId !== resolved.versionId ||
+      selected.resource.checksum !== media.checksum ||
+      selected.resource.sizeBytes !== media.sizeBytes
+    )
+      throw new ObservationViewerError('unavailable', 'The recorded browser moment changed.')
+    return selected
+  }
+  async selectBrowserMoment(
+    viewerId: string,
+    offsetMs: number,
+    auth: ObservationViewAuthorization
+  ): Promise<BrowserRecordingMoment> {
+    return this.withViewer(viewerId, auth, async (record) => {
+      const selected = await this.readMoment(record, offsetMs)
+      record.momentSelection = structuredClone(selected)
+      return selected
+    })
+  }
+  async browserMomentSelection(
+    viewerId: string,
+    auth: ObservationViewAuthorization
+  ): Promise<BrowserRecordingMoment | null> {
+    return this.withViewer(viewerId, auth, async (record) => {
+      await this.readRecording(record)
+      if (!record.momentSelection) return null
+      const current = await this.readMoment(record, record.momentSelection.offsetMs)
+      if (
+        current.indexChecksum !== record.momentSelection.indexChecksum ||
+        JSON.stringify(current.resource) !== JSON.stringify(record.momentSelection.resource)
+      )
+        throw new ObservationViewerError(
+          'unavailable',
+          'The selected browser moment is unavailable.'
+        )
+      return structuredClone(record.momentSelection)
     })
   }
   async revoke(viewerId: string, auth: ObservationViewAuthorization): Promise<void> {

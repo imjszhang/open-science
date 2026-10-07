@@ -1,3 +1,5 @@
+import type { RecordedBrowserPayload, BrowserRecordingMoment } from '../../shared/browser-recording'
+import { BrowserRecordingPlayer } from '../src/pages/workspace/replay/BrowserRecordingPlayer'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReplayResource } from '../../shared/replay'
@@ -205,13 +207,66 @@ const RecordedProjectViewerApp = ({
     </main>
   )
 }
+const RecordedBrowserViewerApp = ({
+  client,
+  context,
+  payload
+}: {
+  client: ReplayViewerClient
+  context: RecordedReplayViewerContext
+  payload: RecordedBrowserPayload
+}): React.JSX.Element => {
+  const { t } = useTranslation()
+  const [selection, setSelection] = useState<BrowserRecordingMoment>()
+  useEffect(() => {
+    const controller = new AbortController()
+    void client.browserMoment(payload, controller.signal).then(
+      (value) => {
+        if (!controller.signal.aborted && value) setSelection(value)
+      },
+      () => undefined
+    )
+    return () => controller.abort()
+  }, [client, payload])
+  const mediaUrl = useCallback(
+    (mediaKey: string) =>
+      context.canReadArtifacts ? client.browserRecordingMediaUrl(payload, mediaKey) : null,
+    [client, payload, context.canReadArtifacts]
+  )
+  return (
+    <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
+      <header className="shrink-0 border-b border-border-200 p-3">
+        <h1 className="text-sm font-medium">{payload.recording.title ?? t('Project recording')}</h1>
+        <p className="mt-1 text-xs text-text-300">{t('Read-only research history')}</p>
+      </header>
+      {selection ? (
+        <ReferencePanel
+          key={selection.selectionId}
+          presentation={context.presentation}
+          kind="moment"
+          observedAt={payload.recording.startedAt + selection.offsetMs}
+          reference={JSON.stringify({ viewerId: context.viewerId, ...selection }, null, 2)}
+        />
+      ) : null}
+      <BrowserRecordingPlayer
+        recording={payload.recording}
+        mediaUrl={mediaUrl}
+        onAskMoment={async (offsetMs) => {
+          setSelection(await client.selectBrowserMoment(payload, offsetMs))
+        }}
+      />
+    </main>
+  )
+}
 export const RecordedViewerApp = (props: {
   client: ReplayViewerClient
   context: RecordedReplayViewerContext
-  payload: RecordedObservationPayload | RecordedProjectPayload
+  payload: RecordedObservationPayload | RecordedProjectPayload | RecordedBrowserPayload
 }): React.JSX.Element => {
   const key = JSON.stringify(props.payload.receiving)
-  return 'archive' in props.payload ? (
+  return 'indexChecksum' in props.payload ? (
+    <RecordedBrowserViewerApp key={key} {...props} payload={props.payload} />
+  ) : 'archive' in props.payload ? (
     <RecordedObservationViewerApp key={key} {...props} payload={props.payload} />
   ) : (
     <RecordedProjectViewerApp key={key} {...props} payload={props.payload} />

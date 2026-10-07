@@ -338,9 +338,10 @@ if (selected) console.log(selected.snapshot)
 await client.observations.revoke({ viewerId: viewer.viewerId })
 ```
 
-`open` accepts only `target`, `allowInteraction`, and `allowCancel`. Both permissions default to
-false. Interactive project controls may change the running experiment and require explicit
-`allowInteraction: true`; the viewer's stop control requires `allowCancel: true` separately.
+`open` accepts `target`, `allowInteraction`, `allowCancel`, `allowCapture`, and `allowRecording`.
+Permissions default to false. Interactive project controls may change the running experiment and
+require explicit `allowInteraction: true`; the viewer's stop control requires `allowCancel: true`
+separately. Image capture and continuous recording require their own respective permissions.
 Pausing Replay or revoking a viewer does not pause or cancel the experiment. An aborted or timed-out
 SDK request only stops waiting. Use the explicit execution cancellation API when stopping work is
 intended.
@@ -467,6 +468,50 @@ With `recordObservation: true`, declared image outputs and an optional declared
 or Notebook observation is required. Missing or failed captures are reported separately from the
 experiment result; frames preserve capture provenance and structured states remain author-declared.
 This is a bounded sampled recording, not a complete video of every screen update.
+
+### Continuous project-page recording
+
+`projectRecordings` controls recording separately from execution and historical playback. Start
+from an authorized live viewer opened with `allowRecording: true`. `inspect` reports whether the
+current desktop project page can be recorded and lists eligible desktop sources for the exact same
+execution. Codex can explicitly choose that Open Science page; this does not record Codex's browser
+tab or the entire desktop. Start recording before the experimental actions you want to preserve.
+
+```js
+const inspection = await client.projectRecordings.inspect({ viewerId: viewer.viewerId })
+const recording = await client.projectRecordings.start({
+  viewerId: viewer.viewerId,
+  request: { requestId: 'record-1', sourceViewId: inspection.sources?.[0]?.sourceViewId }
+})
+// Interact with the recorded Open Science project page, or run the experiment.
+const saved = await client.projectRecordings.stop({
+  viewerId: viewer.viewerId,
+  request: { requestId: 'stop-1', recordingId: recording.recordingId }
+})
+if (saved.target) {
+  const playback = await client.projectRecordings.openRecorded({ target: saved.target })
+  // Open playback.url in the host's browser panel; the SDK does not open it automatically.
+  const moment = await client.projectRecordings.selectMoment({
+    viewerId: playback.viewerId,
+    offsetMs: 1500
+  })
+  console.log(moment.resource, moment.segmentOffsetMs)
+}
+```
+
+`pause`, `resume`, and `stop` require an idempotent `requestId` and the `recordingId` returned by
+`start`. `status({ viewerId })` returns the latest recording even after its source page disappears.
+Stopping recording does not stop the experiment. Recorded segments are independently playable,
+bounded WebM Artifacts, indexed by ordinary `open-science-web-recording` JSON. The `.science`
+container rules do not change. Import resolves media against receiving immutable Versions and
+checksums; recording timestamps never authorize a Notebook step, an executable page, or a service.
+
+`read({ target })` returns the imported index and resolved media. `selection({ viewerId })` returns
+the last explicitly selected immutable moment, including the index checksum, segment Version, and
+relative playback time. The browser offers a copyable reference; it cannot automatically write to
+the Codex conversation. Playback only serves recorded media and declares missing intervals. Existing
+sampled-image recordings remain supported. Audio, arbitrary external browser tabs, DOM reconstruction,
+and MP4 export are not provided by this API.
 
 ### Read current captured images from Codex or another local agent
 

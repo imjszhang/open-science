@@ -5067,7 +5067,9 @@ describe('managed execution HTTP API', () => {
         listArtifacts: vi.fn(),
         acquireArtifact: vi.fn(),
         releaseArtifact: vi.fn(),
-        ...(options.unavailable ? {} : { callManagedExecution: call, callRunObservation: call })
+        ...(options.unavailable
+          ? {}
+          : { callManagedExecution: call, callRunObservation: call, callProjectRecordings: call })
       },
       bootstrap: {
         appName: 'Open-Science',
@@ -5144,6 +5146,49 @@ describe('managed execution HTTP API', () => {
     expect(remote.call).not.toHaveBeenCalled()
     const unavailable = await setup({ unavailable: true })
     expect((await invoke(unavailable.base, {})).status).toBe(503)
+  })
+
+  it('dispatches project recordings only through authenticated local and budgeted requests', async () => {
+    const local = await setup({ budget: true })
+    const invoke = (
+      base: string,
+      method: string,
+      body: unknown,
+      authenticated = true
+    ): Promise<Response> =>
+      fetch(`${base}/api/v1/project-recordings/${method}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(authenticated ? { authorization: 'Bearer execution-token' } : {})
+        },
+        body: JSON.stringify(body)
+      })
+    expect((await invoke(local.base, 'inspect', {}, false)).status).toBe(401)
+    expect((await invoke(local.base, 'start', [])).status).toBe(400)
+    expect((await invoke(local.base, 'start', { data: 'x'.repeat(200) })).status).toBe(413)
+    expect(local.call).not.toHaveBeenCalled()
+    for (const method of [
+      'inspect',
+      'start',
+      'status',
+      'pause',
+      'resume',
+      'stop',
+      'read',
+      'openRecorded',
+      'selectMoment',
+      'selection'
+    ]) {
+      expect((await invoke(local.base, method, { viewerId: 'viewer' })).status).toBe(200)
+      expect(local.call).toHaveBeenLastCalledWith(method, { viewerId: 'viewer' })
+    }
+    expect(local.contexts.every((context) => context.location === 'local')).toBe(true)
+    const remote = await setup({ remote: true })
+    expect((await invoke(remote.base, 'inspect', {}, false)).status).toBe(403)
+    expect(remote.call).not.toHaveBeenCalled()
+    const unavailable = await setup({ unavailable: true })
+    expect((await invoke(unavailable.base, 'inspect', {})).status).toBe(503)
   })
 
   const materialRequest = (

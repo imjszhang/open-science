@@ -234,7 +234,9 @@
       "src/main/research-demos/inspection.test.ts",
       "src/main/research-demos/owner.macos.integration.test.ts",
       "src/main/notebook/offline-plan-admission.test.ts",
-      "src/main/project-recordings/managed-adapter.test.ts"
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/main/browser-recordings/external-port.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

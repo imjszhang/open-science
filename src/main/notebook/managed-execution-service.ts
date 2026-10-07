@@ -324,6 +324,10 @@ export type ManagedExecutionServiceDependencies = {
         ): Promise<ManagedProjectRecordingResult>
       }
     | undefined
+  /** Optional browser evidence, independent of Notebook/observation recording. */
+  registerBrowserRecording?(input: ManagedProjectRecordingRegistration): {
+    close(reason?: 'finished' | 'stopped' | 'interrupted'): Promise<void>
+  }
   runtimes: {
     discover(): Promise<{
       runtimes: Array<{ runtimeId: string; runtime: ManagedResearchRuntime }>
@@ -2139,6 +2143,36 @@ export class ManagedExecutionService {
             let projectRecording: ReturnType<
               NonNullable<ManagedExecutionServiceDependencies['registerProjectRecording']>
             >
+            let browserRecording:
+              | ReturnType<
+                  NonNullable<ManagedExecutionServiceDependencies['registerBrowserRecording']>
+                >
+              | undefined
+            if (
+              request.projectView &&
+              context.saveAuxiliaryOutput &&
+              this.dependencies.registerBrowserRecording
+            ) {
+              try {
+                browserRecording = this.dependencies.registerBrowserRecording({
+                  target: {
+                    projectId: request.projectId,
+                    sessionId: request.sessionId,
+                    operationId: context.operationId,
+                    executionInvocationId
+                  },
+                  outputs: structuredClone(request.outputs),
+                  outputAuthority: environment.createOutputAuthority(context.operationId),
+                  saveAuxiliaryOutput: screenAuxiliaryOutput(
+                    context.saveAuxiliaryOutput.bind(context),
+                    credentialLease?.secretValues ?? []
+                  ),
+                  signal: environment.publicationSignal
+                })
+              } catch {
+                // Optional recording admission never prevents the original experiment.
+              }
+            }
             if (
               request.recordObservation &&
               context.saveAuxiliaryOutput &&
@@ -2188,6 +2222,15 @@ export class ManagedExecutionService {
             } finally {
               // Finish inside the environment/turn authority lifetime, including cancellation.
               // Capture failure never changes the experiment outcome or retries execution.
+              await browserRecording
+                ?.close(
+                  environment.signal.aborted
+                    ? 'stopped'
+                    : processFinished
+                      ? 'finished'
+                      : 'interrupted'
+                )
+                .catch(() => undefined)
               if (projectRecording) {
                 try {
                   journal.projectRecording = projectRecordingResultSchema.parse(

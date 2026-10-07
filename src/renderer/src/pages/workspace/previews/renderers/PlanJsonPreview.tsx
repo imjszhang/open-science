@@ -21,6 +21,7 @@ import { JsonPreviewBody } from './JsonPreview'
 import {
   isRecordedObservationContent,
   isProjectRecordingContent,
+  isBrowserRecordingContent,
   recordedObservationTargetForFile
 } from '../../replay/recorded-file-entry'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
@@ -81,9 +82,14 @@ export const PlanJsonPreview = ({
     state.preview.encoding === 'utf8' &&
     state.pagination.pageNumber === 1 &&
     isProjectRecordingContent(state.preview.content, !state.preview.truncated)
+  const browserContent =
+    state.status === 'ready' &&
+    state.preview.encoding === 'utf8' &&
+    state.pagination.pageNumber === 1 &&
+    isBrowserRecordingContent(state.preview.content, !state.preview.truncated)
   if (
     recordedTarget &&
-    (recordedContent || projectContent) &&
+    (recordedContent || projectContent || browserContent) &&
     !document.documentElement.hasAttribute(WEB_CALLER_LOCATION_ATTRIBUTE) &&
     typeof window.api?.observations?.openRecorded === 'function'
   ) {
@@ -110,7 +116,17 @@ export const PlanJsonPreview = ({
             >
               <RunObservationPreview
                 mode="recorded"
-                format={projectContent ? 'project-recording' : undefined}
+                format={
+                  browserContent
+                    ? 'web-recording'
+                    : projectContent
+                      ? 'project-recording'
+                      : undefined
+                }
+                onAskBrowserMoment={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                    throw new Error('Discussion unavailable')
+                }}
                 onAskArchiveFile={(selection) => {
                   if (!useRunObservationQuestionStore.getState().askRecorded(selection))
                     throw new Error('Discussion unavailable')

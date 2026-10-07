@@ -5,6 +5,7 @@ export type OpenRunObservationViewer = {
   allowInteraction?: boolean
   allowCancel?: boolean
   allowCapture?: boolean
+  allowRecording?: boolean
 }
 export type RunObservationViewerAccess = {
   viewerId: string

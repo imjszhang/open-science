@@ -1,3 +1,5 @@
+import type { BrowserRecordingMoment } from '../../../../shared/browser-recording'
+import { Button } from '@/components/ui/button'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
@@ -41,15 +43,20 @@ export type RunObservationPreviewProps = {
         viewerId: string
       ) => void | Promise<void>
       onAskArchiveSelection?: never
+      onAskBrowserMoment?: never
       onAskArchiveFile?: never
     }
   | {
+      onAskBrowserMoment?: (
+        selection: BrowserRecordingMoment,
+        viewerId: string
+      ) => void | Promise<void>
       onAskArchiveFile?: (
         selection: RecordedObservationFileSelection,
         viewerId: string
       ) => void | Promise<void>
       mode: 'recorded'
-      format?: 'run-observation' | 'project-recording'
+      format?: 'run-observation' | 'project-recording' | 'web-recording'
       target: RecordedObservationTarget
       allowInteraction?: never
       allowCancel?: never
@@ -127,11 +134,13 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
           target: props.target,
           allowInteraction: props.allowInteraction,
           allowCancel: props.allowCancel,
-          allowCapture: props.allowCapture
+          allowCapture: props.allowCapture,
+          allowRecording: props.allowInteraction
         }
   )
   const [access, setAccess] = useState<ViewerAccess>()
   const [openFailed, setOpenFailed] = useState(false)
+  const [savedBrowserTarget, setSavedBrowserTarget] = useState<RecordedObservationTarget>()
   const [selectionFailed, setSelectionFailed] = useState<'read' | 'ask'>()
   const [retry, setRetry] = useState(0)
   const liveTarget = admission.mode === 'live' ? admission.target : undefined
@@ -152,6 +161,34 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     // exact archive receipt settles or the preview becomes inactive.
     running: true
   })
+  useEffect(() => {
+    if (
+      !access ||
+      admission.mode === 'recorded' ||
+      !props.isActive ||
+      !window.api?.projectRecordings?.status
+    )
+      return
+    let disposed = false,
+      timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        const value = await window.api.projectRecordings.status({ viewerId: access.viewerId })
+        // Keep the previous saved recording available during the next capture. Removing
+        // its action row would change the project's capture rectangle mid-recording.
+        if (!disposed && value.target && ['finalized', 'partial', 'failed'].includes(value.state))
+          setSavedBrowserTarget(value.target)
+      } catch {
+        /* Recording controls own errors. */
+      }
+      if (!disposed) timer = setTimeout(() => void poll(), 1000)
+    }
+    void poll()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [access, admission, props.isActive])
   const delivered = useRef(new Set<string>())
   const [requestedSelectionId, setRequestedSelectionId] = useState<string>()
   const [recovering, setRecovering] = useState(false)
@@ -192,7 +229,8 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             target: admission.target,
             allowInteraction: admission.allowInteraction,
             allowCancel: admission.allowCancel,
-            allowCapture: admission.allowCapture
+            allowCapture: admission.allowCapture,
+            allowRecording: admission.allowRecording
           })
     void opening.then(
       (result) => {
@@ -225,7 +263,12 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     if (
       !access ||
       !props.isActive ||
-      !(props.onAskSelection || props.onAskArchiveSelection || props.onAskArchiveFile)
+      !(
+        props.onAskSelection ||
+        props.onAskArchiveSelection ||
+        props.onAskArchiveFile ||
+        props.onAskBrowserMoment
+      )
     )
       return
     let disposed = false,
@@ -235,7 +278,25 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
         let selectionId: string | undefined,
           selectedEvidence: ObservationQuestionSelection | undefined,
           deliver: (() => void | Promise<void>) | undefined
-        if (admission.mode === 'recorded') {
+        if (admission.mode === 'recorded' && admission.format === 'web-recording') {
+          const selected = await window.api.projectRecordings.selection({
+            viewerId: access.viewerId
+          })
+          const destination = current.current
+          if (disposed || !destination.isActive || destination.mode !== 'recorded') return
+          if (selected) {
+            if (
+              !selected.selectionId ||
+              targetKey(selected.receiving) !== targetKey(admission.target)
+            )
+              throw new Error('Recorded moment scope changed.')
+            selectionId = selected.selectionId
+            selectedEvidence = selected
+            deliver = destination.onAskBrowserMoment
+              ? () => destination.onAskBrowserMoment!(selected, access.viewerId)
+              : undefined
+          }
+        } else if (admission.mode === 'recorded') {
           const [stepSelection, fileSelection] = await Promise.all([
             admission.format === 'project-recording'
               ? null
@@ -316,7 +377,8 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     props.isActive,
     props.onAskSelection,
     props.onAskArchiveSelection,
-    props.onAskArchiveFile
+    props.onAskArchiveFile,
+    props.onAskBrowserMoment
   ])
   return (
     // Keep the iframe inside fractional clipping/viewport edges and outside the workspace
@@ -335,6 +397,23 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
         />
       ) : access ? (
         <>
+          {savedBrowserTarget ? (
+            <div className="shrink-0 border-b border-border-200 px-3 py-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  showRecordedObservation(
+                    savedBrowserTarget,
+                    t('Project recording'),
+                    'web-recording'
+                  )
+                }
+              >
+                {t('View recording')}
+              </Button>
+            </div>
+          ) : null}
           {recordingStatus?.archive ? (
             <div className="shrink-0 border-b border-border-200 px-3 py-2">
               <ObservationRecordingStatus

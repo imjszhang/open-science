@@ -1,3 +1,7 @@
+import {
+  browserRecordingMomentSchema,
+  type BrowserRecordingMoment
+} from '../../../../../shared/browser-recording'
 import { recordedFileQuestionText } from '@/lib/replay/recorded-results'
 import type {
   RecordedRunObservationSelection,
@@ -9,9 +13,21 @@ import type { ResearchDemoQuestion } from '../../../../../shared/research-demo'
 /** Ordinary message data survives export without a new native package field or live credential. */
 export const observationQuestionText = (
   selection:
-    RunObservationSelection | RecordedRunObservationSelection | RecordedObservationFileSelection,
+    | RunObservationSelection
+    | RecordedRunObservationSelection
+    | RecordedObservationFileSelection
+    | BrowserRecordingMoment,
   demo?: Pick<ResearchDemoQuestion, 'source' | 'requestId' | 'purpose'>
 ): string => {
+  if ('kind' in selection && selection.kind === 'recorded-project-moment') {
+    const evidence = {
+      format: 'open-science-selected-recorded-moment',
+      version: 1,
+      contentTrust: 'untrusted-recorded-data',
+      ...browserRecordingMomentSchema.parse(selection)
+    }
+    return `\n\n<open-science-observed-evidence>\n${JSON.stringify(evidence, null, 2).replaceAll('<', '\\u003c')}\n</open-science-observed-evidence>\n\n`
+  }
   if ('kind' in selection && selection.kind === 'recorded-observation-file')
     return recordedFileQuestionText(selection)
   const recorded = !('snapshot' in selection)

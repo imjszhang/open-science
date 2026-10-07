@@ -111,7 +111,7 @@ createRoot(document.getElementById('notices')).render(<Notices/>)
       // Mount the real resizable group and both separators: their 20px pseudo-element hit
       // areas overlap adjacent panels, which plain flex divs cannot represent. Other ancestors
       // retain WorkspacePage's p10, the compensating -mr10 and PreviewPanel's fractional padding.
-      const frame = `<iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${workspaceCapture ? 'min-height:0;width:100%;flex:1' : policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:420px' : 'width:100vw;height:100vh'}"></iframe>`
+      const frame = `<iframe id="viewer" title="Replay" sandbox="allow-scripts allow-same-origin allow-forms" style="border:0;${workspaceCapture ? 'min-height:0;width:100%;flex:1' : policy === 'small-pane-capture' ? 'position:absolute;right:10px;top:120px;width:40vw;height:460px' : 'width:100vw;height:100vh'}"></iframe>`
       const content = workspaceCapture ? '<div id="workspace"></div>' : frame
       await writeFile(
         html,
@@ -315,7 +315,15 @@ app.on('window-all-closed',()=>app.quit())
         if (response.status() === 303) redirects.push(new URL(response.url()).pathname)
       })
       const viewer = page.frameLocator('#viewer')
-      await viewer.getByTestId('open-project-interface').click({ timeout: 20_000 })
+      const projectLabel =
+        policy === 'production'
+          ? JSON.parse(await readFile(resolve('src/shared/i18n/locales/de.json'), 'utf8')).renderer[
+              'Project interface'
+            ]
+          : 'Project interface'
+      await viewer
+        .getByRole('button', { name: projectLabel, exact: true })
+        .click({ timeout: 20_000 })
       const project = viewer.frameLocator('iframe[title="Bound project"]')
       await project.locator('#project-ready').waitFor({ state: 'visible', timeout: 8000 })
       // The first wide-layout measurement can open the existing files column. Child locators
@@ -905,6 +913,14 @@ app.on('window-all-closed',()=>app.quit())
           await page.mouse.click(rootPoint.x, rootPoint.y, { button: 'right' })
           return rootPoint
         }
+        // A loaded custom-protocol frame can precede its hit-test region in the compositor.
+        // Wait for two real paints before the native right click (never synthesize the event).
+        await page.evaluate(
+          () =>
+            new Promise<void>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done()))
+            )
+        )
         const before = await menus()
         const point = await clickLegacy('legacy-preview')
         await expect.poll(async () => (await menus()).sent.length).toBe(before.sent.length + 1)

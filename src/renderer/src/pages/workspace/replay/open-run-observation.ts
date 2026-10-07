@@ -15,7 +15,7 @@ export const showRunObservation = (target: RunObservationTarget, title: string):
 export const showRecordedObservation = (
   target: import('../../../../../shared/run-observation-recorded').RecordedObservationTarget,
   title: string,
-  format?: 'run-observation' | 'project-recording'
+  format?: 'run-observation' | 'project-recording' | 'web-recording'
 ): void => {
   usePreviewWorkbenchStore.getState().upsertAndActivateItem({
     id: `tool:${target.sessionId}:replay-recording:${target.artifactId}:${target.versionId}`,

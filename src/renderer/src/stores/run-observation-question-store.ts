@@ -1,3 +1,4 @@
+import type { BrowserRecordingMoment } from '../../../shared/browser-recording'
 import { create } from 'zustand'
 import type { RunObservationSelection } from '../../../shared/run-observation'
 import type {
@@ -12,7 +13,10 @@ export type ObservationQuestionDestination = {
   draftKey: string
 }
 export type ObservationQuestionSelection =
-  RunObservationSelection | RecordedRunObservationSelection | RecordedObservationFileSelection
+  | RunObservationSelection
+  | RecordedRunObservationSelection
+  | RecordedObservationFileSelection
+  | BrowserRecordingMoment
 type PendingQuestion = {
   destination: ObservationQuestionDestination
   selection: ObservationQuestionSelection
@@ -58,7 +62,8 @@ export const useRunObservationQuestionStore = create<{
     expectedDestination: ObservationQuestionDestination
   ): boolean
   askRecorded(
-    selection: RecordedRunObservationSelection | RecordedObservationFileSelection,
+    selection:
+      RecordedRunObservationSelection | RecordedObservationFileSelection | BrowserRecordingMoment,
     demo?: PendingQuestion['demo']
   ): boolean
   recover(

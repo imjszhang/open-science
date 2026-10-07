@@ -301,6 +301,7 @@ describe('local observation public adapter', () => {
     expect(h.openViewer).toHaveBeenCalledWith(target, caller, {
       target,
       allowInteraction: false,
+      allowRecording: false,
       allowCancel: false,
       allowCapture: false
     })

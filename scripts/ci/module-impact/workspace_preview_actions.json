@@ -91,7 +91,10 @@
       "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
       "src/renderer/src/lib/replay/recorded-results.test.ts",
       "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
-      "src/renderer/src/pages/workspace/RunObservationPreview.test.tsx"
+      "src/renderer/src/pages/workspace/RunObservationPreview.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/renderer/src/pages/workspace/browser-recording-question.test.tsx"
     ]
   },
   "capabilityOverlays": [],

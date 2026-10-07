@@ -51,6 +51,9 @@ import { captureElectronObservationView } from '../run-observation/electron-capt
 import { ReplayViewerHttpHost } from '../replay-viewer/http-host'
 import { createReplayViewerAssetReader } from '../replay-viewer/assets'
 import { createRunObservationExternalPort } from '../run-observation-external-port'
+import { BrowserRecordingOwner } from '../browser-recordings/owner'
+import { startElectronSurfaceRecording } from '../browser-recordings/electron-surface-driver'
+import { createBrowserRecordingExternalPort } from '../browser-recordings/external-port'
 import type { composeManagedFiles } from './managed-files'
 import type { composeNotebookRuntime } from './notebook-runtime'
 import type { composeProjectLifecycle } from './project-lifecycle'
@@ -227,6 +230,10 @@ export async function composeManagedExecution({
   })
   const projectViews = new ManagedRuntimeViews()
   const observationMedia = new ObservationMediaCollector()
+  const browserRecordings = new BrowserRecordingOwner({
+    dataRoot,
+    startDriver: startElectronSurfaceRecording
+  })
   const service: ManagedExecutionService = new ManagedExecutionService({
     profiles: new ResearchExecutionProfileStore(resolveConfigRoot()),
     artifacts: managedFiles.artifactProvenanceRepository,
@@ -236,6 +243,16 @@ export async function composeManagedExecution({
     operations,
     runtime: notebook,
     registerProjectService: (registration) => projectViews.register(registration),
+    registerBrowserRecording: (input) =>
+      browserRecordings.register({
+        target: input.target,
+        signal: input.signal,
+        save: input.saveAuxiliaryOutput,
+        assertCurrent: () => {
+          input.signal.throwIfAborted()
+          assertOpen(input.target)
+        }
+      }),
     registerProjectRecording: (input) =>
       startManagedProjectRecording(input, () => {
         input.signal.throwIfAborted()
@@ -440,6 +457,11 @@ export async function composeManagedExecution({
     artifactProvenanceRepository: managedFiles.artifactProvenanceRepository,
     authorizeScope: authorizeObservationScope,
     readSourceVersionMapping: async (target, archiveIdentity) => {
+      const browserNative = await browserRecordings.readNativeSourceVersionMapping(
+        target,
+        archiveIdentity
+      )
+      if (browserNative) return browserNative
       // A working copy can contain both imported archives and new native recordings.
       const native = await service.readNativeObservationSourceVersionMapping(
         target,
@@ -467,8 +489,13 @@ export async function composeManagedExecution({
       authorizeScope: authorizeObservationScope,
       read: (target) => recordedObservations.read(target),
       readProject: (target) => recordedObservations.readProject(target),
-      selectFile: (target, mediaKey, format) =>
-        recordedObservations.selectFile({ target, mediaKey, format })
+      readBrowser: (target) => recordedObservations.readBrowser(target),
+      selectBrowserMoment: (target, offsetMs) =>
+        recordedObservations.selectBrowserMoment(target, offsetMs),
+      selectFile: (target, mediaKey, format) => {
+        if (format === 'web-recording') throw new Error('Select a recorded project moment instead.')
+        return recordedObservations.selectFile({ target, mediaKey, format })
+      }
     },
     onRevoked: (viewerId) => {
       viewerHost.closeViewer(viewerId)
@@ -491,6 +518,42 @@ export async function composeManagedExecution({
   }
   const viewerHost: ReplayViewerHttpHost = new ReplayViewerHttpHost({
     desktopLocale,
+    browserRecording: async (method, input) => {
+      input.assertAuthorized()
+      if (method === 'status') return browserRecordings.status(input.viewerId)
+      if (method === 'pause' || method === 'resume' || method === 'stop')
+        return browserRecordings.control(method, input.viewerId, input.request)
+      const inspected = await service.inspectExecution(input.target)
+      input.assertAuthorized()
+      const exact = inspected
+        ? {
+            projectId: inspected.identity.projectId,
+            sessionId: inspected.identity.sessionId,
+            operationId: inspected.identity.operationId,
+            executionInvocationId: inspected.identity.executionInvocationId,
+            ...(inspected.run ? { runId: inspected.run.runId } : {})
+          }
+        : undefined
+      if (method === 'inspect')
+        return {
+          supported: !!input.host && !!exact && browserRecordings.inspect(exact),
+          ...(!input.host
+            ? { reason: 'desktop-required' as const }
+            : !exact || !browserRecordings.inspect(exact)
+              ? { reason: 'source-unavailable' as const }
+              : {}),
+          active: browserRecordings.status(input.viewerId)
+        }
+      if (!input.host || !exact || inspected?.run?.status !== 'running')
+        throw new Error('A running project page is required for recording.')
+      return browserRecordings.start({
+        target: exact,
+        viewerId: input.viewerId,
+        host: input.host,
+        request: input.request,
+        assertAuthorized: input.assertAuthorized
+      })
+    },
     listCaptures: async (target, signal) => {
       signal.throwIfAborted()
       try {
@@ -567,9 +630,11 @@ export async function composeManagedExecution({
     projectViews,
     readAsset: createReplayViewerAssetReader(),
     readRecordingMedia: (target, mediaKey, signal, format) =>
-      format === 'project-recording'
-        ? recordedObservations.readProjectMedia(target, mediaKey, signal)
-        : recordedObservations.readMedia(target, mediaKey, signal),
+      format === 'web-recording'
+        ? recordedObservations.readBrowserMedia(target, mediaKey, signal)
+        : format === 'project-recording'
+          ? recordedObservations.readProjectMedia(target, mediaKey, signal)
+          : recordedObservations.readMedia(target, mediaKey, signal),
     readArtifact: async ({ target, artifact, signal }) => {
       signal.throwIfAborted()
       if (
@@ -712,6 +777,12 @@ export async function composeManagedExecution({
         ...(caller.surface === 'electron' ? { desktopParent: 'file:' as const } : {})
       })
   })
+  external.projectRecordings = createBrowserRecordingExternalPort({
+    assertOpen,
+    host: viewerHost,
+    viewers: observationViewers,
+    reader: recordedObservations
+  })
   let draining: Promise<void> | undefined
   const quiesce = (): Promise<void> => {
     held = true
@@ -740,6 +811,7 @@ export async function composeManagedExecution({
     return draining
   }
   const close = async (): Promise<void> => {
+    await browserRecordings.close()
     closed = true
     await quiesce()
     await researchDemos.close()

@@ -1,7 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Socket } from 'node:net'
 import { z } from 'zod'
+import {
+  browserRecordingMethodSchema,
+  browserRecordingInspectionSchema,
+  browserRecordingStatusSchema,
+  type BrowserRecordingMethod
+} from '../../shared/browser-recording'
 import type { CallerContext } from '../caller-context'
 import type { Locale } from '../../shared/locale'
 import {
@@ -44,6 +50,7 @@ export type ReplayViewerHttpOpenOptions = Readonly<{
   allowInteraction?: boolean
   allowCancel?: boolean
   allowCapture?: boolean
+  allowRecording?: boolean
   desktopParent?: 'file:'
 }>
 type Asset = Readonly<{ body: Uint8Array; mimeType: string }>
@@ -56,6 +63,8 @@ type Viewers = Pick<
   | 'recordingSelection'
   | 'selectRecordingFile'
   | 'recordingFileSelection'
+  | 'selectBrowserMoment'
+  | 'browserMomentSelection'
   | 'issueGrant'
   | 'authenticateGrant'
   | 'describe'
@@ -67,6 +76,18 @@ type Viewers = Pick<
   | 'revoke'
 >
 export interface ReplayViewerHttpDependencies {
+  browserRecording?(
+    method: BrowserRecordingMethod,
+    input: {
+      viewerId: string
+      target: RunObservationTarget
+      caller: CallerContext
+      host?: { caller: CallerContext; viewerOrigin: string; projectOrigin: string }
+      request: unknown
+      signal: AbortSignal
+      assertAuthorized(): void
+    }
+  ): Promise<unknown>
   /** Main's persisted desktop preference; browser viewers retain their own device language. */
   desktopLocale?(): Locale
   listCaptures?(
@@ -129,6 +150,7 @@ type Binding = {
   active: number
   requests: number
   projectOrigin?: string
+  recordingSourceViewId?: string
   desktopFrames?: DesktopObservationRegistration
   captureEvidence: Map<string, NonNullable<ObservationViewerCapture['viewerEvidence']>>
 }
@@ -254,6 +276,173 @@ export class ReplayViewerHttpHost {
   private readonly bindings = new Map<string, Binding>()
   private closed = false
   constructor(private readonly dependencies: ReplayViewerHttpDependencies) {}
+
+  async browserRecording(
+    method: BrowserRecordingMethod,
+    viewerId: string,
+    request: unknown,
+    caller: CallerContext
+  ): Promise<unknown> {
+    await this.dependencies.viewers.describe(viewerId, { caller })
+    const binding = this.bindings.get(viewerId)
+    if (!binding) throw new HostError(404, 'not-found')
+    const result = await this.browserRecordingBound(method, binding, request, binding.signal.signal)
+    await this.dependencies.viewers.describe(viewerId, { caller })
+    return result
+  }
+  private async recordingSourceIdentity(
+    binding: Binding,
+    source: Binding
+  ): Promise<string | undefined> {
+    if (
+      binding.descriptor.mode === 'recorded' ||
+      source.descriptor.mode === 'recorded' ||
+      source.options.allowRecording !== true ||
+      source.caller.surface !== 'electron'
+    )
+      return undefined
+    const target = binding.descriptor.target
+    const sourceTarget = source.descriptor.target
+    if (target.projectId !== sourceTarget.projectId || target.sessionId !== sourceTarget.sessionId)
+      return undefined
+    const [requested, actual] = await Promise.all([
+      this.dependencies.viewers.snapshot(binding.descriptor.viewerId, { caller: binding.caller }),
+      this.dependencies.viewers.snapshot(source.descriptor.viewerId, { caller: source.caller })
+    ])
+    this.assertCurrent(binding)
+    this.assertCurrent(source)
+    if (
+      !requested.run?.runId ||
+      !actual.run?.runId ||
+      requested.run.runId !== actual.run.runId ||
+      requested.identity.runId !== requested.run.runId ||
+      actual.identity.runId !== actual.run.runId ||
+      (['projectId', 'sessionId', 'operationId', 'executionInvocationId', 'runId'] as const).some(
+        (key) => requested.identity[key] !== actual.identity[key]
+      )
+    )
+      return undefined
+    return JSON.stringify([
+      requested.identity.projectId,
+      requested.identity.sessionId,
+      requested.identity.operationId,
+      requested.identity.executionInvocationId,
+      requested.run.runId
+    ])
+  }
+  private async browserRecordingBound(
+    method: BrowserRecordingMethod,
+    binding: Binding,
+    request: unknown,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    browserRecordingMethodSchema.parse(method)
+    if (
+      !this.dependencies.browserRecording ||
+      binding.descriptor.mode === 'recorded' ||
+      binding.options.allowRecording !== true
+    )
+      throw new HostError(403, 'forbidden')
+    this.assertCurrent(binding)
+    const value = z
+      .object({
+        sourceViewId: z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
+          .optional()
+      })
+      .passthrough()
+      .parse(request)
+    const requestedSource =
+      value.sourceViewId ?? (method === 'start' ? binding.recordingSourceViewId : undefined)
+    let source = binding
+    let sourceIdentity: string | undefined
+    if (
+      (method === 'start' || method === 'inspect') &&
+      requestedSource &&
+      requestedSource !== binding.descriptor.viewerId
+    ) {
+      const candidate = this.bindings.get(requestedSource)
+      if (candidate) {
+        sourceIdentity = await this.recordingSourceIdentity(binding, candidate)
+        if (!sourceIdentity) throw new HostError(403, 'forbidden')
+        await this.dependencies.viewers.describe(requestedSource, { caller: candidate.caller })
+        this.assertCurrent(candidate)
+        source = candidate
+      } else throw new HostError(404, 'not-found')
+    }
+    if (source.descriptor.mode === 'recorded') throw new HostError(403, 'forbidden')
+    if (method === 'start' && source.projectOrigin) {
+      sourceIdentity ??= await this.recordingSourceIdentity(binding, source)
+      if (!sourceIdentity) throw new HostError(403, 'forbidden')
+    }
+    const result = await this.dependencies.browserRecording(method, {
+      viewerId: binding.descriptor.viewerId,
+      target: binding.descriptor.target,
+      caller: binding.caller,
+      ...(source.caller.surface === 'electron' && source.projectOrigin
+        ? {
+            host: {
+              caller: source.caller,
+              viewerOrigin: source.origin,
+              projectOrigin: source.projectOrigin
+            }
+          }
+        : {}),
+      request,
+      signal,
+      assertAuthorized: () => {
+        this.assertCurrent(binding)
+        if (method === 'start') this.assertCurrent(source)
+      }
+    })
+    signal.throwIfAborted()
+    this.assertCurrent(binding)
+    if (
+      method === 'start' &&
+      sourceIdentity &&
+      sourceIdentity !==
+        (await this.recordingSourceIdentity(binding, source).catch(() => undefined))
+    ) {
+      const started = browserRecordingStatusSchema.safeParse(result)
+      if (started.success && started.data.recordingId) {
+        await this.dependencies
+          .browserRecording('stop', {
+            viewerId: binding.descriptor.viewerId,
+            target: binding.descriptor.target,
+            caller: binding.caller,
+            request: { requestId: randomUUID(), recordingId: started.data.recordingId },
+            signal,
+            assertAuthorized: () => this.assertCurrent(binding)
+          })
+          .catch(() => undefined)
+      }
+      throw new HostError(403, 'forbidden')
+    }
+    if (method === 'start') binding.recordingSourceViewId = source.descriptor.viewerId
+    if (method === 'inspect') {
+      const sources: Array<{ sourceViewId: string; label: 'Desktop project page' }> = []
+      for (const candidate of this.bindings.values()) {
+        if (!candidate.projectOrigin) continue
+        try {
+          if (!(await this.recordingSourceIdentity(binding, candidate))) continue
+          this.assertCurrent(candidate)
+          await this.dependencies.viewers.describe(candidate.descriptor.viewerId, {
+            caller: candidate.caller
+          })
+          sources.push({
+            sourceViewId: candidate.descriptor.viewerId,
+            label: 'Desktop project page'
+          })
+        } catch {
+          /* An expired page is not a recording source. */
+        }
+      }
+      const inspection = browserRecordingInspectionSchema.parse(result)
+      return { ...inspection, sources }
+    }
+    return result
+  }
 
   async captureOptions(
     viewerId: string,
@@ -499,7 +688,7 @@ export class ReplayViewerHttpHost {
     if (
       Object.keys(options).some((key) => !['desktopParent', 'format'].includes(key)) ||
       (options.format !== undefined &&
-        !['run-observation', 'project-recording'].includes(options.format)) ||
+        !['run-observation', 'project-recording', 'web-recording'].includes(options.format)) ||
       (options.desktopParent !== undefined && options.desktopParent !== 'file:')
     )
       throw new HostError(403, 'forbidden')
@@ -754,12 +943,25 @@ export class ReplayViewerHttpHost {
               descriptor.mode !== 'recorded' &&
               binding.options.allowCapture === true &&
               !!this.dependencies.capture,
+            canRecord:
+              descriptor.mode !== 'recorded' &&
+              binding.options.allowRecording === true &&
+              !!this.dependencies.browserRecording,
             canReadArtifacts:
               descriptor.mode === 'recorded'
                 ? !!this.dependencies.readRecordingMedia
                 : !!this.dependencies.readArtifact
           }
         if (descriptor.mode === 'recorded') {
+          if (request.method === 'GET' && url.pathname === '/api/recording/moment')
+            return this.dependencies.viewers.browserMomentSelection(viewerId, auth)
+          if (request.method === 'POST' && url.pathname === '/api/recording/moment') {
+            const { offsetMs } = z
+              .object({ offsetMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
+              .strict()
+              .parse(await readBody(request))
+            return this.dependencies.viewers.selectBrowserMoment(viewerId, offsetMs, auth)
+          }
           if (request.method === 'GET' && url.pathname === '/api/recording')
             return this.dependencies.viewers.recording(viewerId, auth)
           if (request.method === 'GET' && url.pathname === '/api/recording/selection')
@@ -781,6 +983,47 @@ export class ReplayViewerHttpHost {
             return this.dependencies.viewers.selectRecording(viewerId, stepKey, auth)
           }
           throw new HostError(403, 'forbidden')
+        }
+        if (request.method === 'POST' && url.pathname === '/api/project-recordings/open') {
+          emptyBody.parse(await readBody(request))
+          const status = browserRecordingStatusSchema.parse(
+            await this.browserRecordingBound('status', binding, {}, signal)
+          )
+          if (
+            !status.target ||
+            !['finalized', 'partial'].includes(status.state) ||
+            status.target.projectId !== descriptor.target.projectId ||
+            status.target.sessionId !== descriptor.target.sessionId
+          )
+            throw new HostError(409, 'unavailable')
+          const opened = await this.openRecorded(status.target, binding.caller, {
+            format: 'web-recording',
+            ...(binding.options.desktopParent
+              ? { desktopParent: binding.options.desktopParent }
+              : {})
+          })
+          try {
+            this.assertCurrent(binding)
+            signal.throwIfAborted()
+            return opened
+          } catch (error) {
+            this.closeViewer(opened.viewerId)
+            await this.dependencies.viewers
+              .revoke(opened.viewerId, { caller: binding.caller })
+              .catch(() => undefined)
+            throw error
+          }
+        }
+        if (url.pathname.startsWith('/api/project-recordings/')) {
+          const method = browserRecordingMethodSchema.parse(
+            url.pathname.slice('/api/project-recordings/'.length)
+          )
+          if (['inspect', 'status'].includes(method)) {
+            if (request.method !== 'GET') throw new HostError(400, 'invalid')
+            return this.browserRecordingBound(method, binding, {}, signal)
+          }
+          if (request.method !== 'POST') throw new HostError(400, 'invalid')
+          return this.browserRecordingBound(method, binding, await readBody(request), signal)
         }
         if (request.method === 'GET' && url.pathname === '/api/captures') {
           return this.readCaptures(binding, signal)
@@ -881,7 +1124,10 @@ export class ReplayViewerHttpHost {
         if (!/^[a-f0-9]{64}$/.test(captureId)) throw new HostError(400, 'invalid')
         asset = await this.dependencies.readCapture(descriptor.target, captureId, signal)
         if (!asset) throw new HostError(404, 'not-found')
-      } else if (url.pathname === '/api/recording/media' && request.method === 'GET') {
+      } else if (
+        url.pathname === '/api/recording/media' &&
+        ['GET', 'HEAD'].includes(request.method ?? '')
+      ) {
         artifactResponse = true
         if (descriptor.mode !== 'recorded' || !this.dependencies.readRecordingMedia)
           throw new HostError(404, 'not-found')
@@ -901,6 +1147,95 @@ export class ReplayViewerHttpHost {
           descriptor.format
         )
         if (!asset) throw new HostError(404, 'not-found')
+        if (descriptor.format === 'web-recording') {
+          if (!('indexChecksum' in payload)) throw new HostError(404, 'not-found')
+          const media = payload.recording.media.find((item) => item.mediaKey === mediaKey)
+          if (
+            !media ||
+            asset.mimeType !== 'video/webm' ||
+            asset.body.byteLength !== media.sizeBytes ||
+            asset.body.byteLength > maxResponse ||
+            createHash('sha256').update(asset.body).digest('hex') !== media.checksum
+          )
+            throw new HostError(404, 'not-found')
+          await this.dependencies.viewers.describe(viewerId, auth)
+          this.assertCurrent(binding)
+          signal.throwIfAborted()
+          const size = asset.body.byteLength
+          let start = 0,
+            end = size - 1
+          const rawRange = request.headers.range
+          if (rawRange !== undefined) {
+            const match = /^bytes=(\d*)-(\d*)$/.exec(rawRange)
+            let invalid = !match || (!match[1] && !match[2])
+            if (match && !invalid) {
+              if (!match[1]) {
+                const suffix = Number(match[2])
+                invalid = !Number.isSafeInteger(suffix) || suffix <= 0
+                start = Math.max(0, size - suffix)
+              } else {
+                start = Number(match[1])
+                end = match[2] ? Math.min(size - 1, Number(match[2])) : size - 1
+                invalid =
+                  !Number.isSafeInteger(start) ||
+                  !Number.isSafeInteger(end) ||
+                  start > end ||
+                  start >= size
+              }
+            }
+            if (invalid) {
+              response.writeHead(416, {
+                'content-range': `bytes */${size}`,
+                'accept-ranges': 'bytes',
+                'content-length': '0',
+                'cache-control': 'no-store'
+              })
+              response.end()
+              return
+            }
+          }
+          response.writeHead(rawRange === undefined ? 200 : 206, {
+            'content-type': 'video/webm',
+            'content-length': String(end - start + 1),
+            'accept-ranges': 'bytes',
+            ...(rawRange === undefined ? {} : { 'content-range': `bytes ${start}-${end}/${size}` }),
+            'cache-control': 'no-store',
+            'referrer-policy': 'no-referrer',
+            'x-content-type-options': 'nosniff',
+            'content-security-policy': "sandbox; default-src 'none'"
+          })
+          if (request.method !== 'HEAD') {
+            // Each independently playable segment remains bounded. Honor backpressure and
+            // revocation while delivering ranges, without materializing the whole recording.
+            for (let offset = start; offset <= end; offset += 64 * 1024) {
+              signal.throwIfAborted()
+              this.assertCurrent(binding)
+              if (
+                !response.write(asset.body.subarray(offset, Math.min(end + 1, offset + 64 * 1024)))
+              ) {
+                await new Promise<void>((resolve, reject) => {
+                  const cleanup = (): void => {
+                    response.off('drain', drained)
+                    signal.removeEventListener('abort', aborted)
+                  }
+                  const drained = (): void => {
+                    cleanup()
+                    resolve()
+                  }
+                  const aborted = (): void => {
+                    cleanup()
+                    reject(new HostError(410, 'unavailable'))
+                  }
+                  response.once('drain', drained)
+                  signal.addEventListener('abort', aborted, { once: true })
+                  if (signal.aborted) aborted()
+                })
+              }
+            }
+          }
+          response.end()
+          return
+        }
       } else if (url.pathname === '/api/artifact' && request.method === 'GET') {
         if (descriptor.mode === 'recorded') throw new HostError(403, 'forbidden')
         artifactResponse = true
@@ -947,7 +1282,7 @@ export class ReplayViewerHttpHost {
         ...(artifactResponse ? { 'content-disposition': 'attachment; filename="artifact"' } : {}),
         'content-security-policy': artifactResponse
           ? "sandbox; default-src 'none'"
-          : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src http://*.localhost:*; frame-ancestors ${binding.options.desktopParent ?? "'none'"}; worker-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'`,
+          : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self' data:; connect-src 'self'; frame-src http://*.localhost:*; frame-ancestors ${binding.options.desktopParent ?? "'none'"}; worker-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'`,
         'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
       })
       response.end(request.method === 'HEAD' ? undefined : asset.body)

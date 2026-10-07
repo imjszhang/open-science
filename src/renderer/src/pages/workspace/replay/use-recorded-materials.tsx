@@ -1,3 +1,4 @@
+import { RunObservationPreview } from '../RunObservationPreview'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -119,7 +120,7 @@ export function useRecordedMaterials(
       setRequest((previous) => ({ id: 'project', revision: (previous?.revision ?? 0) + 1 }))
   }, [])
   useEffect(() => {
-    if (!selected) return
+    if (!selected || selected.format === 'web-recording') return
     let disposed = false
     const load =
       selected.format === 'project-recording'
@@ -263,7 +264,7 @@ export function useRecordedMaterials(
     </div>
   )
   const pending =
-    selected && !payload ? (
+    selected && selected.format !== 'web-recording' && !payload ? (
       loadFailed ? (
         <ErrorNotice
           inline
@@ -286,7 +287,21 @@ export function useRecordedMaterials(
         content: (active) => (
           <>
             {catalog}
-            {pending ??
+            {selected?.format === 'web-recording' ? (
+              <RunObservationPreview
+                mode="recorded"
+                format="web-recording"
+                target={selected.target}
+                title={selected.resource.name}
+                isActive={active}
+                questionRecovery={recovery}
+                onAskBrowserMoment={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                    throw new Error('Discussion unavailable')
+                }}
+              />
+            ) : (
+              (pending ??
               (track ? (
                 <ProjectReplay
                   active={active}
@@ -298,7 +313,8 @@ export function useRecordedMaterials(
                 <p className="p-3 text-sm text-muted-foreground">
                   {t('No project images were recorded. Other research materials remain available.')}
                 </p>
-              ))}
+              )))
+            )}
           </>
         )
       },

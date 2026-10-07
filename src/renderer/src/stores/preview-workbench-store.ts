@@ -74,7 +74,7 @@ export type PreviewToolItem = PreviewItemBase & {
   type: 'tool'
   // Exact local Run identity only; viewer credentials and URLs never enter preview persistence.
   replayRunTarget?: import('../../../shared/run-observation').RunObservationTarget
-  replayRecordingFormat?: 'run-observation' | 'project-recording'
+  replayRecordingFormat?: 'run-observation' | 'project-recording' | 'web-recording'
   replayRecordingTarget?: import('../../../shared/run-observation-recorded').RecordedObservationTarget
   sideChatId?: string
   // A message chip can request a transient Library scope without changing the durable tab format.

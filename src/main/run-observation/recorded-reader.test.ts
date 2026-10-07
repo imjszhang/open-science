@@ -20,6 +20,7 @@ import { buildRunObservationArchive } from './archive'
 import { createRecordedObservationReader, type RecordedObservationReader } from './recorded-reader'
 import { ManagedRunObservationCoordinator } from './managed-coordinator'
 import { RunObservationRecorder } from './recorder'
+import { browserRecordedFixture } from './browser-recorded.test-support'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/home/user', isPackaged: true },
@@ -197,6 +198,107 @@ describe('receiving-session recorded observation reader', () => {
     await expect(
       h.reader.selectFile({ target: h.target, mediaKey: 'frame-0' })
     ).rejects.toMatchObject({ code: 'unauthorized' })
+  })
+  it('keeps browser segment and moment authority across a real .science roundtrip without a Run', async () => {
+    const h = await setup()
+    const fixture = browserRecordedFixture()
+    const media = await h.versions.adoptLegacyArtifact({
+      ...scope,
+      sourceFileId: 'web-segment',
+      logicalFilename: 'segment.webm',
+      content: fixture.bytes,
+      contentType: 'video/webm'
+    })
+    const recording = {
+      ...fixture.payload.recording,
+      media: [{ ...fixture.payload.recording.media[0], sourceVersionId: media.versionId }]
+    }
+    const index = await h.versions.adoptLegacyArtifact({
+      ...scope,
+      sourceFileId: 'web-index',
+      logicalFilename: 'web-recording.json',
+      content: Buffer.from(JSON.stringify(recording)),
+      contentType: 'application/json'
+    })
+    const target = { ...scope, artifactId: index.fileId, versionId: index.versionId }
+    expect((await h.reader.readBrowser(target)).recording).toEqual(recording)
+    expect((await h.reader.selectBrowserMoment(target, 1500)).resource.versionId).toBe(
+      media.versionId
+    )
+    await expect(h.reader.selectBrowserMoment(target, 3000)).rejects.toMatchObject({
+      code: 'media-unavailable'
+    })
+    await expect(h.reader.selectBrowserMoment(target, -1)).rejects.toMatchObject({
+      code: 'media-unavailable'
+    })
+    const receiving = await createProvenanceTestFixture()
+    fixtures.push(receiving)
+    const exporter = new SessionPackageService({
+      storageRoot: h.fixture.storageRoot,
+      getClient: async () => h.fixture.client
+    })
+    const importer = new SessionPackageService({
+      storageRoot: receiving.storageRoot,
+      getClient: async () => receiving.client
+    })
+    try {
+      const path = join(h.fixture.storageRoot, 'browser-recording.science')
+      await exporter.exportTo(scope, path)
+      initDataRoot(receiving.storageRoot)
+      const imported = await importer.importFrom(path)
+      const origin = await importer.readOrigin(imported)
+      const receivedTarget = {
+        projectId: imported.projectId,
+        sessionId: imported.sessionId,
+        artifactId: origin.identities[index.fileId],
+        versionId: origin.identities[index.versionId]
+      }
+      const dependencies = adapters(receiving)
+      const reader = createRecordedObservationReader({
+        immutableInputAuthority: dependencies.authority,
+        projectFilesRepository: dependencies.files,
+        artifactProvenanceRepository: dependencies.provenance,
+        authorizeScope: async (request) => {
+          expect(request.projectId).toBe(imported.projectId)
+          expect(request.sessionId).toBe(imported.sessionId)
+        },
+        readSourceVersionMapping: (current, identity) =>
+          importer.readArtifactSourceVersionMapping(imported, {
+            artifactId: current.artifactId,
+            versionId: current.versionId,
+            checksum: identity.checksum,
+            sizeBytes: identity.sizeBytes
+          })
+      })
+      expect((await reader.readBrowser(receivedTarget)).recording).toEqual(recording)
+      expect(await reader.readBrowserMedia(receivedTarget, 'segment-a')).toEqual({
+        body: new Uint8Array(fixture.bytes),
+        mimeType: 'video/webm'
+      })
+      const selected = await reader.selectBrowserMoment(receivedTarget, 1500)
+      expect(selected).toMatchObject({
+        receiving: receivedTarget,
+        offsetMs: 1500,
+        segmentOffsetMs: 1500,
+        resource: { versionId: origin.identities[media.versionId] }
+      })
+      expect(selected.resource.versionId).not.toBe(media.versionId)
+      expect(selected).not.toHaveProperty('stepKey')
+      expect(
+        (
+          await new SessionRepository(receiving.storageRoot).loadSession(
+            imported.projectId,
+            imported.sessionId
+          )
+        )?.activeRun
+      ).toBeUndefined()
+      await expect(reader.readBrowserMedia(receivedTarget, '../segment')).rejects.toMatchObject({
+        code: 'media-unavailable'
+      })
+    } finally {
+      await exporter.close()
+      await importer.close()
+    }
   })
   it('reads an independent project recording and its historical media after a real .science roundtrip', async () => {
     const h = await setup()

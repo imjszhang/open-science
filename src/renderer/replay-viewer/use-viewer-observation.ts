@@ -49,7 +49,9 @@ export function useViewerObservation(
             const recording = await client.recording(signal)
             const target = context.target
             if (
-              (context.format === 'project-recording') !== 'recording' in recording ||
+              (context.format === 'web-recording') !== 'indexChecksum' in recording ||
+              (context.format === 'project-recording') !==
+                ('recording' in recording && !('indexChecksum' in recording)) ||
               (['projectId', 'sessionId', 'artifactId', 'versionId'] as const).some(
                 (key) => recording.receiving[key] !== target[key]
               )

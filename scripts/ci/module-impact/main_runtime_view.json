@@ -216,7 +216,13 @@
       "src/main/notebook/offline-plan-admission.test.ts",
       "src/main/project-recordings/recorder.test.ts",
       "src/main/project-recordings/managed-adapter.test.ts",
-      "src/main/notebook/screened-auxiliary-output.test.ts"
+      "src/main/notebook/screened-auxiliary-output.test.ts",
+      "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
+      "src/main/browser-recordings/owner.test.ts",
+      "src/main/browser-recordings/external-port.test.ts",
+      "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

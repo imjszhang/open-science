@@ -16,6 +16,7 @@ import { composeHandoff, composeStorageHandoff } from './composition/handoff'
 import { composeManagedFiles } from './composition/managed-files'
 import { composeManagedExecution } from './composition/managed-execution'
 import { registerRunObservationIpc } from './run-observation/ipc'
+import { registerBrowserRecordingIpc } from './browser-recordings/ipc'
 import { registerResearchRunInspectionIpc } from './research-runs/ipc'
 import { registerResearchDemoIpc } from './research-demos/ipc'
 import { registerResearchExecutionProfileIpc } from './research-execution-profiles/ipc'
@@ -325,6 +326,8 @@ export const createApplicationModules = async (
   declareElectronAdapter('run-observation', () => {
     if (managedExecution.external.observation)
       registerRunObservationIpc(managedExecution.external.observation)
+    if (managedExecution.external.projectRecordings)
+      registerBrowserRecordingIpc(managedExecution.external.projectRecordings)
   })
   sessionAuthority.notebookActivityRef.current = managedExecution.notebookLifecycle
   const researchCatalog = await composeResearchCatalog({

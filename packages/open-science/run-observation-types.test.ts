@@ -12,6 +12,7 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     import type * as Recorded from '../../src/shared/run-observation-recorded'
     import type * as Archive from '../../src/shared/run-observation-archive'
     import type * as ProjectRecording from '../../src/shared/project-recording'
+    import type * as BrowserRecording from '../../src/shared/browser-recording'
     import type * as Capture from '../../src/shared/run-observation-capture'
     import type { RunObservationRecordingStatus } from '../../src/shared/run-observation-recording-status'
     import type { RuntimeViewLaunch } from '../../src/shared/runtime-view'
@@ -22,6 +23,11 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     type RecordingPayload = Assert<Compatible<SDK.RecordedObservationPayload, Recorded.RecordedObservationPayload>>
     type ProjectRecordingContent = Assert<Compatible<SDK.ProjectRecording, ProjectRecording.ProjectRecording>>
     type ProjectRecordingPayload = Assert<Compatible<SDK.RecordedProjectPayload, Recorded.RecordedProjectPayload>>
+    type BrowserRecordingContent = Assert<Compatible<SDK.BrowserRecording, BrowserRecording.BrowserRecording>>
+    type BrowserPayload = Assert<Compatible<SDK.RecordedBrowserPayload, BrowserRecording.RecordedBrowserPayload>>
+    type BrowserMoment = Assert<Compatible<SDK.BrowserRecordingMoment, BrowserRecording.BrowserRecordingMoment>>
+    type BrowserStatus = Assert<Compatible<SDK.BrowserRecordingStatus, BrowserRecording.BrowserRecordingStatus>>
+    type BrowserInspection = Assert<Compatible<SDK.BrowserRecordingInspection, BrowserRecording.BrowserRecordingInspection>>
     type FileSelection = Assert<Compatible<SDK.RecordedObservationFileSelection, Recorded.RecordedObservationFileSelection>>
     type RecordingSelection = Assert<Compatible<SDK.RecordedRunObservationSelection, Recorded.RecordedRunObservationSelection>>
     type RecordingArchive = Assert<Compatible<SDK.RunObservationArchive, Archive.RunObservationArchive>>
@@ -66,7 +72,12 @@ it('keeps SDK observation DTOs and project-view launch types compatible with app
     client.observations.selection({ viewerId: 'v' }).then(selection => selection?.snapshot)
     client.observations.revoke({ viewerId: 'v' })
     client.observations.openRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(view => view.mode)
-    client.observations.recording({ viewerId: 'v' }).then(payload => 'archive' in payload ? payload.archive.records : payload.recording.frames)
+    client.observations.recording({ viewerId: 'v' }).then(payload => 'archive' in payload ? payload.archive.records : 'indexChecksum' in payload ? payload.recording.segments : payload.recording.frames)
+    client.projectRecordings.inspect({ viewerId: 'v' }).then(value => value.sources?.[0]?.sourceViewId)
+    client.projectRecordings.start({ viewerId: 'v', request: { requestId: 'r', sourceViewId: 'desktop' } })
+    client.projectRecordings.selectMoment({ viewerId: 'v', offsetMs: 12 }).then(moment => moment.resource.versionId)
+    // @ts-expect-error Browser recording media is not executable HTML.
+    const badRecordingMedia: SDK.BrowserRecording['media'][number] = { mediaKey: 'm', name: 'bad', mimeType: 'text/html', checksum: '', sizeBytes: 1, sourceVersionId: 'v' }
     client.observations.openRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' }, format: 'project-recording' })
     client.observations.readRecorded({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(payload => payload.archive.records)
     client.observations.readProjectRecording({ target: { projectId: 'p', sessionId: 's', artifactId: 'a', versionId: 'v' } }).then(payload => payload.recording.frames)

@@ -782,7 +782,10 @@
       "src/main/notebook/offline-plan-admission.test.ts",
       "src/main/project-recordings/managed-adapter.test.ts",
       "src/main/project-recordings/recorder.test.ts",
-      "src/main/notebook/screened-auxiliary-output.test.ts"
+      "src/main/notebook/screened-auxiliary-output.test.ts",
+      "src/main/browser-recordings/external-port.test.ts",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/main/browser-recordings/owner.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

@@ -69,7 +69,8 @@ const openRequest = z
     target: runObservationTargetSchema,
     allowInteraction: z.boolean().default(false),
     allowCancel: z.boolean().default(false),
-    allowCapture: z.boolean().default(false)
+    allowCapture: z.boolean().default(false),
+    allowRecording: z.boolean().default(false)
   })
   .strict()
 
@@ -107,6 +108,7 @@ export function createRunObservationExternalPort(dependencies: {
       allowInteraction: boolean
       allowCancel: boolean
       allowCapture: boolean
+      allowRecording?: boolean
     }
   ): Promise<unknown>
 }): RunObservationExternalPort {

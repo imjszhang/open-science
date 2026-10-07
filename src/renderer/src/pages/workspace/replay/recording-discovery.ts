@@ -8,7 +8,11 @@ import type {
 } from '../../../../../shared/artifacts'
 import type { ReplayResource } from '../../../../../shared/replay'
 import type { RecordedObservationTarget } from '../../../../../shared/run-observation-recorded'
-import { isRecordedObservationContent, isProjectRecordingContent } from './recorded-file-entry'
+import {
+  isRecordedObservationContent,
+  isProjectRecordingContent,
+  isBrowserRecordingContent
+} from './recorded-file-entry'
 
 export const RECORDING_DISCOVERY_PAGE_SIZE = 32
 export const RECORDING_DISCOVERY_PREVIEW_BYTES = 4096
@@ -16,7 +20,7 @@ export type RecordingDiscoverySource = { projectId: string; sessionId: string }
 export type RecordingCandidate = {
   resource: ReplayResource
   target: RecordedObservationTarget
-  format?: 'project-recording'
+  format?: 'project-recording' | 'web-recording'
 }
 export type RecordingDiscoveryPage = {
   recordings: RecordingCandidate[]
@@ -126,6 +130,11 @@ export const discoverRecordingPage = async (
           isProjectRecordingContent(preview.content, !preview.truncated)
         )
           found.set(index, { ...candidate, format: 'project-recording' })
+        else if (
+          preview.encoding === 'utf8' &&
+          isBrowserRecordingContent(preview.content, !preview.truncated)
+        )
+          found.set(index, { ...candidate, format: 'web-recording' })
       } catch {
         checkAbort(signal)
         unavailable += 1

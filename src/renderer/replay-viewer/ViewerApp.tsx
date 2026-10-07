@@ -15,6 +15,7 @@ import { ReferencePanel } from './ReferencePanel'
 import { RecordedViewerApp } from './RecordedViewerApp'
 import { useObservationRecordingStatus } from '../src/pages/workspace/replay/use-observation-recording-status'
 import { ObservationRecordingStatus } from '../src/pages/workspace/replay/ObservationRecordingStatus'
+import { BrowserRecordingControls } from './BrowserRecordingControls'
 import { ObservationCaptureControls } from './ObservationCaptureControls'
 import { capturesForObservation, useViewerCaptures } from './use-viewer-captures'
 import { RecordedProjectImages } from '../src/pages/workspace/replay/RecordedProjectImages'
@@ -302,6 +303,23 @@ export const ViewerApp = ({
           title={t('Could not open the project interface.')}
           description={t('The service may not be ready. Check the execution record and try again.')}
           dismissButton={{ label: t('Dismiss'), onClick: () => setProjectError(false) }}
+        />
+      ) : null}
+      {context.canRecord ? (
+        <BrowserRecordingControls
+          client={client}
+          enabled={connection === 'connected' && snapshot.run?.status === 'running'}
+          hostViewOpen={Boolean(access)}
+          onOpen={
+            context.presentation === 'browser'
+              ? async (status) => {
+                  if (status.target)
+                    navigateToArchive(
+                      (await client.openArchive(status.target, 'web-recording')).url
+                    )
+                }
+              : undefined
+          }
         />
       ) : null}
       {reference ? (

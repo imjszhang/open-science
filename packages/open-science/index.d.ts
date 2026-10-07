@@ -975,6 +975,7 @@ export type OpenRunObservationRequest = {
   allowCancel?: boolean
   /** Defaults to false; permits saving current observation images as ordinary Artifacts. */
   allowCapture?: boolean
+  allowRecording?: boolean
 }
 export type RunObservationView = Readonly<{
   viewerId: string
@@ -1232,8 +1233,9 @@ export type RecordedRunObservationSelection = Readonly<{
   /** Main-captured collection context at this selection's evidence cutoff. */
   executionContext?: RunObservationExecutionContext
 }>
-export type RecordedEvidenceFormat = 'run-observation' | 'project-recording'
-export type RecordedEvidencePayload = RecordedObservationPayload | RecordedProjectPayload
+export type RecordedEvidenceFormat = 'run-observation' | 'project-recording' | 'web-recording'
+export type RecordedEvidencePayload =
+  RecordedObservationPayload | RecordedProjectPayload | RecordedBrowserPayload
 export type RecordedObservationView = Readonly<{
   mode: 'recorded'
   format?: RecordedEvidenceFormat
@@ -1266,7 +1268,7 @@ export type RunObservationsClient = {
   openRecorded(
     request: {
       target: RecordedObservationTarget
-      format?: 'run-observation' | 'project-recording'
+      format?: RecordedEvidenceFormat
     },
     options?: RequestOptions
   ): Promise<RecordedObservationView>
@@ -1297,7 +1299,7 @@ export type RunObservationsClient = {
   recording(
     request: RunObservationViewerReference,
     options?: RequestOptions
-  ): Promise<RecordedObservationPayload | RecordedProjectPayload>
+  ): Promise<RecordedEvidencePayload>
   selectRecording(
     request: RunObservationViewerReference & { stepKey: string },
     options?: RequestOptions
@@ -1330,9 +1332,149 @@ export type RunObservationsClient = {
   revoke(request: RunObservationViewerReference, options?: RequestOptions): Promise<null>
 }
 
+export type BrowserRecording = {
+  format: 'open-science-web-recording'
+  version: 1
+  recordingId: string
+  title?: string
+  startedAt: number
+  durationMs: number
+  source?: {
+    projectId?: string
+    sessionId?: string
+    operationId?: string
+    executionInvocationId?: string
+    runId?: string
+  }
+  media: Array<{
+    mediaKey: string
+    name: string
+    mimeType: 'video/webm'
+    checksum: string
+    sizeBytes: number
+    sourceVersionId: string
+  }>
+  segments: Array<{
+    segmentId: string
+    mediaKey: string
+    startMs: number
+    endMs: number
+    width: number
+    height: number
+    codec: 'vp8' | 'vp9'
+    frameRate: number
+  }>
+  events: Array<{
+    eventId: string
+    offsetMs: number
+    kind: 'click' | 'scroll' | 'navigation' | 'resize' | 'visibility' | 'author'
+    source: 'host-observed' | 'browser-observed' | 'author-declared'
+    label?: string
+    x?: number
+    y?: number
+  }>
+  coverage: {
+    stopReason: 'finished' | 'stopped' | 'interrupted' | 'capacity' | 'capture-failed'
+    gaps: Array<{
+      startMs: number
+      endMs: number
+      reason: 'paused' | 'hidden' | 'source-lost' | 'capture-failed' | 'capacity' | 'interrupted'
+    }>
+    droppedFrames: number
+  }
+}
+export type BrowserRecordingStatus = {
+  recordingId?: string
+  state:
+    'idle' | 'starting' | 'recording' | 'paused' | 'finalizing' | 'finalized' | 'partial' | 'failed'
+  elapsedMs: number
+  segments: number
+  bytes: number
+  droppedFrames: number
+  target?: RecordedObservationTarget
+  error?: 'unavailable' | 'capture-failed' | 'publication-failed' | 'capacity'
+}
+export type BrowserRecordingInspection = {
+  supported: boolean
+  reason?: 'desktop-required' | 'source-unavailable' | 'not-authorized' | 'surface-unavailable'
+  active?: BrowserRecordingStatus
+  sources?: Array<{ sourceViewId: string; label: 'Desktop project page' }>
+}
+export type RecordedBrowserPayload = {
+  receiving: RecordedObservationTarget
+  recording: BrowserRecording
+  indexChecksum: string
+  media: ResolvedObservationMedia[]
+}
+export type BrowserRecordingMoment = {
+  kind: 'recorded-project-moment'
+  selectionId: string
+  selectedAt: number
+  receiving: RecordedObservationTarget
+  indexChecksum: string
+  recordingId: string
+  offsetMs: number
+  segmentId: string
+  mediaKey: string
+  segmentOffsetMs: number
+  resource: RecordedObservationTarget & {
+    name: string
+    mimeType: 'video/webm'
+    checksum: string
+    sizeBytes: number
+  }
+}
+export type ProjectRecordingControlRequest = {
+  viewerId: string
+  request: { requestId: string; recordingId?: string; sourceViewId?: string }
+}
+export type ProjectRecordingsClient = {
+  inspect(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingInspection>
+  start(
+    request: ProjectRecordingControlRequest,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingStatus>
+  status(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingStatus>
+  pause(
+    request: ProjectRecordingControlRequest,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingStatus>
+  resume(
+    request: ProjectRecordingControlRequest,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingStatus>
+  stop(
+    request: ProjectRecordingControlRequest,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingStatus>
+  read(
+    request: { target: RecordedObservationTarget },
+    options?: RequestOptions
+  ): Promise<RecordedBrowserPayload>
+  openRecorded(
+    request: { target: RecordedObservationTarget },
+    options?: RequestOptions
+  ): Promise<Omit<RecordedObservationView, 'format'> & { format: 'web-recording' }>
+  selectMoment(
+    request: RunObservationViewerReference & { offsetMs: number },
+    options?: RequestOptions
+  ): Promise<BrowserRecordingMoment>
+  selection(
+    request: RunObservationViewerReference,
+    options?: RequestOptions
+  ): Promise<BrowserRecordingMoment | null>
+}
+
 export class OpenScienceClient {
   readonly execution: ManagedExecutionClient
   readonly observations: RunObservationsClient
+  readonly projectRecordings: ProjectRecordingsClient
   readonly packages: SessionPackagesClient
   constructor(options: {
     baseUrl: string

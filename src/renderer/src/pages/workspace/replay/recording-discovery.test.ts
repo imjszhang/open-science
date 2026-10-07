@@ -26,6 +26,18 @@ const archive = {
 }
 
 describe('receiving source recording discovery', () => {
+  it('discovers portable web recordings by content and preserves their receiving target', async () => {
+    const read = vi.fn().mockResolvedValue({
+      ...archive,
+      content: '{"format":"open-science-web-recording","version":1,"recordingId":'
+    })
+    const page = await discoverRecordingPage(recordingCandidates([resource()], source), read)
+    expect(page.recordings).toHaveLength(1)
+    expect(page.recordings[0]).toMatchObject({
+      format: 'web-recording',
+      target: { ...source, artifactId: 'artifact', versionId: 'version' }
+    })
+  })
   it('projects only the receiving viewer identity from a complete Replay source', async () => {
     const replaySource = { ...source, title: 'Received study', fingerprint: 'source-fingerprint' }
     const page = await discoverRecordingPage(

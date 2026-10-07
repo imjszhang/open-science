@@ -359,6 +359,10 @@ export const PreviewToolContent = ({
                 questionRecovery={questionRecovery}
                 title={item.title}
                 isActive={isActive}
+                onAskBrowserMoment={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                    throw new Error('Discussion unavailable')
+                }}
                 onAskArchiveFile={(selection) => {
                   if (!useRunObservationQuestionStore.getState().askRecorded(selection))
                     throw new Error('Discussion unavailable')

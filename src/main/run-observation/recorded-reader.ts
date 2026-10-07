@@ -28,6 +28,13 @@ import { resolveRunObservationMedia, verifyRunObservationMediaBytes } from './ar
 import { readCollectionExecutionContext, unknownExecutionContext } from './execution-context'
 import type { RunObservationExecutionContext } from '../../shared/run-observation'
 import type { ArtifactVersionDescriptor } from '../../shared/artifact-provenance'
+import {
+  parseBrowserRecording,
+  browserRecordingMomentSchema,
+  type BrowserRecording,
+  type RecordedBrowserPayload,
+  type BrowserRecordingMoment
+} from '../../shared/browser-recording'
 
 export type RecordedObservationReaderDependencies = {
   immutableInputAuthority: Pick<ImmutableInputAuthority, 'resolveVersion' | 'openContent'>
@@ -47,6 +54,20 @@ export type RecordedObservationReaderDependencies = {
   ): Promise<Readonly<Record<string, string>> | undefined>
 }
 export type RecordedObservationReader = {
+  readBrowser(
+    target: RecordedObservationTarget,
+    signal?: AbortSignal
+  ): Promise<RecordedBrowserPayload>
+  readBrowserMedia(
+    target: RecordedObservationTarget,
+    mediaKey: string,
+    signal?: AbortSignal
+  ): Promise<{ body: Uint8Array; mimeType: string }>
+  selectBrowserMoment(
+    target: RecordedObservationTarget,
+    offsetMs: number,
+    signal?: AbortSignal
+  ): Promise<BrowserRecordingMoment>
   read(target: RecordedObservationTarget, signal?: AbortSignal): Promise<RecordedObservationPayload>
   readMedia(
     target: RecordedObservationTarget,
@@ -427,14 +448,16 @@ export function createRecordedObservationReader(
     await guard(target, signal)
     return { receiving: { ...target }, archive, media, executionContext }
   }
-  const loadProject = async (
+  const loadProjectLike = async (
     target: RecordedObservationTarget,
-    signal?: AbortSignal
-  ): Promise<RecordedProjectPayload> => {
+    signal?: AbortSignal,
+    browser = false
+  ): Promise<RecordedProjectPayload | RecordedBrowserPayload> => {
     const bytes = await readVersion(target, MAX_PROJECT_RECORDING_BYTES, signal)
-    let recording: ProjectRecording
+    let recording: ProjectRecording | BrowserRecording
     try {
-      recording = parseProjectRecording(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+      const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      recording = browser ? parseBrowserRecording(content) : parseProjectRecording(content)
     } catch {
       throw new RecordedObservationReadError('invalid-archive')
     }
@@ -539,10 +562,28 @@ export function createRecordedObservationReader(
     }
     await resolve(target)
     await guard(target, signal)
-    return { receiving: { ...target }, recording, media }
+    return recording.format === 'open-science-web-recording'
+      ? { receiving: { ...target }, recording, indexChecksum: checksum(bytes), media }
+      : { receiving: { ...target }, recording, media }
+  }
+  const loadProject = async (
+    target: RecordedObservationTarget,
+    signal?: AbortSignal
+  ): Promise<RecordedProjectPayload> => {
+    const payload = await loadProjectLike(target, signal)
+    if ('indexChecksum' in payload) throw new RecordedObservationReadError('invalid-archive')
+    return payload
+  }
+  const loadBrowser = async (
+    target: RecordedObservationTarget,
+    signal?: AbortSignal
+  ): Promise<RecordedBrowserPayload> => {
+    const payload = await loadProjectLike(target, signal, true)
+    if (!('indexChecksum' in payload)) throw new RecordedObservationReadError('invalid-archive')
+    return payload
   }
   const mediaBytes = async (
-    payload: RecordedObservationPayload | RecordedProjectPayload,
+    payload: RecordedObservationPayload | RecordedProjectPayload | RecordedBrowserPayload,
     mediaKey: string,
     signal?: AbortSignal
   ): Promise<{ body: Uint8Array; mimeType: string }> => {
@@ -575,6 +616,53 @@ export function createRecordedObservationReader(
     }
   }
   return {
+    readBrowser: (target, signal) =>
+      safe(() => loadBrowser(recordedObservationTargetSchema.parse(target), signal)),
+    readBrowserMedia: (target, mediaKey, signal) =>
+      safe(async () => {
+        if (!SAFE_ID.test(mediaKey)) throw new RecordedObservationReadError('media-unavailable')
+        return mediaBytes(
+          await loadBrowser(recordedObservationTargetSchema.parse(target), signal),
+          mediaKey,
+          signal
+        )
+      }),
+    selectBrowserMoment: (target, offsetMs, signal) =>
+      safe(async () => {
+        const payload = await loadBrowser(recordedObservationTargetSchema.parse(target), signal)
+        if (!Number.isSafeInteger(offsetMs) || offsetMs < 0)
+          throw new RecordedObservationReadError('media-unavailable')
+        const segment = payload.recording.segments.find(
+          (item) => offsetMs >= item.startMs && offsetMs < item.endMs
+        )
+        if (!segment) throw new RecordedObservationReadError('media-unavailable')
+        const media = payload.recording.media.find((item) => item.mediaKey === segment.mediaKey)!
+        const resolved = payload.media.find((item) => item.mediaKey === segment.mediaKey)
+        if (!resolved) throw new RecordedObservationReadError('media-unavailable')
+        await mediaBytes(payload, segment.mediaKey, signal)
+        return browserRecordingMomentSchema.parse({
+          kind: 'recorded-project-moment',
+          selectionId: randomUUID(),
+          selectedAt: Date.now(),
+          receiving: payload.receiving,
+          indexChecksum: payload.indexChecksum,
+          recordingId: payload.recording.recordingId,
+          offsetMs,
+          segmentId: segment.segmentId,
+          mediaKey: segment.mediaKey,
+          segmentOffsetMs: offsetMs - segment.startMs,
+          resource: {
+            projectId: target.projectId,
+            sessionId: target.sessionId,
+            artifactId: resolved.artifactId,
+            versionId: resolved.versionId,
+            name: media.name,
+            mimeType: media.mimeType,
+            checksum: media.checksum,
+            sizeBytes: media.sizeBytes
+          }
+        })
+      }),
     read: (input, signal) => safe(() => load(recordedObservationTargetSchema.parse(input), signal)),
     readProject: (input, signal) =>
       safe(() => loadProject(recordedObservationTargetSchema.parse(input), signal)),

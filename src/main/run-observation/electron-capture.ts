@@ -52,7 +52,7 @@ const rectangleSchema = z
     height: z.number().finite().positive()
   })
   .strict()
-const measurementSchema = z
+export const projectSurfaceMeasurementSchema = z
   .object({
     documentUrl: z.string(),
     sourceUrl: z.string(),
@@ -62,7 +62,7 @@ const measurementSchema = z
     rect: rectangleSchema
   })
   .strict()
-type Measurement = z.infer<typeof measurementSchema>
+type Measurement = z.infer<typeof projectSurfaceMeasurementSchema>
 const measurementReasons = [
   'document-hidden',
   'iframe-ambiguous',
@@ -161,7 +161,7 @@ function checkedOrigin(input: string): string {
 
 /** Fixed, read-only query in the trusted app/viewer only. No caller rectangle or project script.
  * Reject effects, clipping and overlapping siblings rather than guessing a transformed crop. */
-function measurementScript(origin: string): string {
+export function projectSurfaceMeasurementScript(origin: string): string {
   return String.raw`(() => {
     const origin = ${JSON.stringify(origin)};
     if (document.visibilityState !== 'visible') return {unavailable:'document-hidden'};
@@ -334,13 +334,16 @@ export function createElectronProjectCapture(
         for (const frame of [root, viewer, project]) live(frame)
       }
       const readMeasurement = async (frame: CaptureFrame, origin: string): Promise<Measurement> => {
-        const value = await bounded(frame.executeJavaScript(measurementScript(origin)), signal)
+        const value = await bounded(
+          frame.executeJavaScript(projectSurfaceMeasurementScript(origin)),
+          signal
+        )
         const failure = failureSchema.safeParse(value)
         if (failure.success) {
           const { unavailable: reason, ...detail } = failure.data
           throw new CaptureUnavailable(reason, detail)
         }
-        const parsed = measurementSchema.safeParse(value)
+        const parsed = projectSurfaceMeasurementSchema.safeParse(value)
         if (!parsed.success) throw unavailable('measurement-invalid')
         return parsed.data
       }

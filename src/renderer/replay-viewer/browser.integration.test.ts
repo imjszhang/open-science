@@ -429,9 +429,9 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
         (await viewers.selection(access.viewerId, { caller }))?.snapshot.run?.logs.stdout.text
       ).toBe(startupOutput)
       await page.getByRole('button', { name: 'Back to live', exact: true }).click()
-      await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
+      await expect(page.getByText('Offline run', { exact: true })).toBeVisible()
       await expect(page.getByTestId('demo-viewing-notice')).toContainText(
-        'Maximum demo execution time: 10 min.'
+        'Maximum execution time: 10 min. The program may finish earlier.'
       )
       await expect(projectFrame.locator('output')).toHaveText('1')
       await expect(projectFrame.getByRole('button', { name: 'Increment' })).toBeInViewport()
@@ -638,7 +638,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       const selected = await viewers.recordingSelection(access.viewerId, { caller })
       expect(selected?.record.sourceEvidence.identity.runId).toBe('author-run')
       expect(selected?.executionContext).toEqual(payload.executionContext)
-      await expect(page.getByText('Offline demo', { exact: true })).toBeVisible()
+      await expect(page.getByText('Offline run', { exact: true })).toBeVisible()
       await page.getByRole('button', { name: 'View files', exact: true }).click()
       await page.getByRole('button', { name: 'project.html', exact: true }).click()
       await expect(
@@ -664,9 +664,10 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       await expect
         .poll(async () => JSON.parse(await reference.inputValue()).stepKey)
         .toBe('earlier-observation')
-      await page.getByText('Recording attachments', { exact: true }).click()
+      await page.getByRole('button', { name: 'Research materials', exact: true }).click()
+      await page.getByRole('button', { name: 'Results', exact: true }).click()
       await page
-        .getByRole('button', { name: 'project-result.html', exact: true })
+        .getByRole('button', { name: /^project-result\.html Recording attachment/ })
         .click({ delay: 80 })
       await expect(
         page
@@ -676,7 +677,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       expect(
         await page.locator('iframe[title="project-result.html"]').getAttribute('sandbox')
       ).toBe('')
-      await page.getByRole('button', { name: 'Back to recording', exact: true }).click()
+      await page.getByRole('button', { name: 'Notebook', exact: true }).click()
+      await page.getByRole('button', { name: 'Research materials', exact: true }).click()
       await expect(page.getByText('Earlier author output', { exact: true })).toBeVisible()
       await expect(page.getByTestId('replay-live-record')).toHaveAttribute(
         'data-observation-record',

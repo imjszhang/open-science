@@ -8,7 +8,7 @@ export const ReferencePanel = ({
   presentation
 }: {
   reference: string
-  kind?: 'step' | 'file'
+  kind?: 'step' | 'file' | 'moment'
   observedAt?: number
   presentation?: 'desktop' | 'browser'
 }): React.JSX.Element => {
@@ -25,7 +25,13 @@ export const ReferencePanel = ({
   return (
     <section
       className="shrink-0 border-b border-border-200 px-3 py-2"
-      aria-label={kind === 'file' ? t('Recorded file version') : t('Recorded step reference')}
+      aria-label={
+        kind === 'moment'
+          ? t('Recorded moment reference')
+          : kind === 'file'
+            ? t('Recorded file version')
+            : t('Recorded step reference')
+      }
     >
       <div className="flex items-center justify-between gap-2">
         {presentation !== 'desktop' ? (
@@ -44,9 +50,11 @@ export const ReferencePanel = ({
         >
           {copyState === 'copied'
             ? t('Copied')
-            : kind === 'file'
-              ? t('Copy file reference')
-              : t('Copy step reference')}
+            : kind === 'moment'
+              ? t('Copy moment reference')
+              : kind === 'file'
+                ? t('Copy file reference')
+                : t('Copy step reference')}
         </Button>
       </div>
       {observedAt !== undefined ? (
@@ -58,7 +66,13 @@ export const ReferencePanel = ({
       ) : null}
       <textarea
         readOnly
-        aria-label={kind === 'file' ? t('Recorded file version') : t('Recorded step reference')}
+        aria-label={
+          kind === 'moment'
+            ? t('Recorded moment reference')
+            : kind === 'file'
+              ? t('Recorded file version')
+              : t('Recorded step reference')
+        }
         value={reference}
         rows={3}
         className="mt-2 w-full resize-none rounded border border-border-200 bg-bg-100 p-2 font-mono text-xs"

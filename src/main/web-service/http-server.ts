@@ -69,6 +69,10 @@ import {
   RUN_OBSERVATION_EXTERNAL_METHODS,
   type RunObservationExternalMethod
 } from '../run-observation-external-port'
+import {
+  BROWSER_RECORDING_EXTERNAL_METHODS,
+  type BrowserRecordingExternalMethod
+} from '../browser-recordings/external-port'
 
 const MAX_RPC_BODY_BYTES = 64 * 1024 * 1024
 // Preserve one maximum-size request per logical client while leaving the same amount of capacity
@@ -166,6 +170,7 @@ type WebServerOptions = {
         HeadlessTaskApi,
         | 'callManagedExecution'
         | 'callRunObservation'
+        | 'callProjectRecordings'
         | 'callSessionPackages'
         | 'getSessionPlan'
         | 'respondSessionPlan'
@@ -1070,6 +1075,49 @@ const handleTaskApiRequest = async (
         return true
       }
       const executionMatch = url.pathname.match(/^\/api\/v1\/execution\/([^/]+)$/)
+      const browserRecordingMatch = url.pathname.match(/^\/api\/v1\/project-recordings\/([^/]+)$/)
+      if (
+        browserRecordingMatch &&
+        request.method === 'POST' &&
+        BROWSER_RECORDING_EXTERNAL_METHODS.includes(
+          browserRecordingMatch[1] as BrowserRecordingExternalMethod
+        )
+      ) {
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '') ?? ''
+        if (
+          callerContext.location !== 'local' ||
+          !(peer === '::1' || (isIP(peer) === 4 && peer.startsWith('127.')))
+        )
+          throw new ManagedExecutionExternalError(
+            'unsupported_location',
+            'Project recording is local to this device.'
+          )
+        if (!tasks.callProjectRecordings)
+          throw new ManagedExecutionExternalError(
+            'unavailable',
+            'Project recording is unavailable.'
+          )
+        const body = await readJsonBody(
+          request,
+          response,
+          requestBodyBudgetRegistry,
+          requestBodyClientId
+        )
+        if (!body || typeof body !== 'object' || Array.isArray(body))
+          throw new ManagedExecutionExternalError(
+            'invalid_request',
+            'Project recording input must be a JSON object.'
+          )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        const data = await tasks.callProjectRecordings(
+          browserRecordingMatch[1] as BrowserRecordingExternalMethod,
+          body
+        )
+        assertExternalAuthorizationCurrent(externalAuthorization)
+        json(response, 200, { data })
+        return true
+      }
       const observationMatch = url.pathname.match(/^\/api\/v1\/observations\/([^/]+)$/)
       if (
         observationMatch &&

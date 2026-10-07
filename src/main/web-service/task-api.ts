@@ -281,6 +281,17 @@ class HeadlessTaskApi {
     return result
   }
 
+  async callProjectRecordings(
+    method: import('../browser-recordings/external-port').BrowserRecordingExternalMethod,
+    payload: unknown
+  ): Promise<unknown> {
+    const caller = this.currentCallerContext()
+    const port = this.ports.managedExecution?.projectRecordings
+    if (!port)
+      throw new ManagedExecutionExternalError('unavailable', 'Project recording is unavailable.')
+    return port.call(method, payload, caller)
+  }
+
   async callRunObservation(
     method: RunObservationExternalMethod,
     payload: unknown

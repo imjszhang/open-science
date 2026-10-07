@@ -69,7 +69,16 @@
     "src/renderer/src/pages/workspace/replay/results/ResultsPanel.tsx",
     "src/renderer/src/pages/workspace/replay/results/recorded-resource-reader.ts",
     "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
-    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx"
+    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx",
+    "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx",
+    "src/renderer/replay-viewer/BrowserRecordingControls.tsx",
+    "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+    "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+    "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
+    "src/renderer/src/pages/workspace/replay/BrowserRecording.test-support.ts",
+    "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx",
+    "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.tsx",
+    "src/renderer/src/pages/workspace/replay/browser-recording-playback.ts"
   ],
   "interfacePaths": [
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
@@ -115,7 +124,10 @@
     "src/renderer/src/pages/workspace/replay/results/RecordedResourcePreview.tsx",
     "src/renderer/src/pages/workspace/replay/results/ResultsPanel.tsx",
     "src/renderer/src/pages/workspace/replay/results/recorded-resource-reader.ts",
-    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx"
+    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx",
+    "src/renderer/replay-viewer/BrowserRecordingControls.tsx",
+    "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.tsx",
+    "src/renderer/src/pages/workspace/replay/browser-recording-playback.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -144,7 +156,12 @@
       "src/renderer/src/pages/workspace/replay/DemoViewingNotice.test.tsx",
       "src/renderer/src/pages/workspace/replay/ProjectReplay.test.tsx",
       "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
+      "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx"
     ],
     "contract": [],
     "consumer": [

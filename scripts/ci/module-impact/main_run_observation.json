@@ -48,7 +48,22 @@
     "src/main/project-recordings/recorder.ts",
     "src/shared/project-recording-data.ts",
     "src/shared/project-recording.test.ts",
-    "src/shared/project-recording.ts"
+    "src/shared/project-recording.ts",
+    "src/main/browser-recordings/driver-deadline.ts",
+    "src/main/browser-recordings/electron-surface-driver.integration.test.ts",
+    "src/main/browser-recordings/electron-surface-driver.ts",
+    "src/main/browser-recordings/external-port.test.ts",
+    "src/main/browser-recordings/external-port.ts",
+    "src/main/browser-recordings/ipc.ts",
+    "src/main/browser-recordings/owner.test.ts",
+    "src/main/browser-recordings/owner.ts",
+    "src/main/browser-recordings/webm-encoder.ts",
+    "src/main/run-observation/browser-recorded.test-support.ts",
+    "src/shared/browser-recording.test.ts",
+    "src/shared/browser-recording.ts",
+    "docs/browser-recording.md",
+    "src/main/browser-recordings/README.md",
+    "src/main/browser-recordings/driver-deadline.test.ts"
   ],
   "interfacePaths": [
     "src/main/managed-run-observation.ts",
@@ -77,7 +92,14 @@
     "src/main/project-recordings/managed-adapter.ts",
     "src/main/project-recordings/recorder.ts",
     "src/shared/project-recording-data.ts",
-    "src/shared/project-recording.ts"
+    "src/shared/project-recording.ts",
+    "src/main/browser-recordings/driver-deadline.ts",
+    "src/main/browser-recordings/electron-surface-driver.ts",
+    "src/main/browser-recordings/external-port.ts",
+    "src/main/browser-recordings/ipc.ts",
+    "src/main/browser-recordings/owner.ts",
+    "src/main/browser-recordings/webm-encoder.ts",
+    "src/shared/browser-recording.ts"
   ],
   "consumerModules": ["main_runtime_view", "replay_observation"],
   "testFiles": {
@@ -102,7 +124,11 @@
       "src/main/project-recordings/declarations.test.ts",
       "src/main/project-recordings/managed-adapter.test.ts",
       "src/main/project-recordings/recorder.test.ts",
-      "src/shared/project-recording.test.ts"
+      "src/shared/project-recording.test.ts",
+      "src/main/browser-recordings/electron-surface-driver.integration.test.ts",
+      "src/main/browser-recordings/external-port.test.ts",
+      "src/main/browser-recordings/owner.test.ts",
+      "src/shared/browser-recording.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -750,7 +776,13 @@
       "src/main/notebook/offline-plan-admission.test.ts",
       "src/renderer/src/pages/workspace/replay/DemoViewingNotice.test.tsx",
       "src/renderer/src/lib/replay/recorded-results.test.ts",
-      "src/main/notebook/screened-auxiliary-output.test.ts"
+      "src/main/notebook/screened-auxiliary-output.test.ts",
+      "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx",
+      "src/main/browser-recordings/driver-deadline.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

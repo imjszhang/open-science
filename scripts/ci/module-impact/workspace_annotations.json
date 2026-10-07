@@ -184,7 +184,9 @@
       "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
       "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
       "src/main/research-demos/owner.macos.integration.test.ts",
-      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

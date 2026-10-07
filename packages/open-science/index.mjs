@@ -143,7 +143,10 @@ const validateObservationOpen = (input) => {
   if (
     !object(input) ||
     Object.keys(input).some(
-      (key) => !['target', 'allowInteraction', 'allowCancel', 'allowCapture'].includes(key)
+      (key) =>
+        !['target', 'allowInteraction', 'allowCancel', 'allowCapture', 'allowRecording'].includes(
+          key
+        )
     ) ||
     !object(input.target) ||
     Object.keys(input.target).some((key) => !targetKeys.includes(key)) ||
@@ -155,12 +158,12 @@ const validateObservationOpen = (input) => {
         (typeof input.target[key] !== 'string' ||
           !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(input.target[key]))
     ) ||
-    ['allowInteraction', 'allowCancel', 'allowCapture'].some(
+    ['allowInteraction', 'allowCancel', 'allowCapture', 'allowRecording'].some(
       (key) => input[key] !== undefined && typeof input[key] !== 'boolean'
     )
   )
     throw new TypeError(
-      'Observation open requires an exact target and optional allowInteraction/allowCancel/allowCapture booleans.'
+      'Observation open requires an exact target and optional allowInteraction/allowCancel/allowCapture/allowRecording booleans.'
     )
 }
 
@@ -171,7 +174,7 @@ const validateRecordedObservationOpen = (input) => {
     !object(input) ||
     Object.keys(input).some((key) => !['target', 'format'].includes(key)) ||
     (input.format !== undefined &&
-      !['run-observation', 'project-recording'].includes(input.format)) ||
+      !['run-observation', 'project-recording', 'web-recording'].includes(input.format)) ||
     !object(input.target) ||
     Object.keys(input.target).some((key) => !keys.includes(key)) ||
     !keys.every(
@@ -201,6 +204,43 @@ const validateObservationCaptureRead = (input, content) => {
   )
     throw new TypeError(
       'Capture reads require a viewerId, an exact captureId for content, and optional bounded offset/length.'
+    )
+}
+
+const validateProjectRecordingRequest = (method, input) => {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const id = (value) =>
+    typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(value)
+  const exact = (value, keys) =>
+    object(value) && Object.keys(value).every((key) => keys.includes(key))
+  let valid = false
+  if (method === 'read' || method === 'openRecorded') {
+    valid =
+      exact(input, ['target']) &&
+      exact(input.target, ['projectId', 'sessionId', 'artifactId', 'versionId']) &&
+      ['projectId', 'sessionId', 'artifactId', 'versionId'].every((key) => id(input.target[key]))
+  } else if (['inspect', 'status', 'selection'].includes(method)) {
+    valid = exact(input, ['viewerId']) && id(input.viewerId)
+  } else if (method === 'selectMoment') {
+    valid =
+      exact(input, ['viewerId', 'offsetMs']) &&
+      id(input.viewerId) &&
+      Number.isSafeInteger(input.offsetMs) &&
+      input.offsetMs >= 0
+  } else {
+    valid =
+      exact(input, ['viewerId', 'request']) &&
+      id(input.viewerId) &&
+      exact(input.request, ['requestId', 'recordingId', 'sourceViewId']) &&
+      id(input.request.requestId) &&
+      ['recordingId', 'sourceViewId'].every(
+        (key) => input.request[key] === undefined || id(input.request[key])
+      ) &&
+      (method === 'start' || id(input.request.recordingId))
+  }
+  if (!valid)
+    throw new TypeError(
+      'Project recording requires an exact viewer or receiving Version and bounded recording controls.'
     )
 }
 
@@ -305,6 +345,32 @@ export class OpenScienceClient {
             if (method === 'captures' || method === 'captureContent')
               validateObservationCaptureRead(payload, method === 'captureContent')
             return this.request(`/api/v1/observations/${method}`, {
+              ...options,
+              method: 'POST',
+              body: payload
+            })
+          }
+        ])
+      )
+    )
+    this.projectRecordings = Object.freeze(
+      Object.fromEntries(
+        [
+          'inspect',
+          'start',
+          'status',
+          'pause',
+          'resume',
+          'stop',
+          'read',
+          'openRecorded',
+          'selectMoment',
+          'selection'
+        ].map((method) => [
+          method,
+          (payload, options = {}) => {
+            validateProjectRecordingRequest(method, payload)
+            return this.request(`/api/v1/project-recordings/${method}`, {
               ...options,
               method: 'POST',
               body: payload

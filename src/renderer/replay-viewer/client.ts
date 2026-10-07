@@ -1,4 +1,14 @@
 import { z } from 'zod'
+import {
+  browserRecordingMomentSchema,
+  browserRecordingStatusSchema,
+  browserRecordingInspectionSchema,
+  type BrowserRecordingStatus,
+  type BrowserRecordingInspection,
+  type BrowserRecordingControlRequest,
+  type RecordedBrowserPayload,
+  type BrowserRecordingMoment
+} from '../../shared/browser-recording'
 import { LOCALES, type Locale } from '../../shared/locale'
 import {
   applyRunObservationChanges,
@@ -55,6 +65,7 @@ const liveContextSchema = z
     canInteract: z.boolean(),
     canCancel: z.boolean(),
     canCapture: z.boolean().optional(),
+    canRecord: z.boolean().optional(),
     canReadArtifacts: z.boolean()
   })
   .strict()
@@ -64,7 +75,8 @@ const recordedContextSchema = liveContextSchema.extend({
   target: recordedObservationTargetSchema,
   canInteract: z.literal(false),
   canCancel: z.literal(false),
-  canCapture: z.literal(false).optional()
+  canCapture: z.literal(false).optional(),
+  canRecord: z.literal(false).optional()
 })
 const contextSchema = z.union([liveContextSchema, recordedContextSchema])
 export type RecordedReplayViewerContext = z.infer<typeof recordedContextSchema>
@@ -210,6 +222,7 @@ const verifiedRecordedFileSelection = (
   mediaKey?: string
 ): RecordedObservationFileSelection => {
   const selection = recordedFileSelectionSchema.parse(value)
+  if ('indexChecksum' in payload) throw new ReplayViewerRequestError('unavailable')
   try {
     const expected = recordedFileSelectionForPayload(payload, selection.mediaKey)
     const content = { ...selection }
@@ -332,12 +345,16 @@ export class ReplayViewerClient {
       signal
     )
   }
-  async openArchive(expected: RecordedObservationTarget): Promise<RecordedObservationViewerAccess> {
+  async openArchive(
+    expected: RecordedObservationTarget,
+    format?: 'web-recording'
+  ): Promise<RecordedObservationViewerAccess> {
     const access = await this.json(
-      '/api/open-archive',
+      format === 'web-recording' ? '/api/project-recordings/open' : '/api/open-archive',
       z
         .object({
           mode: z.literal('recorded'),
+          format: recordedEvidenceFormatSchema.optional(),
           viewerId: id,
           target: recordedObservationTargetSchema,
           expiresAt: z.number().finite(),
@@ -415,6 +432,103 @@ export class ReplayViewerClient {
   recording(signal?: AbortSignal): Promise<RecordedEvidencePayload> {
     return this.json('/api/recording', recordedEvidencePayloadSchema, undefined, signal)
   }
+  inspectBrowserRecording(signal?: AbortSignal): Promise<BrowserRecordingInspection> {
+    return this.json(
+      '/api/project-recordings/inspect',
+      browserRecordingInspectionSchema,
+      undefined,
+      signal
+    )
+  }
+  browserRecordingStatus(signal?: AbortSignal): Promise<BrowserRecordingStatus> {
+    return this.json(
+      '/api/project-recordings/status',
+      browserRecordingStatusSchema,
+      undefined,
+      signal
+    )
+  }
+  controlBrowserRecording(
+    method: 'start' | 'pause' | 'resume' | 'stop',
+    request: BrowserRecordingControlRequest,
+    signal?: AbortSignal
+  ): Promise<BrowserRecordingStatus> {
+    return this.json(
+      `/api/project-recordings/${method}`,
+      browserRecordingStatusSchema,
+      request,
+      signal
+    )
+  }
+  browserRecordingMediaUrl(payload: RecordedBrowserPayload, mediaKey: string): string | null {
+    const declared = payload.recording.media.find((item) => item.mediaKey === mediaKey)
+    const resolved = payload.media.find((item) => item.mediaKey === mediaKey)
+    if (
+      !declared ||
+      !resolved ||
+      declared.checksum !== resolved.checksum ||
+      declared.sizeBytes !== resolved.sizeBytes
+    )
+      return null
+    return `/api/recording/media?mediaKey=${encodeURIComponent(mediaKey)}`
+  }
+  private verifyBrowserMoment(
+    payload: RecordedBrowserPayload,
+    value: unknown,
+    offsetMs?: number
+  ): BrowserRecordingMoment {
+    const moment = browserRecordingMomentSchema.parse(value)
+    const segment = payload.recording.segments.find((item) => item.segmentId === moment.segmentId)
+    const declared = payload.recording.media.find((item) => item.mediaKey === moment.mediaKey)
+    const resolved = payload.media.find((item) => item.mediaKey === moment.mediaKey)
+    if (
+      !segment ||
+      !declared ||
+      !resolved ||
+      !equivalent(moment.receiving, payload.receiving) ||
+      moment.indexChecksum !== payload.indexChecksum ||
+      moment.recordingId !== payload.recording.recordingId ||
+      (offsetMs !== undefined && moment.offsetMs !== offsetMs) ||
+      moment.offsetMs < segment.startMs ||
+      moment.offsetMs >= segment.endMs ||
+      moment.segmentOffsetMs !== moment.offsetMs - segment.startMs ||
+      segment.mediaKey !== moment.mediaKey ||
+      moment.resource.artifactId !== resolved.artifactId ||
+      moment.resource.versionId !== resolved.versionId ||
+      moment.resource.checksum !== declared.checksum ||
+      moment.resource.checksum !== resolved.checksum ||
+      moment.resource.sizeBytes !== declared.sizeBytes ||
+      moment.resource.sizeBytes !== resolved.sizeBytes ||
+      moment.resource.name !== declared.name
+    )
+      throw new ReplayViewerRequestError('invalid-response')
+    return moment
+  }
+  async selectBrowserMoment(
+    payload: RecordedBrowserPayload,
+    offsetMs: number,
+    signal?: AbortSignal
+  ): Promise<BrowserRecordingMoment> {
+    const value = await this.json(
+      '/api/recording/moment',
+      browserRecordingMomentSchema,
+      { offsetMs },
+      signal
+    )
+    return this.verifyBrowserMoment(payload, value, offsetMs)
+  }
+  async browserMoment(
+    payload: RecordedBrowserPayload,
+    signal?: AbortSignal
+  ): Promise<BrowserRecordingMoment | null> {
+    const value = await this.json(
+      '/api/recording/moment',
+      browserRecordingMomentSchema.nullable(),
+      undefined,
+      signal
+    )
+    return value ? this.verifyBrowserMoment(payload, value) : null
+  }
   async selectRecording(
     payload: RecordedObservationPayload,
     stepKey: string,
@@ -447,6 +561,7 @@ export class ReplayViewerClient {
     mediaKey: string,
     signal?: AbortSignal
   ): Promise<RecordedObservationFileSelection> {
+    if ('indexChecksum' in payload) throw new ReplayViewerRequestError('unavailable')
     try {
       recordedFileSelectionForPayload(payload, mediaKey)
     } catch {

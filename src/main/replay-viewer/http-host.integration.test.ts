@@ -9,6 +9,7 @@ import {
   projectRecordedFixture
 } from '../run-observation/recorded-viewer.test-support'
 import { recordedFileSelectionForPayload } from '../../shared/run-observation-recorded'
+import { browserRecordedFixture } from '../run-observation/browser-recorded.test-support'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import {
@@ -55,7 +56,8 @@ function harness(
     readAsset?: ReplayViewerHttpDependencies['readAsset']
     cancel?: boolean
     lifetimeMs?: number
-    recorded?: boolean | 'project'
+    recorded?: boolean | 'project' | 'browser'
+    browserRecording?: ReplayViewerHttpDependencies['browserRecording']
     capture?: ReplayViewerHttpDependencies['capture']
     listCaptures?: ReplayViewerHttpDependencies['listCaptures']
     readCapture?: ReplayViewerHttpDependencies['readCapture']
@@ -98,6 +100,16 @@ function harness(
             readProject: async (target) => ({
               ...projectRecordedFixture().payload,
               receiving: target
+            }),
+            readBrowser: async (target) => ({
+              ...browserRecordedFixture().payload,
+              receiving: target
+            }),
+            selectBrowserMoment: async (target, offsetMs) => ({
+              ...browserRecordedFixture().moment,
+              receiving: target,
+              offsetMs,
+              segmentOffsetMs: offsetMs
             }),
             selectFile: async (target, mediaKey, format) =>
               recordedFileSelectionForPayload(
@@ -150,6 +162,7 @@ function harness(
   )
   const host: ReplayViewerHttpHost = new ReplayViewerHttpHost({
     desktopLocale: options.desktopLocale,
+    browserRecording: options.browserRecording,
     ...(options.capture
       ? {
           capture: options.capture,
@@ -165,7 +178,10 @@ function harness(
     readArtifact,
     ...(options.recorded
       ? {
-          readRecordingMedia: async () => ({ body: recordedFixture().bytes, mimeType: 'text/html' })
+          readRecordingMedia: async (_target, _key, _signal, format) =>
+            format === 'web-recording'
+              ? { body: browserRecordedFixture().bytes, mimeType: 'video/webm' }
+              : { body: recordedFixture().bytes, mimeType: 'text/html' }
         }
       : {}),
     ...(options.cancel ? { cancelRun: cancel } : {})
@@ -250,6 +266,138 @@ async function open(
   }
 }
 describe('isolated Replay viewer HTTP host', () => {
+  it('requires separate recording permission and explicitly binds a same-execution desktop source for SDK control', async () => {
+    const control = vi.fn<NonNullable<ReplayViewerHttpDependencies['browserRecording']>>(
+      async (method) =>
+        method === 'inspect'
+          ? { supported: false, reason: 'desktop-required' }
+          : {
+              state: 'recording',
+              recordingId: 'recording-a',
+              elapsedMs: 10,
+              segments: 0,
+              bytes: 0,
+              droppedFrames: 0
+            }
+    )
+    const h = harness({ browserRecording: control })
+    const denied = await open(h)
+    expect((await denied.get('/api/project-recordings/inspect')).status).toBe(403)
+    const desktopCaller = createCallerContext({
+      ...h.owner,
+      clientId: 'desktop-client',
+      leaseId: 'desktop-lease',
+      surface: 'electron'
+    })
+    const desktop = await h.host.open(
+      { ...scope, executionInvocationId: 'invocation-a', runId: 'run-a' },
+      desktopCaller,
+      {
+        allowRecording: true,
+        allowInteraction: true
+      }
+    )
+    const boot = await http(desktop.url)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(desktop.url).origin
+    expect(
+      (
+        await http(origin + '/api/project-view', {
+          method: 'POST',
+          headers: { cookie, origin, 'content-type': 'application/json' },
+          body: '{}'
+        })
+      ).status
+    ).toBe(200)
+    const sdk = await open(h, { allowRecording: true })
+    expect(JSON.parse((await sdk.get('/api/project-recordings/inspect')).body)).toMatchObject({
+      sources: [{ sourceViewId: desktop.viewerId, label: 'Desktop project page' }]
+    })
+    expect(
+      (
+        await sdk.post('/api/project-recordings/start', {
+          requestId: 'start',
+          sourceViewId: desktop.viewerId
+        })
+      ).status
+    ).toBe(200)
+    expect(control).toHaveBeenLastCalledWith(
+      'start',
+      expect.objectContaining({
+        viewerId: sdk.access.viewerId,
+        target: scope,
+        host: expect.objectContaining({
+          viewerOrigin: origin,
+          caller: expect.objectContaining({ surface: 'electron' })
+        })
+      })
+    )
+    const foreign = await h.host.open({ ...scope, sessionId: 'foreign-session' }, desktopCaller, {
+      allowRecording: true
+    })
+    expect(
+      (
+        await sdk.post('/api/project-recordings/start', {
+          requestId: 'bad-source',
+          sourceViewId: foreign.viewerId
+        })
+      ).status
+    ).toBe(403)
+    const anotherRun = await h.host.open({ ...scope, runId: 'run-b' }, desktopCaller, {
+      allowRecording: true
+    })
+    expect(
+      (
+        await sdk.post('/api/project-recordings/start', {
+          requestId: 'other-run',
+          sourceViewId: anotherRun.viewerId
+        })
+      ).status
+    ).not.toBe(200)
+    control.mockImplementationOnce(async () => {
+      Object.assign(h.source, { identity: { ...h.source.identity, runId: 'replacement-run' } })
+      h.source.run!.runId = 'replacement-run'
+      return {
+        state: 'recording',
+        recordingId: 'replacement-recording',
+        elapsedMs: 0,
+        segments: 0,
+        bytes: 0,
+        droppedFrames: 0
+      }
+    })
+    expect(
+      (
+        await sdk.post('/api/project-recordings/start', {
+          requestId: 'stale-start',
+          sourceViewId: desktop.viewerId
+        })
+      ).status
+    ).toBe(403)
+    expect(control).toHaveBeenLastCalledWith(
+      'stop',
+      expect.objectContaining({
+        viewerId: sdk.access.viewerId,
+        request: expect.objectContaining({ recordingId: 'replacement-recording' })
+      })
+    )
+    Object.assign(h.source, { identity: { ...h.source.identity, runId: 'run-a' } })
+    h.source.run!.runId = 'run-a'
+    h.host.closeViewer(desktop.viewerId)
+    expect((await sdk.get('/api/project-recordings/status')).status).toBe(200)
+    expect(control).toHaveBeenLastCalledWith(
+      'status',
+      expect.objectContaining({ viewerId: sdk.access.viewerId })
+    )
+    expect(
+      (
+        await sdk.post('/api/project-recordings/stop', {
+          requestId: 'stop',
+          recordingId: 'recording-a'
+        })
+      ).status
+    ).toBe(200)
+  })
   it('opens a published archive on a new browser viewer from the current bound receipt without opening any project service', async () => {
     const archive = {
       projectId: scope.projectId,
@@ -794,6 +942,86 @@ describe('isolated Replay viewer HTTP host', () => {
 })
 
 describe('recorded Replay HTTP viewer', () => {
+  it('serves bounded browser video ranges and moments with no recording or execution authority', async () => {
+    const control = vi.fn(async () => ({}))
+    const h = harness({ recorded: 'browser', cancel: true, browserRecording: control })
+    const { payload, bytes } = browserRecordedFixture()
+    const access = await h.host.openRecorded(payload.receiving, h.owner, {
+      format: 'web-recording'
+    })
+    const boot = await http(access.url)
+    const cookie = boot.headers['set-cookie']![0].split(';')[0]
+    const origin = new URL(access.url).origin
+    const get = (
+      path: string,
+      headers: Record<string, string> = {},
+      method = 'GET'
+    ): ReturnType<typeof http> => http(origin + path, { method, headers: { cookie, ...headers } })
+    const post = (path: string, body: unknown): ReturnType<typeof http> =>
+      http(origin + path, {
+        method: 'POST',
+        headers: { cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    const mediaPath = '/api/recording/media?mediaKey=segment-a'
+    expect(JSON.parse((await get('/api/context')).body)).toMatchObject({
+      format: 'web-recording',
+      canRecord: false,
+      canCapture: false,
+      canInteract: false
+    })
+    expect((await get('/')).headers['content-security-policy']).toContain("media-src 'self'")
+    expect((await get(mediaPath)).body).toBe(bytes.toString())
+    const range = await get(mediaPath, { range: 'bytes=5-8' })
+    expect(range).toMatchObject({
+      status: 206,
+      body: bytes.subarray(5, 9).toString(),
+      headers: {
+        'accept-ranges': 'bytes',
+        'content-range': `bytes 5-8/${bytes.length}`,
+        'content-length': '4'
+      }
+    })
+    expect((await get(mediaPath, { range: 'bytes=-5' })).body).toBe(bytes.subarray(-5).toString())
+    expect((await get(mediaPath, { range: 'bytes=5-' })).body).toBe(bytes.subarray(5).toString())
+    expect(await get(mediaPath, {}, 'HEAD')).toMatchObject({
+      status: 200,
+      body: '',
+      headers: { 'content-length': String(bytes.length) }
+    })
+    for (const range of [
+      'bytes=999-',
+      'bytes=8-5',
+      'bytes=0-1,3-4',
+      'bytes=-0',
+      'bytes=-',
+      'bytes=9007199254740993-'
+    ])
+      expect(await get(mediaPath, { range })).toMatchObject({
+        status: 416,
+        body: '',
+        headers: { 'content-range': `bytes */${bytes.length}` }
+      })
+    expect((await get('/api/recording/media?mediaKey=foreign')).status).toBe(404)
+    expect(
+      JSON.parse((await post('/api/recording/moment', { offsetMs: 1500 })).body)
+    ).toMatchObject({
+      kind: 'recorded-project-moment',
+      offsetMs: 1500,
+      receiving: payload.receiving
+    })
+    expect(JSON.parse((await get('/api/recording/moment')).body)).toMatchObject({ offsetMs: 1500 })
+    expect((await post('/api/recording/moment', { offsetMs: 3000 })).status).not.toBe(200)
+    expect((await post('/api/project-recordings/start', { requestId: 'forbidden' })).status).toBe(
+      403
+    )
+    expect((await post('/api/recording/select', { stepKey: 'fake' })).status).not.toBe(200)
+    expect(control).not.toHaveBeenCalled()
+    expect(h.projectOpen).not.toHaveBeenCalled()
+    expect(h.cancel).not.toHaveBeenCalled()
+    h.setAuthorized(false)
+    expect((await get(mediaPath, { range: 'bytes=0-1' })).status).not.toBe(206)
+  })
   it('opens a project-only recording through the same bounded viewer with no Notebook or live service', async () => {
     const h = harness({ recorded: 'project', cancel: true })
     const { payload } = projectRecordedFixture()
