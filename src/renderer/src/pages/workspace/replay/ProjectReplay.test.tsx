@@ -52,11 +52,13 @@ it('renders a project-only recording without Notebook or a runtime API, keeping 
     ask = vi.fn()
   const read = vi.fn(async (key: string) => `data:image/png;base64,${key}`)
   render(<ProjectReplay track={track} readImage={read} onAskFrame={ask} />)
-  await screen.findByRole('img')
+  fireEvent.load(await screen.findByAltText('Recorded project image'))
   fireEvent.click(screen.getByRole('button', { name: 'Next image' }))
   await act(async () => {})
+  fireEvent.load(screen.getByAltText('Recorded project image'))
   expect(screen.getByRole('img').getAttribute('src')).toContain('image-1')
   fireEvent.click(screen.getByRole('button', { name: 'Ask about this frame' }))
+  await act(async () => {})
   expect(ask).toHaveBeenCalledWith(track.frames[1])
   expect(screen.queryByText('Notebook')).toBeNull()
 })
@@ -99,7 +101,7 @@ it('drops the displayed image when the receiving reader changes even if recordin
   const { rerender } = render(
     <ProjectReplay track={track} readImage={async () => 'data:image/png;base64,first'} />
   )
-  await screen.findByRole('img')
+  fireEvent.load(await screen.findByAltText('Recorded project image'))
   let finish!: (value: string | null) => void
   const otherReader = (): Promise<string | null> =>
     new Promise<string | null>((resolve) => {
@@ -148,7 +150,7 @@ it('follows the research timestamp without local playback controls or timer adva
       transport={{ recordedAt: 25, onSeekRecordedAt }}
     />
   )
-  await screen.findByRole('img')
+  fireEvent.load(await screen.findByAltText('Recorded project image'))
   expect(screen.getByRole('img').getAttribute('src')).toContain('image-0')
   expect(screen.queryByRole('slider')).toBeNull()
   expect(screen.queryByRole('button', { name: /(?:Play|Pause) replay/ })).toBeNull()
@@ -162,6 +164,7 @@ it('follows the research timestamp without local playback controls or timer adva
     />
   )
   await act(async () => {})
+  fireEvent.load(screen.getByAltText('Recorded project image'))
   expect(screen.getByRole('img').getAttribute('src')).toContain('image-1')
   expect(onSeekRecordedAt).not.toHaveBeenCalled()
 })
@@ -177,7 +180,7 @@ it('drops controlled images before their first capture, outside recording covera
       transport={{ recordedAt: 50, onSeekRecordedAt }}
     />
   )
-  await screen.findByRole('img')
+  fireEvent.load(await screen.findByAltText('Recorded project image'))
   for (const recordedAt of [5, 15, 81, undefined]) {
     rerender(
       <ProjectReplay
@@ -216,6 +219,7 @@ it('does not cite a loading or hidden controlled image and seeks the master cloc
   await act(async () => {
     finish('data:image/png;base64,image-1')
   })
+  fireEvent.load(screen.getByAltText('Recorded project image'))
   fireEvent.click(askButton)
   await act(async () => {})
   expect(onSeekRecordedAt).toHaveBeenCalledWith(50)
@@ -260,4 +264,24 @@ it('ignores a delayed image read after the research clock leaves its coverage', 
   })
   expect(screen.queryByRole('img')).toBeNull()
   expect(screen.getByText('No project image was recorded at this time.')).toBeTruthy()
+})
+
+it('does not allow referencing image URLs that have not decoded or failed to decode', async () => {
+  const ask = vi.fn()
+  render(
+    <ProjectReplay
+      track={projectRecordingToTrack(fixture())}
+      readImage={async () => 'data:image/png;base64,broken'}
+      onAskFrame={ask}
+      presentationMode="research"
+    />
+  )
+  const image = await screen.findByAltText('Recorded project image')
+  const button = screen.getByRole('button', { name: 'Ask about this frame' })
+  expect(button.hasAttribute('disabled')).toBe(true)
+  fireEvent.error(image)
+  expect(screen.getByText('Could not read the recorded material.')).toBeTruthy()
+  expect(button.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(button)
+  expect(ask).not.toHaveBeenCalled()
 })

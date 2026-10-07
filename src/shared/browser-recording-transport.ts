@@ -7,6 +7,7 @@ export type BrowserRecordingPlaybackState = {
   recordedAt?: number
   playing: boolean
   speed: number
+  presentation?: 'research'
 }
 
 type Envelope = {
@@ -17,6 +18,8 @@ type TransportBody =
   | { type: 'offer' | 'ready' | 'close' }
   | { type: 'state'; revision: number; playback: BrowserRecordingPlaybackState }
   | { type: 'seek'; revision: number; recordedAt: number }
+  | { type: 'action'; revision: number; disabled: boolean; pending: boolean }
+  | { type: 'ask'; revision: number }
 export type BrowserRecordingTransportMessage = Envelope & TransportBody
 
 export const isBrowserRecordingRecordedAt = (value: unknown): value is number =>
@@ -34,7 +37,8 @@ export const isBrowserRecordingPlaybackState = (
   value: unknown
 ): value is BrowserRecordingPlaybackState =>
   object(value) &&
-  keysWithin(value, ['recordedAt', 'playing', 'speed']) &&
+  keysWithin(value, ['recordedAt', 'playing', 'speed', 'presentation']) &&
+  (value.presentation === undefined || value.presentation === 'research') &&
   (value.recordedAt === undefined || isBrowserRecordingRecordedAt(value.recordedAt)) &&
   typeof value.playing === 'boolean' &&
   typeof value.speed === 'number' &&
@@ -55,6 +59,13 @@ export const isBrowserRecordingTransportMessage = (
   if (value.type === 'offer' || value.type === 'ready' || value.type === 'close')
     return keysWithin(value, envelope)
   if (!Number.isSafeInteger(value.revision) || (value.revision as number) < 1) return false
+  if (value.type === 'ask') return keysWithin(value, [...envelope, 'revision'])
+  if (value.type === 'action')
+    return (
+      keysWithin(value, [...envelope, 'revision', 'disabled', 'pending']) &&
+      typeof value.disabled === 'boolean' &&
+      typeof value.pending === 'boolean'
+    )
   if (value.type === 'state')
     return (
       keysWithin(value, [...envelope, 'revision', 'playback']) &&

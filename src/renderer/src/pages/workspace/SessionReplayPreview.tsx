@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { RunRecordingsPanel } from './replay/RunRecordingsPanel'
 import { useRecordingDiscovery } from './replay/use-recording-discovery'
 import { useRecordedMaterials } from './replay/use-recorded-materials'
+import { exitResearchReplayFullscreen } from './replay/exit-research-fullscreen'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -125,7 +126,14 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     discussionRequest.current = abort
     setDiscussionPending(true)
     setDiscussionError(undefined)
-    void openResearchDiscussion(context, abort.signal)
+    const captured = structuredClone(context)
+    const open = async (): Promise<boolean> => {
+      const exiting = exitResearchReplayFullscreen()
+      if (exiting) await exiting
+      if (abort.signal.aborted) return false
+      return openResearchDiscussion(captured, abort.signal)
+    }
+    void open()
       .then((accepted) => {
         if (!accepted) throw new Error('Discussion unavailable')
       })
@@ -138,6 +146,26 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           discussionRequest.current = undefined
           setDiscussionPending(false)
         }
+      })
+  }
+
+  const chooseConversation = (context: SessionDiscussionCapture): void => {
+    if (sourceUnavailable || discussionRequest.current) return
+    const captured = structuredClone(context)
+    const abort = new AbortController()
+    discussionRequest.current = abort
+    const open = async (): Promise<void> => {
+      const exiting = exitResearchReplayFullscreen()
+      if (exiting) await exiting
+      if (!abort.signal.aborted) setDiscussionCapture(captured)
+    }
+    void open()
+      .catch(() => {
+        if (!abort.signal.aborted)
+          setDiscussionError(t('Could not open the research discussion. Please retry.'))
+      })
+      .finally(() => {
+        if (discussionRequest.current === abort) discussionRequest.current = undefined
       })
   }
 
@@ -176,7 +204,8 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
         ],
         records: undefined
       })
-    }
+    },
+    'research'
   )
 
   useEffect(() => {
@@ -301,6 +330,43 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const notebookUnavailable = loaded.document.issues.some(
     (issue) => issue.code === 'notebook-unavailable'
   )
+  const materialNavigation = (
+    <div className="shrink-0 border-b border-border-200 px-3 py-2">
+      {materialsMode !== 'replay' ? (
+        <p
+          className="truncate text-xs font-medium text-text-300"
+          title={loaded.document.source.title}
+        >
+          {loaded.document.source.title}
+        </p>
+      ) : null}
+      <div role="group" aria-label={t('Research materials')} className="flex flex-wrap gap-1">
+        {(['replay', 'runs', 'records', 'files'] as const).map((mode) => (
+          <Button
+            key={mode}
+            variant={materialsMode === mode ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7 px-2 text-xs"
+            aria-pressed={materialsMode === mode}
+            onClick={() => {
+              materialsChosen.current = true
+              setEvidenceStep(undefined)
+              setEvidenceFile(undefined)
+              setMaterialsMode(mode)
+            }}
+          >
+            {mode === 'replay'
+              ? t('Session process')
+              : mode === 'runs'
+                ? t('Run recordings')
+                : mode === 'records'
+                  ? t('Original records')
+                  : t('Source files')}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
   return (
     <div
       ref={surface}
@@ -310,41 +376,9 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       onKeyDownCapture={keepCurrentMaterials}
       onWheelCapture={keepCurrentMaterials}
     >
-      <div className="shrink-0 border-b border-border-200 px-3 py-2">
-        {materialsMode !== 'replay' ? (
-          <p
-            className="truncate text-xs font-medium text-text-300"
-            title={loaded.document.source.title}
-          >
-            {loaded.document.source.title}
-          </p>
-        ) : null}
-        <div role="group" aria-label={t('Research materials')} className="flex flex-wrap gap-1">
-          {(['replay', 'runs', 'records', 'files'] as const).map((mode) => (
-            <Button
-              key={mode}
-              variant={materialsMode === mode ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-7 px-2 text-xs"
-              aria-pressed={materialsMode === mode}
-              onClick={() => {
-                materialsChosen.current = true
-                setEvidenceStep(undefined)
-                setEvidenceFile(undefined)
-                setMaterialsMode(mode)
-              }}
-            >
-              {mode === 'replay'
-                ? t('Session process')
-                : mode === 'runs'
-                  ? t('Run recordings')
-                  : mode === 'records'
-                    ? t('Original records')
-                    : t('Source files')}
-            </Button>
-          ))}
-        </div>
-      </div>
+      {materialsMode !== 'replay' || recordedMaterials.timingReady === false
+        ? materialNavigation
+        : null}
       {notebookUnavailable ? (
         <ErrorNotice
           inline
@@ -380,6 +414,8 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           </p>
         ) : (
           <ReplayPanel
+            presentationMode="research"
+            info={materialNavigation}
             recordedCoverage={recordedMaterials.timelineCoverage}
             recordedTimeOrigins={recordedMaterials.recordedTimeOrigins}
             expanded={expanded}
@@ -394,7 +430,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
             onViewChange={notebookUnavailable ? undefined : loaded.writer.enqueue}
             onAskStep={askStep}
             discussionPending={discussionPending}
-            onChooseConversation={setDiscussionCapture}
+            onChooseConversation={chooseConversation}
             onOpenEvidence={openEvidence}
           />
         )}

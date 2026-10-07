@@ -45,6 +45,7 @@ vi.mock('./replay/ReplayPanel', () => ({
     return (
       <div data-testid="replay-panel" data-active={String(props.active)} data-time-ms={timeMs}>
         {props.document.source.title}
+        {props.active ? props.info : null}
         <button onClick={() => setTimeMs(500)}>Play</button>
         <button data-replay-browse-steps>Browse steps</button>
       </div>
@@ -388,7 +389,9 @@ describe('SessionReplayPreview lifecycle', () => {
       mounted.rerender(<SessionReplayPreview item={item()} isActive />)
       expect(props().active).toBe(false)
       // The invoking control remains focused when explicit navigation exits evidence.
-      const invokingControl = screen.getByRole('button', { name: 'Session process' })
+      const invokingControl = document.createElement('button')
+      invokingControl.textContent = 'View replay from conversation'
+      document.body.append(invokingControl)
       invokingControl.focus()
       mounted.rerender(
         <SessionReplayPreview item={{ ...item(), replayRevealRequest: 1 }} isActive />
@@ -401,6 +404,7 @@ describe('SessionReplayPreview lifecycle', () => {
         await new Promise((resolve) => requestAnimationFrame(resolve))
       })
       expect(document.activeElement).toBe(invokingControl)
+      invokingControl.remove()
       expect(mocks.load).toHaveBeenCalledTimes(1)
       expect(mocks.get).toHaveBeenCalledTimes(1)
 
@@ -499,6 +503,101 @@ describe('SessionReplayPreview lifecycle', () => {
     expect(props().discussionPending).toBe(false)
     expect(screen.getByText('Could not open the research discussion. Please retry.')).toBeTruthy()
   })
+  it.each(['question', 'chooser'] as const)(
+    'freezes the %s reference before leaving research fullscreen and waits before native handoff',
+    async (action) => {
+      useNavigationStore.setState({ activeProjectId: 'project' })
+      let finish!: () => void
+      const exit = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      )
+      const full = document.createElement('div')
+      full.dataset.replayPresentation = 'research'
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => full })
+      Object.defineProperty(document, 'exitFullscreen', { configurable: true, value: exit })
+      try {
+        render(<SessionReplayPreview item={item()} />)
+        await screen.findByTestId('replay-panel')
+        const capture = {
+          projectId: 'project',
+          sourceSessionId: 'source',
+          sourceTitle: 'Study',
+          fingerprint: 'hash',
+          branchId: 'main',
+          stepId: step.id,
+          stepOffsetMs: 123,
+          evidence: [],
+          excerpt: 'Original frozen question',
+          stepTitle: 'Original frozen title'
+        }
+        act(() =>
+          action === 'question'
+            ? props().onAskStep(capture)
+            : props().onChooseConversation?.(capture)
+        )
+        capture.excerpt = 'Changed after capture'
+        capture.stepTitle = 'Changed after capture'
+        expect(exit).toHaveBeenCalledTimes(1)
+        expect(mocks.discuss).not.toHaveBeenCalled()
+        expect(screen.queryByRole('dialog')).toBeNull()
+        await act(async () => finish())
+        if (action === 'question') {
+          expect(mocks.discuss).toHaveBeenCalledWith(
+            expect.objectContaining({ stepOffsetMs: 123, excerpt: 'Original frozen question' }),
+            expect.any(AbortSignal)
+          )
+        } else {
+          expect(await screen.findByRole('dialog', { name: 'Ask in a conversation' })).toBeTruthy()
+          expect(screen.getByText('Original frozen title')).toBeTruthy()
+        }
+      } finally {
+        Reflect.deleteProperty(document, 'fullscreenElement')
+        Reflect.deleteProperty(document, 'exitFullscreen')
+      }
+    }
+  )
+
+  it('does not deliver a fullscreen question after its source preview was replaced', async () => {
+    let finish!: () => void
+    const full = document.createElement('div')
+    full.dataset.replayPresentation = 'research'
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => full })
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    })
+    try {
+      const mounted = render(<SessionReplayPreview item={item()} />)
+      await screen.findByTestId('replay-panel')
+      act(() =>
+        props().onAskStep({
+          projectId: 'project',
+          sourceSessionId: 'source',
+          sourceTitle: 'Study',
+          fingerprint: 'hash',
+          branchId: 'main',
+          stepId: step.id,
+          stepOffsetMs: 123,
+          evidence: [],
+          excerpt: 'Old source'
+        })
+      )
+      mounted.rerender(<SessionReplayPreview item={item('other')} />)
+      await waitFor(() => expect(props().document.source.sessionId).toBe('other'))
+      await act(async () => finish())
+      expect(mocks.discuss).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(document, 'fullscreenElement')
+      Reflect.deleteProperty(document, 'exitFullscreen')
+    }
+  })
+
   it('loads paused history and forwards active visibility changes', async () => {
     const mounted = render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')

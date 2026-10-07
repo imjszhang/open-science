@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import type { ReplayMaterialAction } from './replay-material-action'
 import {
   isBrowserRecordingPlaybackState,
   isBrowserRecordingRecordedAt,
@@ -39,7 +40,13 @@ export const useBrowserRecordingTransportHost = ({
   origin?: string
   enabled: boolean
   playback?: EmbeddedBrowserRecordingPlayback
-}): { onLoad: () => void } => {
+}): {
+  onLoad: () => void
+  action?: { disabled: boolean; pending: boolean }
+  ask: () => void
+} => {
+  const [action, setAction] = useState<{ disabled: boolean; pending: boolean }>()
+  const ask = useRef<() => void>(() => undefined)
   const latest = useRef(playback)
   useLayoutEffect(() => {
     latest.current = playback
@@ -56,6 +63,8 @@ export const useBrowserRecordingTransportHost = ({
     let revision = 0
     let attempts = 0
     const disconnect = (): void => {
+      setAction(undefined)
+      ask.current = () => undefined
       if (timer !== undefined) clearTimeout(timer)
       timer = undefined
       if (port) {
@@ -75,7 +84,8 @@ export const useBrowserRecordingTransportHost = ({
       const state = {
         recordedAt: current.recordedAt,
         playing: current.playing,
-        speed: current.speed
+        speed: current.speed,
+        ...(current.presentation ? { presentation: current.presentation } : {})
       }
       if (!isBrowserRecordingPlaybackState(state)) return
       port.postMessage(
@@ -100,9 +110,25 @@ export const useBrowserRecordingTransportHost = ({
           publish()
         } else if (acknowledged && event.data.type === 'seek' && event.data.revision <= revision) {
           latest.current?.onSeekRecordedAt(event.data.recordedAt)
+        } else if (
+          acknowledged &&
+          event.data.type === 'action' &&
+          event.data.revision <= revision &&
+          latest.current?.presentation === 'research'
+        ) {
+          const { disabled, pending } = event.data
+          setAction((previous) =>
+            previous?.disabled === disabled && previous.pending === pending
+              ? previous
+              : { disabled, pending }
+          )
         }
       }
       offeredPort.start()
+      ask.current = () => {
+        if (acknowledged && port === offeredPort && latest.current?.presentation === 'research')
+          offeredPort.postMessage(recordingTransportMessage({ type: 'ask', revision }))
+      }
       try {
         // Never use '*': the host already holds the exact admitted viewer origin.
         target.postMessage(recordingTransportMessage({ type: 'offer' }), origin, [channel.port2])
@@ -131,9 +157,13 @@ export const useBrowserRecordingTransportHost = ({
 
   useEffect(() => {
     send.current()
-  }, [playback?.recordedAt, playback?.playing, playback?.speed])
+  }, [playback?.recordedAt, playback?.playing, playback?.speed, playback?.presentation])
 
-  return { onLoad: useCallback(() => connect.current(), []) }
+  return {
+    onLoad: useCallback(() => connect.current(), []),
+    action,
+    ask: useCallback(() => ask.current(), [])
+  }
 }
 
 /** The caller enables this only for desktop presentation inside an iframe. Embedded controls
@@ -145,7 +175,10 @@ export const useBrowserRecordingTransportReceiver = ({
 }): {
   playback?: BrowserRecordingPlaybackState
   onSeekRecordedAt: (recordedAt: number) => void
+  onActionChange: (action: ReplayMaterialAction | undefined) => void
 } => {
+  const action = useRef<ReplayMaterialAction | undefined>(undefined)
+  const researchPresentation = useRef(false)
   const [playback, setPlayback] = useState<BrowserRecordingPlaybackState>()
   const [previousEnabled, setPreviousEnabled] = useState(enabled)
   if (previousEnabled !== enabled) {
@@ -153,6 +186,18 @@ export const useBrowserRecordingTransportReceiver = ({
     setPlayback(undefined)
   }
   const current = useRef<{ port: MessagePort; revision: number } | undefined>(undefined)
+  const publishAction = useCallback(() => {
+    const connection = current.current
+    if (!connection || connection.revision < 1 || !researchPresentation.current) return
+    connection.port.postMessage(
+      recordingTransportMessage({
+        type: 'action',
+        revision: connection.revision,
+        disabled: !action.current || Boolean(action.current.disabled),
+        pending: Boolean(action.current?.pending)
+      })
+    )
+  }, [])
   useEffect(() => {
     if (!enabled || window.parent === window) return
     const receive = (event: MessageEvent): void => {
@@ -177,7 +222,16 @@ export const useBrowserRecordingTransportReceiver = ({
           setPlayback(undefined)
         } else if (message.data.type === 'state' && message.data.revision > connection.revision) {
           connection.revision = message.data.revision
+          researchPresentation.current = message.data.playback.presentation === 'research'
           setPlayback(message.data.playback)
+          publishAction()
+        } else if (
+          message.data.type === 'ask' &&
+          message.data.revision === connection.revision &&
+          researchPresentation.current
+        ) {
+          const latest = action.current
+          if (latest && !latest.disabled && !latest.pending) latest.onAsk()
         }
       }
       port.start()
@@ -189,7 +243,7 @@ export const useBrowserRecordingTransportReceiver = ({
       closePort(current.current?.port)
       current.current = undefined
     }
-  }, [enabled])
+  }, [enabled, publishAction])
   const onSeekRecordedAt = useCallback((recordedAt: number): void => {
     const connection = current.current
     if (!connection || connection.revision < 1 || !isBrowserRecordingRecordedAt(recordedAt)) return
@@ -197,5 +251,12 @@ export const useBrowserRecordingTransportReceiver = ({
       recordingTransportMessage({ type: 'seek', revision: connection.revision, recordedAt })
     )
   }, [])
-  return { playback: enabled ? playback : undefined, onSeekRecordedAt }
+  const onActionChange = useCallback(
+    (next: ReplayMaterialAction | undefined) => {
+      action.current = next
+      publishAction()
+    },
+    [publishAction]
+  )
+  return { playback: enabled ? playback : undefined, onSeekRecordedAt, onActionChange }
 }

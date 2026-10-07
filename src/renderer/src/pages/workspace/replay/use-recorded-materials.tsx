@@ -36,18 +36,19 @@ import {
 import { readReplayResource } from './replay-resources'
 import { ResultsPanel, type ReplayResultEntry } from './results/ResultsPanel'
 import { ProjectReplay } from './ProjectReplay'
-import { RecordedFootageStatus } from './RecordedFootageStatus'
 import type { RecordingDiscovery } from './use-recording-discovery'
 import type { RecordingCandidate } from './recording-discovery'
 import type { ReplayMaterialView } from './ReplayStage'
 import { showRecordedObservation } from './open-run-observation'
+import { exitResearchReplayFullscreen } from './exit-research-fullscreen'
 
 type Candidate = RecordingCandidate & { localHistory?: boolean }
 export function useRecordedMaterials(
   document: ReplayDocument | undefined,
   discovery: RecordingDiscovery,
   legacySource?: ResearchDemoSource,
-  onAskSourceFile?: (resource: ReplayResource) => Promise<void> | void
+  onAskSourceFile?: (resource: ReplayResource) => Promise<void> | void,
+  presentationMode?: 'research'
 ): {
   views: ReplayMaterialView[]
   choose: (candidate: RecordingCandidate) => void
@@ -367,6 +368,10 @@ export function useRecordedMaterials(
       mediaKey,
       format: 'archive' in payload ? 'run-observation' : 'project-recording'
     })
+    if (presentationMode === 'research') {
+      const exiting = exitResearchReplayFullscreen()
+      if (exiting) await exiting
+    }
     const currentDestination = useRunObservationQuestionStore.getState().destination
     if (
       controller.signal.aborted ||
@@ -382,45 +387,48 @@ export function useRecordedMaterials(
   }
   const catalog = (
     <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
-      <p className="text-xs text-muted-foreground">
-        {t('Choose saved project evidence. No environment is started.')}
-      </p>
-      <select
-        aria-label={t('Project recording')}
-        className="w-full rounded border border-border-200 bg-bg-000 p-2 text-xs"
-        value={selected ? JSON.stringify(selected.target) : ''}
-        onChange={(event) => {
-          const next = candidates.find(
-            (candidate) => JSON.stringify(candidate.target) === event.target.value
-          )
-          if (next) choose(next, false)
-          else {
-            askRequest.current?.abort()
-            setSelectionInitialized(true)
-            setSelected(undefined)
-            setPayload(undefined)
-            setBrowserPayload(undefined)
-          }
-        }}
-      >
-        <option value="">{t('Research source files')}</option>
-        {selected &&
-        !candidates.some(
-          (candidate) => JSON.stringify(candidate.target) === JSON.stringify(selected.target)
-        ) ? (
-          // A later discovery page may replace a checkpoint in the catalog. Keep the user's
-          // explicitly opened immutable Version selected without silently switching its footage.
-          <option value={JSON.stringify(selected.target)} disabled>
-            {selected.resource.name}
-          </option>
-        ) : null}
-        {candidates.map((candidate) => (
-          <option key={JSON.stringify(candidate.target)} value={JSON.stringify(candidate.target)}>
-            {candidate.localHistory ? `${t('Local historical run')} · ` : ''}
-            {candidate.resource.name}
-          </option>
-        ))}
-      </select>
+      {presentationMode === 'research' && candidates.length <= 1 ? (
+        <p className="truncate text-sm text-text-200" title={selected?.resource.name}>
+          {selected?.resource.name ?? t('Project recording')}
+        </p>
+      ) : (
+        <select
+          aria-label={t('Project recording')}
+          className="w-full rounded border border-border-200 bg-bg-000 p-2 text-xs"
+          value={selected ? JSON.stringify(selected.target) : ''}
+          onChange={(event) => {
+            const next = candidates.find(
+              (candidate) => JSON.stringify(candidate.target) === event.target.value
+            )
+            if (next) choose(next, false)
+            else {
+              askRequest.current?.abort()
+              setSelectionInitialized(true)
+              setSelected(undefined)
+              setPayload(undefined)
+              setBrowserPayload(undefined)
+            }
+          }}
+        >
+          <option value="">{t('Research source files')}</option>
+          {selected &&
+          !candidates.some(
+            (candidate) => JSON.stringify(candidate.target) === JSON.stringify(selected.target)
+          ) ? (
+            // A later discovery page may replace a checkpoint in the catalog. Keep the user's
+            // explicitly opened immutable Version selected without silently switching its footage.
+            <option value={JSON.stringify(selected.target)} disabled>
+              {selected.resource.name}
+            </option>
+          ) : null}
+          {candidates.map((candidate) => (
+            <option key={JSON.stringify(candidate.target)} value={JSON.stringify(candidate.target)}>
+              {candidate.localHistory ? `${t('Local historical run')} · ` : ''}
+              {candidate.resource.name}
+            </option>
+          ))}
+        </select>
+      )}
       {selected?.localHistory ? (
         <p className="text-xs text-muted-foreground">
           {t('Recorded on this device. This is separate from the imported author’s evidence.')}
@@ -506,19 +514,6 @@ export function useRecordedMaterials(
                   </Button>
                 </div>
               ) : null}
-              {browserPayload && browserAligned ? (
-                <RecordedFootageStatus
-                  recording={browserPayload.recording}
-                  recordedAt={playback?.recordedAt}
-                  onSeek={(at) => playback?.onSeekRecordedAt(at)}
-                  onShowNotebook={() =>
-                    setRequest((previous) => ({
-                      id: 'notebook',
-                      revision: (previous?.revision ?? 0) + 1
-                    }))
-                  }
-                />
-              ) : null}
               {selected?.format === 'web-recording' && loadFailed ? (
                 <ErrorNotice
                   inline
@@ -528,6 +523,7 @@ export function useRecordedMaterials(
               ) : null}
               {selected?.format === 'web-recording' ? (
                 <RunObservationPreview
+                  presentationMode={presentationMode}
                   mode="recorded"
                   format="web-recording"
                   target={selected.target}
@@ -552,6 +548,7 @@ export function useRecordedMaterials(
                 (pending ??
                 (track ? (
                   <ProjectReplay
+                    presentationMode={presentationMode}
                     active={active}
                     transport={
                       playback
@@ -587,11 +584,13 @@ export function useRecordedMaterials(
       {
         id: 'results',
         label: t('Results'),
-        content: (_active, playback) => (
+        content: (active, playback) => (
           <>
             {catalog}
             {pending ?? (
               <ResultsPanel
+                active={active}
+                presentationMode={presentationMode}
                 entries={results}
                 recordedAt={playback?.continuous ? playback.recordedAt : undefined}
                 read={readResults}

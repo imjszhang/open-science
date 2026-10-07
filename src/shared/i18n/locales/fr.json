@@ -7627,6 +7627,19 @@
     "Jump to recorded footage": "Aller aux images enregistrées",
     "Loading replay…": "Chargement de la relecture…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "La lecture suit les horodatages de recherche enregistrés ; les lacunes n’impliquent pas une absence d’activité.",
-    "Could not reference this research evidence.": "Impossible de citer ces éléments de recherche."
+    "Could not reference this research evidence.": "Impossible de citer ces éléments de recherche.",
+    "Recorded media size": "Taille du média enregistré",
+    "Fit to window": "Adapter à la fenêtre",
+    "Actual size (100%)": "Taille réelle (100 %)",
+    "Playback options": "Options de lecture",
+    "Ask about this run": "Poser une question sur cette exécution",
+    "Ask about this record": "Poser une question sur cet enregistrement",
+    "Ask about this content": "Poser une question sur ce contenu",
+    "Collapse preview": "Réduire l’aperçu",
+    "Expand preview": "Agrandir l’aperçu",
+    "Original conversation": "Conversation d’origine",
+    "Question options": "Options de question",
+    "Result details": "Détails du résultat",
+    "Saved reference details": "Détails de la référence enregistrée"
   }
 }

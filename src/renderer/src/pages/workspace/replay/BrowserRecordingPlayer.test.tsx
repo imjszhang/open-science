@@ -6,6 +6,7 @@ import { BrowserRecordingPlayer } from './BrowserRecordingPlayer'
 import { segmentAt } from './browser-recording-playback'
 
 beforeEach(() => {
+  vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(2)
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined)
@@ -566,4 +567,99 @@ it('keeps a failed or retried recording moment unavailable until a fresh frame d
   expect(ask.hasAttribute('disabled')).toBe(true)
   fireEvent.loadedData(video)
   expect(ask.hasAttribute('disabled')).toBe(false)
+})
+
+it('registers the research footer action with current decoded time and revokes it across gaps', async () => {
+  const recording = browserRecordingFixture()
+  const ask = vi.fn()
+  const onSeek = vi.fn()
+  const onActionChange = vi.fn()
+  const props = {
+    recording,
+    mediaUrl,
+    onAskMoment: ask,
+    presentationMode: 'research' as const,
+    onActionChange
+  }
+  const { rerender, unmount } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1000, playing: false, speed: 1, onSeek }}
+    />
+  )
+  expect(screen.queryByRole('button', { name: 'Ask about this moment' })).toBeNull()
+  expect(onActionChange.mock.lastCall?.[0].disabled).toBe(true)
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  const action = onActionChange.mock.lastCall?.[0]
+  expect(action.disabled).toBe(false)
+  video.currentTime = 1.346
+  await act(async () => action.onAsk())
+  expect(ask).toHaveBeenCalledWith(1346)
+  ask.mockClear()
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 4500, playing: false, speed: 1, onSeek }}
+    />
+  )
+  expect(onActionChange.mock.lastCall?.[0].disabled).toBe(true)
+  await act(async () => action.onAsk())
+  expect(ask).not.toHaveBeenCalled()
+  unmount()
+  expect(onActionChange).toHaveBeenLastCalledWith(undefined)
+})
+
+it('disables a buffered or seeking frame and restores it only after decoding resumes', () => {
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={vi.fn()}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage')
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  const ask = screen.getByRole('button', { name: 'Ask about this moment' })
+  expect(ask.hasAttribute('disabled')).toBe(false)
+  fireEvent.waiting(video)
+  expect(ask.hasAttribute('disabled')).toBe(true)
+  fireEvent.canPlay(video)
+  expect(ask.hasAttribute('disabled')).toBe(false)
+  fireEvent.seeking(video)
+  expect(ask.hasAttribute('disabled')).toBe(true)
+  fireEvent.seeked(video)
+  expect(ask.hasAttribute('disabled')).toBe(false)
+})
+
+it('uses decoded native dimensions and does not reload media when changing fit mode', () => {
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      presentationMode="research"
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperties(video, {
+    videoWidth: { configurable: true, value: 540 },
+    videoHeight: { configurable: true, value: 960 }
+  })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  vi.mocked(HTMLMediaElement.prototype.load).mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Actual size (100%)' }))
+  expect(screen.getByTestId('recorded-video-surface').style.width).toBe('540px')
+  expect(screen.getByTestId('recorded-video-surface').style.height).toBe('960px')
+  Object.defineProperties(video, {
+    videoWidth: { configurable: true, value: 1920 },
+    videoHeight: { configurable: true, value: 1080 }
+  })
+  fireEvent(video, new Event('resize'))
+  expect(screen.getByTestId('recorded-video-surface').style.width).toBe('1920px')
+  fireEvent.click(screen.getByRole('button', { name: 'Fit to window' }))
+  expect(screen.getByLabelText('Recorded webpage')).toBe(video)
+  expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled()
 })

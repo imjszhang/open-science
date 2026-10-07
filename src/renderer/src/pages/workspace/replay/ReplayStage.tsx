@@ -91,6 +91,19 @@ export type ReplayMaterialPlayback = {
 }
 
 export type ReplayStageProps = {
+  presentationMode?: 'research'
+  selectedContent?: {
+    kind: 'conversation' | 'notebook'
+    stepId: string
+    runId?: string
+    savedHistory?: boolean
+  }
+  onSelectContent?: (selection: {
+    kind: 'conversation' | 'notebook'
+    stepId: string
+    runId?: string
+    savedHistory?: boolean
+  }) => void
   materialPlayback?: ReplayMaterialPlayback
   materialViews?: readonly ReplayMaterialView[]
   materialsActive?: boolean
@@ -391,6 +404,8 @@ const StepConversation = memo(function StepConversation({
   messageCharacters,
   showResults,
   interactive,
+  selectable = false,
+  selected = false,
   runDetails,
   artifactResources,
   resources,
@@ -403,6 +418,8 @@ const StepConversation = memo(function StepConversation({
   onSelectResource?: (id: string, element?: HTMLElement) => void
   runDetails: Readonly<Record<string, ReplayNotebookRunDetails>>
   interactive: boolean
+  selectable?: boolean
+  selected?: boolean
   step: ReplayStep
   active: boolean
   messageCharacters: number
@@ -429,10 +446,11 @@ const StepConversation = memo(function StepConversation({
     <article
       data-replay-step={step.id}
       data-replay-active={active || undefined}
-      tabIndex={interactive ? -1 : undefined}
+      tabIndex={selectable ? 0 : interactive ? -1 : undefined}
+      data-replay-selected={selected || undefined}
       className={
         interactive
-          ? 'min-w-0 py-2'
+          ? `min-w-0 py-2 outline-none focus-visible:keyboard-focus ${selected ? 'rounded-lg ring-1 ring-inset ring-border-100' : ''}`
           : `rounded-xl border p-4 ${active ? 'border-border-100 bg-bg-000' : 'border-border-200 bg-bg-10'}`
       }
     >
@@ -614,6 +632,9 @@ const usePrependAnchor = (
 const ReplayStageContent = ({
   document: replayDocument,
   fitContainer = false,
+  presentationMode,
+  onSelectContent,
+  selectedContent,
   primaryContent,
   primaryLabel,
   followPrimary = true,
@@ -653,6 +674,7 @@ const ReplayStageContent = ({
   readinessTimeoutMs
 }: ReplayStageProps): React.JSX.Element => {
   const { t } = useReplayTranslation()
+  const researchPresentation = presentationMode === 'research' && fitContainer && !primaryContent
   const stage = useRef<HTMLDivElement>(null)
   const captureTranscript = useRef<HTMLDivElement>(null)
   const material = useRef<HTMLDivElement>(null)
@@ -791,7 +813,7 @@ const ReplayStageContent = ({
     .find((step) => step.runs.length || step.resourceIds.length)
   const inspecting = Boolean(selectedResource)
   const hasMaterial = Boolean(materialStep) || inspecting
-  const showMaterialPane = materialsOpen && !fullHistory
+  const showMaterialPane = materialsOpen && (researchPresentation || !fullHistory)
   const materialRuns =
     selectedResource && !fitContainer
       ? []
@@ -911,7 +933,7 @@ const ReplayStageContent = ({
     }
     // Follow the recorded Notebook cell, not the Files list below it. Manual inspection
     // suspends this in the owner; explicit play/seek resumes without moving pane chrome.
-    if (!wide || !materialsOpen || !followNotebook || inspecting) return
+    if ((!wide && !researchPresentation) || !materialsOpen || !followNotebook || inspecting) return
     const current = Array.from(
       viewport.querySelectorAll<HTMLElement>('[data-replay-notebook-run]')
     ).find((node) => node.dataset.replayNotebookRun === latestNotebookRunId)
@@ -942,6 +964,7 @@ const ReplayStageContent = ({
     selectedResource,
     inspecting,
     wide,
+    researchPresentation,
     materialsOpen,
     followNotebook,
     latestNotebookRunId,
@@ -1057,7 +1080,9 @@ const ReplayStageContent = ({
     <div
       ref={stage}
       style={fitContainer ? { ...style, width: '100%', height: '100%' } : style}
-      data-replay-layout={fitContainer ? 'interactive' : 'capture'}
+      data-replay-layout={
+        researchPresentation ? 'research' : fitContainer ? 'interactive' : 'capture'
+      }
       data-testid="replay-stage"
       data-replay-frame-ready={frameReady}
       data-replay-frame-key={frameKey}
@@ -1066,6 +1091,29 @@ const ReplayStageContent = ({
       data-replay-position={scene.positionMs}
       data-replay-branch={scene.branchId}
       className="@container/replay flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden bg-bg-000 text-text-100"
+      onFocusCapture={(event) => {
+        if (
+          !researchPresentation ||
+          !(event.target instanceof Element) ||
+          !event.target.matches(':focus-visible')
+        )
+          return
+        const record = event.target.closest<HTMLElement>('[data-replay-step]')?.dataset.replayStep
+        const run =
+          event.target.closest<HTMLElement>('[data-replay-run-item]')?.dataset.replayRunItem
+        const stepId = run
+          ? branchSteps.find((step) => step.runs.some((item) => item.runId === run))?.id
+          : record
+        if (stepId) {
+          onInspect?.()
+          onSelectContent?.({
+            kind: run ? 'notebook' : 'conversation',
+            stepId,
+            runId: run,
+            savedHistory: !run && fullHistory
+          })
+        }
+      }}
       onWheelCapture={(event) => {
         if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
@@ -1076,6 +1124,21 @@ const ReplayStageContent = ({
         if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
+        if (researchPresentation && event.target instanceof Element) {
+          const record = event.target.closest<HTMLElement>('[data-replay-step]')?.dataset.replayStep
+          const run =
+            event.target.closest<HTMLElement>('[data-replay-run-item]')?.dataset.replayRunItem
+          const stepId = run
+            ? branchSteps.find((step) => step.runs.some((item) => item.runId === run))?.id
+            : record
+          if (stepId)
+            onSelectContent?.({
+              kind: run ? 'notebook' : 'conversation',
+              stepId,
+              runId: run,
+              savedHistory: !run && fullHistory
+            })
+        }
         // A file's click already freezes and selects its exact Version atomically. Freezing
         // on pointerdown adds the inspection banner and moves this row before pointerup,
         // so an ordinary first click can miss the button entirely.
@@ -1105,7 +1168,12 @@ const ReplayStageContent = ({
           event.preventDefault()
           event.stopPropagation()
           onCloseFiles?.()
-        } else if (event.key === 'Escape' && fitContainer && materialsOpen) {
+        } else if (
+          event.key === 'Escape' &&
+          fitContainer &&
+          materialsOpen &&
+          !researchPresentation
+        ) {
           event.preventDefault()
           event.stopPropagation()
           onCloseMaterials?.()
@@ -1131,10 +1199,12 @@ const ReplayStageContent = ({
       ) : null}
       {fitContainer && !primaryContent ? (
         <ReplayCurrentContext
+          compact={researchPresentation}
           scene={scene}
           steps={branchSteps}
           onHistory={() => {
             onInspect?.()
+            if (researchPresentation) onMaterialViewChange?.('conversation')
             setFullHistory(true)
             setBrowsingConversation(true)
             const index = historicalMessages.findIndex((step) => step.id === scene.step?.id)
@@ -1150,7 +1220,9 @@ const ReplayStageContent = ({
           }
         />
       ) : null}
-      {fitContainer && fullHistory ? (
+      {fitContainer &&
+      fullHistory &&
+      (!researchPresentation || materialViewId === 'conversation') ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-200 px-3 py-1 text-xs">
           <span>{t('Browsing saved history; playback position is unchanged.')}</span>
           <Button
@@ -1247,6 +1319,12 @@ const ReplayStageContent = ({
               {transcriptSteps.map((step) => (
                 <StepConversation
                   interactive={fitContainer}
+                  selectable={researchPresentation}
+                  selected={
+                    researchPresentation &&
+                    selectedContent?.kind === 'conversation' &&
+                    selectedContent.stepId === step.id
+                  }
                   artifactResources={replayDocument.resources}
                   resources={resources}
                   visibleResourceIds={scene.visibleResourceIds}
@@ -1307,7 +1385,7 @@ const ReplayStageContent = ({
           }
           style={{ scrollbarWidth: fitContainer ? undefined : 'none' }}
         >
-          {fitContainer && !inspecting ? (
+          {fitContainer && !researchPresentation && !inspecting ? (
             <div className="flex h-9 min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border-200 px-3">
               {materialViews?.length ? (
                 <div
@@ -1435,7 +1513,7 @@ const ReplayStageContent = ({
                         run={detail.run}
                         index={notebookIndices.get(index.runId) ?? runOffset}
                         showOutput={
-                          fullHistory
+                          fullHistory && !researchPresentation
                             ? true
                             : materialPlayback?.continuous &&
                                 materialPlayback.recordedAt !== undefined
@@ -1464,7 +1542,25 @@ const ReplayStageContent = ({
                       </p>
                     )
                   return fitContainer ? (
-                    <div key={index.runId} data-replay-run-item={index.runId}>
+                    <div
+                      key={index.runId}
+                      data-replay-run-item={index.runId}
+                      tabIndex={researchPresentation ? 0 : undefined}
+                      className={
+                        researchPresentation
+                          ? 'outline-none focus-visible:keyboard-focus data-[replay-selected]:ring-1 data-[replay-selected]:ring-inset data-[replay-selected]:ring-border-100'
+                          : undefined
+                      }
+                      data-replay-selected={
+                        (researchPresentation &&
+                          selectedContent?.kind === 'notebook' &&
+                          (!selectedContent.runId || selectedContent.runId === index.runId) &&
+                          branchSteps
+                            .find((step) => step.id === selectedContent.stepId)
+                            ?.runs.some((run) => run.runId === index.runId)) ||
+                        undefined
+                      }
+                    >
                       {content}
                     </div>
                   ) : (

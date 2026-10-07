@@ -12,6 +12,8 @@ export const researchReplayPositionSchema = z
     branchId: id,
     stepId: id,
     scope: z.enum(['step', 'session']).optional(),
+    notebookRunId: id.optional(),
+    inspectStep: z.enum(['visible', 'saved-history']).optional(),
     timeMs: z.number().finite().nonnegative(),
     recordedAt: z.number().finite().nonnegative().optional(),
     resourceId: id.optional(),

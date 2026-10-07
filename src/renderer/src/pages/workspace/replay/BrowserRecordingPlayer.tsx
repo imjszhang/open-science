@@ -2,6 +2,8 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useSta
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
+import { RecordedMediaViewport } from './RecordedMediaViewport'
+import { useReplayMaterialAction, type ReplayMaterialAction } from './replay-material-action'
 import { recordingTime, segmentAt } from './browser-recording-playback'
 import type {
   BrowserRecording,
@@ -23,6 +25,9 @@ export type BrowserRecordingPlayerProps = {
   mediaUrl: (mediaKey: string) => string | null
   onAskMoment?: (offsetMs: number) => void | Promise<void>
   transport?: BrowserRecordingTransport
+  presentationMode?: 'standalone' | 'research'
+  /** Used by the trusted recorded-viewer bridge; never a live project capability. */
+  onActionChange?: (action: ReplayMaterialAction | undefined) => void
 }
 /** Passive media only: no project address, HTML, environment or execution capability enters here. */
 const BrowserRecordingPlayerContent = ({
@@ -30,7 +35,9 @@ const BrowserRecordingPlayerContent = ({
   active = true,
   mediaUrl,
   onAskMoment,
-  transport
+  transport,
+  presentationMode = 'standalone',
+  onActionChange
 }: BrowserRecordingPlayerProps): React.JSX.Element => {
   const { t } = useTranslation()
   const video = useRef<HTMLVideoElement>(null)
@@ -60,6 +67,11 @@ const BrowserRecordingPlayerContent = ({
   const [heldOffset, setHeldOffset] = useState<number>()
   const [asking, setAsking] = useState(false)
   const [askFailed, setAskFailed] = useState(false)
+  const [decodedSize, setDecodedSize] = useState<{
+    source: string | undefined
+    width: number
+    height: number
+  }>()
   const mounted = useRef(true)
   const desiredOffset = useRef(firstOffset)
   const segment = segmentAt(recording, offsetMs)
@@ -250,96 +262,176 @@ const BrowserRecordingPlayerContent = ({
     recording.coverage.droppedFrames > 0 ||
     recording.coverage.gaps.length > 0 ||
     !['finished', 'stopped'].includes(recording.coverage.stopReason)
+  const askDisabled = !active || !segment || !source || asking || failed || loading
+  const ask = (): void => {
+    const element = video.current
+    if (
+      askDisabled ||
+      !onAskMoment ||
+      !element ||
+      !segment ||
+      element.seeking ||
+      element.readyState < 2
+    )
+      return
+    // Capture the actual decoded media position, never a stale research-clock timestamp.
+    element.pause()
+    const atMs = Math.min(
+      segment.endMs - 1,
+      Math.max(segment.startMs, segment.startMs + Math.round(element.currentTime * 1000))
+    )
+    if (!Number.isFinite(atMs)) return
+    if (transport) transport.onSeek(atMs)
+    else {
+      desiredOffset.current = atMs
+      setOffsetMs(atMs)
+      setPlaying(false)
+    }
+    setAsking(true)
+    setAskFailed(false)
+    void Promise.resolve()
+      .then(() => onAskMoment(atMs))
+      .catch(() => {
+        if (mounted.current) setAskFailed(true)
+      })
+      .finally(() => {
+        if (mounted.current) setAsking(false)
+      })
+  }
+  const actionLabel = active && onAskMoment ? t('Ask about this moment') : undefined
+  const materialAction = actionLabel
+    ? { label: actionLabel, disabled: askDisabled, pending: asking, onAsk: ask }
+    : undefined
+  const sharedAction = useReplayMaterialAction(materialAction)
+  const latestAction = useRef(materialAction)
+  const actionCallback = useRef(onActionChange)
+  useLayoutEffect(() => {
+    latestAction.current = materialAction
+    actionCallback.current = onActionChange
+  })
+  const hasActionCallback = Boolean(onActionChange)
+  useLayoutEffect(() => {
+    if (!hasActionCallback || !actionLabel) return
+    actionCallback.current?.({
+      label: actionLabel,
+      disabled: askDisabled,
+      pending: asking,
+      onAsk: () => {
+        const action = latestAction.current
+        if (action && !action.disabled && !action.pending) action.onAsk()
+      }
+    })
+    return () => actionCallback.current?.(undefined)
+  }, [hasActionCallback, actionLabel, askDisabled, asking])
+  const compact = presentationMode === 'research' || sharedAction
+  const centralized = sharedAction || (presentationMode === 'research' && hasActionCallback)
+  const dimensions =
+    decodedSize && decodedSize.source === sourceIdentity && decodedSize.width && decodedSize.height
+      ? decodedSize
+      : segment
+  const status = failed ? (
+    <ErrorNotice
+      inline
+      title={t('Could not play the recorded footage.')}
+      primaryButton={{
+        label: t('Retry'),
+        onClick: () => {
+          setFailedSource(undefined)
+          setDecodedSource(undefined)
+          clearHeldFrame()
+          video.current?.load()
+        }
+      }}
+    />
+  ) : source && segment ? (
+    loading ? (
+      <div role="status" data-testid="recorded-segment-loading">
+        {t('Loading…')}
+      </div>
+    ) : null
+  ) : segment && active ? (
+    <ErrorNotice inline title={t('Could not read the recorded material.')} />
+  ) : (
+    <div role="status" className="max-w-prose text-center">
+      <p>
+        {!aligned
+          ? t('This recording cannot be aligned with the research replay timeline.')
+          : gap?.reason === 'paused'
+            ? t('Recording was paused at this time.')
+            : compact && offsetMs < firstOffset
+              ? t('The project recording has not started yet.')
+              : compact && offsetMs >= (recording.segments.at(-1)?.endMs ?? recording.durationMs)
+                ? t('The project recording has ended.')
+                : t('No webpage footage was recorded at this time.')}
+      </p>
+      {next && aligned ? (
+        <Button className="mt-3" size="sm" variant="outline" onClick={() => seek(next.startMs)}>
+          {compact && offsetMs < firstOffset
+            ? t('Jump to recorded footage')
+            : t('Go to next recorded moment')}
+        </Button>
+      ) : null}
+    </div>
+  )
   return (
     <section
       ref={surface}
       aria-label={t('Project replay')}
-      className="min-h-0 flex-1 space-y-3 overflow-auto p-3"
+      className={
+        compact
+          ? 'flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3'
+          : 'flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3'
+      }
       data-testid="browser-recording-player"
     >
-      <p className="text-xs text-muted-foreground">
-        {controlled
-          ? t('Follows playback progress')
-          : t('Recorded webpage footage. Playback does not run the project.')}
-      </p>
-      {incomplete ? (
+      {!compact ? (
+        <p className="text-xs text-muted-foreground">
+          {controlled
+            ? t('Follows playback progress')
+            : t('Recorded webpage footage. Playback does not run the project.')}
+        </p>
+      ) : null}
+      {incomplete && !compact ? (
         <p role="status" className="text-xs text-status-warning-foreground">
           {t('This project recording is incomplete. Missing activity is not reconstructed.')}
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        {!controlled ? (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!active || !segment || !source || failed}
-              onClick={() => setPlaying(!playing)}
-            >
-              {playing ? t('Pause replay') : t('Play replay')}
+      {!controlled || (onAskMoment && !centralized) ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {!controlled ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!active || !segment || !source || failed}
+                onClick={() => setPlaying(!playing)}
+              >
+                {playing ? t('Pause replay') : t('Play replay')}
+              </Button>
+              <span className="font-mono text-xs" aria-live="off">
+                {recordingTime(displayedOffset)} / {recordingTime(recording.durationMs)}
+              </span>
+              <select
+                aria-label={t('Playback speed')}
+                value={speed}
+                className="rounded border border-border-200 bg-bg-000 p-1 text-xs"
+                onChange={(event) => setSpeed(Number(event.target.value))}
+              >
+                {[0.5, 1, 1.5, 2].map((rate) => (
+                  <option key={rate} value={rate}>
+                    {t('{{speed}}×', { speed: rate })}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
+          {onAskMoment && !centralized ? (
+            <Button size="sm" variant="outline" disabled={askDisabled} onClick={ask}>
+              {t('Ask about this moment')}
             </Button>
-            <span className="font-mono text-xs" aria-live="off">
-              {recordingTime(displayedOffset)} / {recordingTime(recording.durationMs)}
-            </span>
-            <select
-              aria-label={t('Playback speed')}
-              value={speed}
-              className="rounded border border-border-200 bg-bg-000 p-1 text-xs"
-              onChange={(event) => setSpeed(Number(event.target.value))}
-            >
-              {[0.5, 1, 1.5, 2].map((rate) => (
-                <option key={rate} value={rate}>
-                  {t('{{speed}}×', { speed: rate })}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : null}
-        {onAskMoment ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!active || !segment || !source || asking || failed || loading}
-            onClick={() => {
-              // timeupdate is deliberately sparse. Freeze and read the actual media position,
-              // rather than citing the earlier timestamp most recently rendered by React.
-              const element = video.current
-              element?.pause()
-              const atMs =
-                element &&
-                segment &&
-                element.readyState >= 1 &&
-                Number.isFinite(element.currentTime)
-                  ? Math.min(
-                      segment.endMs - 1,
-                      Math.max(
-                        segment.startMs,
-                        segment.startMs + Math.round(element.currentTime * 1000)
-                      )
-                    )
-                  : Math.round(offsetMs)
-              if (transport) transport.onSeek(atMs)
-              else {
-                desiredOffset.current = atMs
-                setOffsetMs(atMs)
-                setPlaying(false)
-              }
-              setAsking(true)
-              setAskFailed(false)
-              void Promise.resolve()
-                .then(() => onAskMoment(atMs))
-                .catch(() => {
-                  if (mounted.current) setAskFailed(true)
-                })
-                .finally(() => {
-                  if (mounted.current) setAsking(false)
-                })
-            }}
-          >
-            {t('Ask about this moment')}
-          </Button>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
       {!controlled ? (
         <input
           type="range"
@@ -352,136 +444,124 @@ const BrowserRecordingPlayerContent = ({
           onChange={(event) => seek(Number(event.target.value))}
         />
       ) : null}
-      {source && segment ? (
-        <div
-          className="relative max-h-[65vh] w-full bg-bg-100"
-          style={{ aspectRatio: `${segment.width} / ${segment.height}` }}
-          data-testid="recorded-video-surface"
+      <div
+        className={compact ? 'flex min-h-0 flex-1' : 'flex h-[min(65vh,480px)] min-h-48 shrink-0'}
+      >
+        <RecordedMediaViewport
+          width={dimensions?.width}
+          height={dimensions?.height}
+          status={status}
+          surfaceTestId="recorded-video-surface"
+          metadata={compact ? t('Recorded webpage') : undefined}
         >
-          <video
-            key={segment.segmentId}
-            ref={video}
-            src={source}
-            muted
-            playsInline
-            preload="auto"
-            aria-label={t('Recorded webpage')}
-            className="absolute inset-0 h-full w-full object-contain"
-            style={{ visibility: loading ? 'hidden' : 'visible' }}
-            onLoadedMetadata={(event) => {
-              if (event.currentTarget !== video.current || !active) return
-              event.currentTarget.currentTime = Math.max(
-                0,
-                ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
-              )
-              event.currentTarget.playbackRate = speed
-            }}
-            onLoadedData={(event) => decoded(event.currentTarget)}
-            onSeeked={(event) => {
-              if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
-            }}
-            onTimeUpdate={(event) => {
-              if (controlled || event.currentTarget !== video.current || !active || loading) return
-              const value = Math.min(
-                segment.endMs - 1,
-                segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
-              )
-              desiredOffset.current = value
-              setOffsetMs(value)
-            }}
-            onEnded={(event) => {
-              if (event.currentTarget !== video.current || !active) return
-              if (controlled) {
-                event.currentTarget.pause()
-                return
-              }
-              const following = recording.segments.find((item) => item.startMs >= segment.endMs)
-              if (
-                following &&
-                following.startMs - segment.endMs <= 250 &&
-                !recording.coverage.gaps.some(
-                  (item) => item.startMs < following.startMs && item.endMs > segment.endMs
-                )
-              ) {
-                retainDecodedFrame()
-                setDecodedSource(undefined)
-                desiredOffset.current = following.startMs
-                setOffsetMs(following.startMs)
-              } else {
-                clearHeldFrame()
-                setPlaying(false)
-                desiredOffset.current = Math.min(recording.durationMs - 1, segment.endMs)
-                setOffsetMs(desiredOffset.current)
-              }
-            }}
-            onError={(event) => {
-              if (event.currentTarget !== video.current || !active) return
-              setPlaying(false)
-              clearHeldFrame()
-              setDecodedSource(undefined)
-              setFailedSource(source ?? undefined)
-            }}
-          />
-          <canvas
-            ref={setHeldFrameNode}
-            aria-hidden="true"
-            hidden={!loading || heldOffset === undefined}
-            className="absolute inset-0 h-full w-full object-contain"
-            data-testid="held-recorded-frame"
-          />
-          {loading ? (
-            <div
-              role="status"
-              className="absolute inset-0 flex items-center justify-center bg-bg-000/40 text-sm"
-              data-testid="recorded-segment-loading"
-            >
-              {t('Loading…')}
-            </div>
+          {source && segment ? (
+            <>
+              <video
+                key={segment.segmentId}
+                ref={video}
+                src={source}
+                muted
+                playsInline
+                preload="auto"
+                aria-label={t('Recorded webpage')}
+                className="absolute inset-0 h-full w-full object-contain"
+                style={{ visibility: loading || failed ? 'hidden' : 'visible' }}
+                onLoadedMetadata={(event) => {
+                  if (event.currentTarget !== video.current || !active) return
+                  setDecodedSize({
+                    source: sourceIdentity,
+                    width: event.currentTarget.videoWidth,
+                    height: event.currentTarget.videoHeight
+                  })
+                  event.currentTarget.currentTime = Math.max(
+                    0,
+                    ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
+                  )
+                  event.currentTarget.playbackRate = speed
+                }}
+                onResize={(event) => {
+                  if (event.currentTarget === video.current)
+                    setDecodedSize({
+                      source: sourceIdentity,
+                      width: event.currentTarget.videoWidth,
+                      height: event.currentTarget.videoHeight
+                    })
+                }}
+                onLoadedData={(event) => decoded(event.currentTarget)}
+                onCanPlay={(event) => {
+                  if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
+                }}
+                onWaiting={() => setDecodedSource(undefined)}
+                onSeeking={() => setDecodedSource(undefined)}
+                onSeeked={(event) => {
+                  if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
+                }}
+                onTimeUpdate={(event) => {
+                  if (controlled || event.currentTarget !== video.current || !active || loading)
+                    return
+                  const value = Math.min(
+                    segment.endMs - 1,
+                    segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
+                  )
+                  desiredOffset.current = value
+                  setOffsetMs(value)
+                }}
+                onEnded={(event) => {
+                  if (event.currentTarget !== video.current || !active) return
+                  if (controlled) {
+                    event.currentTarget.pause()
+                    return
+                  }
+                  const following = recording.segments.find((item) => item.startMs >= segment.endMs)
+                  if (
+                    following &&
+                    following.startMs - segment.endMs <= 250 &&
+                    !recording.coverage.gaps.some(
+                      (item) => item.startMs < following.startMs && item.endMs > segment.endMs
+                    )
+                  ) {
+                    retainDecodedFrame()
+                    setDecodedSource(undefined)
+                    desiredOffset.current = following.startMs
+                    setOffsetMs(following.startMs)
+                  } else {
+                    clearHeldFrame()
+                    setPlaying(false)
+                    desiredOffset.current = Math.min(recording.durationMs - 1, segment.endMs)
+                    setOffsetMs(desiredOffset.current)
+                  }
+                }}
+                onError={(event) => {
+                  if (event.currentTarget !== video.current || !active) return
+                  setPlaying(false)
+                  clearHeldFrame()
+                  setDecodedSource(undefined)
+                  setFailedSource(source ?? undefined)
+                }}
+              />
+              <canvas
+                ref={setHeldFrameNode}
+                aria-hidden="true"
+                hidden={!loading || heldOffset === undefined}
+                className="absolute inset-0 h-full w-full object-contain"
+                data-testid="held-recorded-frame"
+              />
+            </>
           ) : null}
-        </div>
-      ) : segment && active ? (
-        <ErrorNotice inline title={t('Could not read the recorded material.')} />
-      ) : (
-        <div
-          role="status"
-          className="rounded border border-border-200 p-6 text-sm text-muted-foreground"
-        >
-          <span>
-            {!aligned
-              ? t('This recording cannot be aligned with the research replay timeline.')
-              : gap?.reason === 'paused'
-                ? t('Recording was paused at this time.')
-                : t('No webpage footage was recorded at this time.')}
-          </span>
-          {next ? (
-            <Button className="ml-2" size="sm" variant="outline" onClick={() => seek(next.startMs)}>
-              {t('Go to next recorded moment')}
-            </Button>
-          ) : null}
-        </div>
-      )}
-      {failed ? (
-        <ErrorNotice
-          inline
-          title={t('Could not play the recorded footage.')}
-          primaryButton={{
-            label: t('Retry'),
-            onClick: () => {
-              setFailedSource(undefined)
-              setDecodedSource(undefined)
-              clearHeldFrame()
-              video.current?.load()
-            }
-          }}
-        />
-      ) : null}
+        </RecordedMediaViewport>
+      </div>
       {askFailed ? (
         <ErrorNotice inline title={t('Could not reference this recorded step.')} />
       ) : null}
-      {recording.events.length ? (
-        <details className="text-xs">
+      {recording.events.length || (compact && incomplete) ? (
+        <details className="shrink-0 text-xs">
           <summary>{t('Recorded actions and events')}</summary>
-          <ol className="mt-2 max-h-48 space-y-1 overflow-auto">
+          {compact && incomplete ? (
+            <p className="mt-2 text-status-warning-foreground">
+              {t('This project recording is incomplete. Missing activity is not reconstructed.')}
+            </p>
+          ) : null}
+          <ol className="mt-2 max-h-32 space-y-1 overflow-auto">
             {recording.events.map((event) => (
               <li key={event.eventId}>
                 <button

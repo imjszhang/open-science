@@ -42,7 +42,8 @@ import {
   CircleX,
   ChevronDown,
   FileSearch,
-  RotateCcw
+  RotateCcw,
+  Settings2
 } from 'lucide-react'
 import {
   REPLAY_SPEEDS,
@@ -52,6 +53,8 @@ import {
 } from '../../../../../shared/replay'
 
 export type ReplayControlsProps = {
+  compact?: boolean
+  hideAsk?: boolean
   playing: boolean
   skipNoNewRecords?: boolean
   onSkipNoNewRecords?: (skip: boolean) => void
@@ -236,26 +239,32 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
   const playLabel = ended ? t('Watch again') : props.playing ? t('Pause replay') : t('Play replay')
   return (
     <div
-      className={`shrink-0 border-t border-border-200 bg-bg-000 px-3 ${props.recordNavigation ? 'flex items-center gap-1 py-1' : 'space-y-1 py-2'}`}
+      className={`shrink-0 border-t border-border-200 bg-bg-000 px-3 ${props.compact ? 'flex flex-wrap items-center gap-x-1 py-1' : props.recordNavigation ? 'flex items-center gap-1 py-1' : 'space-y-1 py-2'}`}
       data-testid="replay-controls"
     >
       <Popover open={open} onOpenChange={changeOpen}>
         <div
-          className={`flex min-w-0 items-center gap-1${props.recordNavigation ? ' flex-1' : ''}`}
+          className={`flex min-w-0 items-center gap-1${props.compact ? ' order-3' : props.recordNavigation ? ' flex-1' : ''}`}
           data-testid="replay-step-actions"
         >
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
-              className="h-8 min-w-0 max-w-xl flex-1 justify-start gap-2 px-1 text-xs"
+              className={`h-8 min-w-0 max-w-xl justify-start gap-2 px-1 text-xs ${props.compact ? '' : 'flex-1'}`}
               disabled={empty}
               data-replay-browse-steps
               aria-label={t('Browse steps')}
               title={current ? label(current) : t('No steps')}
             >
-              <StepIcon step={current} />
-              <span className="min-w-0 truncate">{current ? label(current) : t('No steps')}</span>
-              {!empty ? (
+              {props.compact ? (
+                <ListOrdered size={14} aria-hidden="true" />
+              ) : (
+                <StepIcon step={current} />
+              )}
+              <span className={props.compact ? 'sr-only' : 'min-w-0 truncate'}>
+                {props.compact ? t('Browse steps') : current ? label(current) : t('No steps')}
+              </span>
+              {!empty && !props.compact ? (
                 <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
                   {props.stepIndex + 1} / {count}
                 </span>
@@ -263,38 +272,40 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
               <ChevronDown size={12} aria-hidden="true" />
             </Button>
           </PopoverTrigger>
-          <div role="group" aria-label={t('Step actions')} className="ml-auto shrink-0">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  asChild
-                  onFocus={(event) => {
-                    if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
-                  }}
-                >
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    className={controlClass}
-                    onClick={props.onAsk}
-                    disabled={empty || props.discussionPending}
-                    aria-label={t('Ask about this step')}
+          {!props.hideAsk ? (
+            <div role="group" aria-label={t('Step actions')} className="ml-auto shrink-0">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    asChild
+                    onFocus={(event) => {
+                      if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
+                    }}
                   >
-                    <MessageSquare size={14} />
-                    <span className={width < 560 ? 'sr-only' : 'min-w-0 truncate'}>
-                      {t('Ask about this step')}
-                    </span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t('Ask about this step')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      className={props.compact ? 'h-8 w-7 shrink-0 px-1 text-xs' : controlClass}
+                      onClick={props.onAsk}
+                      disabled={empty || props.discussionPending}
+                      aria-label={t('Ask about this step')}
+                    >
+                      <MessageSquare size={14} />
+                      <span className={width < 560 ? 'sr-only' : 'min-w-0 truncate'}>
+                        {t('Ask about this step')}
+                      </span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('Ask about this step')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          ) : null}
         </div>
         {!props.recordNavigation ? (
           <div
             ref={track}
-            className="group/timeline relative flex h-6 items-center"
+            className={`group/timeline relative flex h-6 items-center ${props.compact ? 'order-1 w-full' : ''}`}
             data-testid="replay-timeline"
             onPointerMove={(event) => {
               if (empty) return
@@ -606,7 +617,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
           ) : null}
         </PopoverContent>
       </Popover>
-      {props.skipNoNewRecords !== undefined ? (
+      {props.skipNoNewRecords !== undefined && !props.compact ? (
         <label className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
           <input
             type="checkbox"
@@ -617,14 +628,14 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
         </label>
       ) : null}
       <div
-        className="flex shrink-0 items-center gap-1"
+        className={`flex min-w-0 shrink-0 items-center gap-1 ${props.compact ? 'order-2 flex-1' : ''}`}
         role="group"
         aria-label={t('Playback controls')}
       >
         <Button
           variant="ghost"
           type="button"
-          className={controlClass}
+          className={props.compact ? 'h-8 w-7 shrink-0 px-1 text-xs' : controlClass}
           onClick={props.onPrevious}
           disabled={empty || props.stepIndex <= 0}
           title={t('Previous step')}
@@ -636,7 +647,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
           <Button
             variant="secondary"
             type="button"
-            className={controlClass}
+            className={props.compact ? 'h-8 w-7 shrink-0 px-1 text-xs' : controlClass}
             onClick={props.onToggle}
             disabled={empty}
             aria-label={playLabel}
@@ -657,7 +668,7 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
         <Button
           variant="ghost"
           type="button"
-          className={controlClass}
+          className={props.compact ? 'h-8 w-7 shrink-0 px-1 text-xs' : controlClass}
           onClick={props.onNext}
           disabled={empty || props.stepIndex >= count - 1}
           title={t('Next step')}
@@ -667,8 +678,12 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
         </Button>
         {!props.recordNavigation ? (
           <>
-            <div className="ml-auto flex min-w-0 flex-1 justify-end">
-              <span className="truncate px-1 text-xs text-muted-foreground">
+            <div
+              className={`ml-auto flex flex-1 justify-end ${props.compact ? 'min-w-[5.5rem]' : 'min-w-0'}`}
+            >
+              <span
+                className={`${props.compact ? 'whitespace-nowrap' : 'truncate'} px-1 text-xs text-muted-foreground`}
+              >
                 {empty ? (
                   t('No steps')
                 ) : ended ? (
@@ -697,6 +712,25 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
               </SelectContent>
             </Select>
           </>
+        ) : null}
+        {props.compact && props.skipNoNewRecords !== undefined ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label={t('Playback options')}>
+                <Settings2 size={14} aria-hidden="true" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" className="w-72 p-3">
+              <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={props.skipNoNewRecords}
+                  onChange={(event) => props.onSkipNoNewRecords?.(event.currentTarget.checked)}
+                />
+                {t('Skip intervals without new records')}
+              </label>
+            </PopoverContent>
+          </Popover>
         ) : null}
       </div>
     </div>

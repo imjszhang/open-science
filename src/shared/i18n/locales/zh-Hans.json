@@ -7299,6 +7299,19 @@
     "Jump to recorded footage": "跳到已录制画面",
     "Loading replay…": "正在加载回放…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "播放遵循已记录的研究时间；记录空缺不代表没有活动。",
-    "Could not reference this research evidence.": "无法引用这份研究证据。"
+    "Could not reference this research evidence.": "无法引用这份研究证据。",
+    "Recorded media size": "录制画面尺寸",
+    "Fit to window": "适应窗口",
+    "Actual size (100%)": "原始尺寸（100%）",
+    "Playback options": "播放选项",
+    "Ask about this run": "询问本次运行",
+    "Ask about this record": "询问此记录",
+    "Ask about this content": "询问当前内容",
+    "Collapse preview": "收起预览",
+    "Expand preview": "展开预览",
+    "Original conversation": "原始对话",
+    "Question options": "提问选项",
+    "Result details": "结果详情",
+    "Saved reference details": "已保存的引用详情"
   }
 }

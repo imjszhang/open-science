@@ -20,7 +20,6 @@ import type {
   ReplayMaterialView
 } from '../src/pages/workspace/replay/ReplayStage'
 import { BrowserRecordingPlayer } from '../src/pages/workspace/replay/BrowserRecordingPlayer'
-import { RecordedFootageStatus } from '../src/pages/workspace/replay/RecordedFootageStatus'
 import { ProjectReplay } from '../src/pages/workspace/replay/ProjectReplay'
 import { ResultsPanel } from '../src/pages/workspace/replay/results/ResultsPanel'
 import type { SessionDiscussionCapture } from '../src/pages/workspace/replay/replay-context'
@@ -53,13 +52,16 @@ const saveView = (viewerId: string, document: ReplayDocument, view: ReplayViewSt
   }
 }
 
-type MaterialPreferences = { materialId: 'notebook' | 'project' | 'results'; recordingId?: string }
+type MaterialPreferences = {
+  materialId: 'conversation' | 'notebook' | 'project' | 'results'
+  recordingId?: string
+}
 const restoreMaterials = (viewerId: string, document: ReplayDocument): MaterialPreferences => {
   try {
     const saved = JSON.parse(
       sessionStorage.getItem(`${storageKey(viewerId, document)}:materials`) ?? 'null'
     )
-    if (saved && ['notebook', 'project', 'results'].includes(saved.materialId))
+    if (saved && ['conversation', 'notebook', 'project', 'results'].includes(saved.materialId))
       return {
         materialId: saved.materialId,
         recordingId: typeof saved.recordingId === 'string' ? saved.recordingId : undefined
@@ -67,7 +69,7 @@ const restoreMaterials = (viewerId: string, document: ReplayDocument): MaterialP
   } catch {
     /* Optional browser navigation state. */
   }
-  return { materialId: 'notebook' }
+  return { materialId: 'conversation' }
 }
 
 const ResearchReplayContent = ({
@@ -94,7 +96,7 @@ const ResearchReplayContent = ({
   const [selecting, setSelecting] = useState(false)
   const [preferences] = useState(() => restoreMaterials(context.viewerId, document))
   const [materialId, setMaterialId] = useState<string>(preferences.materialId)
-  const [materialRequest, setMaterialRequest] = useState<{ id: string; revision: number }>({
+  const [materialRequest] = useState<{ id: string; revision: number }>({
     id: preferences.materialId,
     revision: 0
   })
@@ -200,10 +202,6 @@ const ResearchReplayContent = ({
       current ? client.researchMediaUrl(current.descriptor.id, current.payload, mediaKey) : null,
     [client, current]
   )
-  const chooseNotebook = useCallback(() => {
-    setMaterialId('notebook')
-    setMaterialRequest((previous) => ({ id: 'notebook', revision: (previous?.revision ?? 0) + 1 }))
-  }, [])
   const askResource = useCallback(
     async (resource: ReplayResource, playback?: ReplayMaterialPlayback) => {
       const position = researchPosition(document, timed.recordedTimeOrigins, playback)
@@ -241,8 +239,8 @@ const ResearchReplayContent = ({
           return (
             <div className="flex h-full min-h-0 flex-col">
               <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
-                <p className="text-xs text-muted-foreground">
-                  {t('Choose saved project evidence. No environment is started.')}
+                <p className="truncate text-sm text-text-200" title={current?.descriptor.name}>
+                  {current?.descriptor.name ?? t('Project recording')}
                 </p>
                 {recordings.length > 1 ? (
                   <select
@@ -264,16 +262,9 @@ const ResearchReplayContent = ({
                   {t('No project images were recorded. Other research materials remain available.')}
                 </p>
               ) : null}
-              {web && aligned ? (
-                <RecordedFootageStatus
-                  recording={web.recording}
-                  recordedAt={at}
-                  onSeek={(timestamp) => playback?.onSeekRecordedAt(timestamp)}
-                  onShowNotebook={chooseNotebook}
-                />
-              ) : null}
               {web ? (
                 <BrowserRecordingPlayer
+                  presentationMode="research"
                   key={current!.descriptor.id}
                   active={active}
                   recording={web.recording}
@@ -300,6 +291,7 @@ const ResearchReplayContent = ({
               ) : null}
               {track ? (
                 <ProjectReplay
+                  presentationMode="research"
                   key={current!.descriptor.id}
                   track={track}
                   active={active}
@@ -324,8 +316,10 @@ const ResearchReplayContent = ({
       {
         id: 'results',
         label: t('Results'),
-        content: (_active, playback) => (
+        content: (active, playback) => (
           <ResultsPanel
+            active={active}
+            presentationMode="research"
             entries={results}
             recordedAt={playback?.recordedAt}
             read={readRaw}
@@ -340,7 +334,6 @@ const ResearchReplayContent = ({
       timed,
       recordings,
       recordingId,
-      chooseNotebook,
       mediaUrl,
       document,
       select,
@@ -357,11 +350,16 @@ const ResearchReplayContent = ({
         .find((branch) => branch.id === capture.branchId)
         ?.steps.find((step) => step.id === capture.stepId)
       if (!step) return
-      const timeMs = step.startMs + capture.stepOffsetMs
+      const timeMs =
+        capture.notebookInspection?.timeMs ??
+        capture.stepInspection?.timeMs ??
+        step.startMs + capture.stepOffsetMs
       const origin = timed.recordedTimeOrigins[capture.branchId]
       void select({
         branchId: capture.branchId,
         scope: capture.scope,
+        notebookRunId: capture.notebookInspection?.runId,
+        inspectStep: capture.stepInspection?.mode,
         stepId: capture.stepId,
         timeMs,
         ...(origin === undefined ? {} : { recordedAt: origin + timeMs })
@@ -393,15 +391,6 @@ const ResearchReplayContent = ({
       className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100"
       data-testid="research-replay-viewer"
     >
-      {reference ? (
-        <ReferencePanel
-          key={selection!.selectionId}
-          reference={reference}
-          kind={selection!.moment ? 'moment' : selection!.resource ? 'file' : 'step'}
-          observedAt={selection!.position.recordedAt}
-          presentation={context.presentation}
-        />
-      ) : null}
       {selectionFailed ? (
         <ErrorNotice inline title={t('Could not reference this research evidence.')} />
       ) : null}
@@ -417,6 +406,19 @@ const ResearchReplayContent = ({
       ) : null}
       <div className="min-h-0 flex-1">
         <ReplayPanel
+          presentationMode="research"
+          footerReference={
+            reference ? (
+              <ReferencePanel
+                compact
+                key={selection!.selectionId}
+                reference={reference}
+                kind={selection!.moment ? 'moment' : selection!.resource ? 'file' : 'step'}
+                observedAt={selection!.position.recordedAt}
+                presentation={context.presentation}
+              />
+            ) : null
+          }
           host={null}
           document={document}
           initialView={initialView}

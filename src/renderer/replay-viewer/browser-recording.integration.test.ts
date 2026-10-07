@@ -3,6 +3,8 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { readFile, writeFile, mkdtemp, realpath, chmod, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
 import { chromium, expect } from '@playwright/test'
 import { it } from 'vitest'
 import { ObservationViewers } from '../../main/run-observation/viewers'
@@ -501,4 +503,287 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1' || process.platform === 
     }
   },
   30000
+)
+
+it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
+  'fits real landscape, portrait and ultrawide research footage without changing its clock or leaking scroll outside the stage',
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'os-recording-viewport-'))
+    const browser = await chromium.launch({ headless: true })
+    let host: ReplayViewerHttpHost | undefined, viewers: ObservationViewers | undefined
+    try {
+      const sizes = [
+        { width: 1280, height: 720 },
+        { width: 540, height: 960 },
+        { width: 1920, height: 480 }
+      ]
+      const capture = await browser.newPage()
+      const clips = await Promise.all(
+        sizes.map(async (size) =>
+          Buffer.from(
+            await capture.evaluate(async ({ width, height }) => {
+              const canvas = document.createElement('canvas')
+              canvas.width = width
+              canvas.height = height
+              const context = canvas.getContext('2d')!
+              const stream = canvas.captureStream(10)
+              const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' })
+              const chunks: Blob[] = []
+              recorder.ondataavailable = (event) => chunks.push(event.data)
+              const finished = new Promise<Blob>((done) => {
+                recorder.onstop = () => done(new Blob(chunks, { type: 'video/webm' }))
+              })
+              let tick = 0
+              const paint = (): void => {
+                context.fillStyle = '#184b6b'
+                context.fillRect(0, 0, width, height)
+                context.fillStyle = '#fff'
+                context.fillRect((tick++ * 30) % (width - 50), Math.round(height / 2), 40, 40)
+              }
+              paint()
+              recorder.start()
+              const timer = setInterval(paint, 100)
+              await new Promise((done) => setTimeout(done, 1200))
+              clearInterval(timer)
+              recorder.stop()
+              const blob = await finished
+              stream.getTracks().forEach((track) => track.stop())
+              return Array.from(new Uint8Array(await blob.arrayBuffer()))
+            }, size)
+          )
+        )
+      )
+      await capture.close()
+      const recording = validateBrowserRecording({
+        format: 'open-science-web-recording',
+        version: 1,
+        recordingId: 'viewport-e2e',
+        startedAt: 100000,
+        durationMs: 3000,
+        media: clips.map((bytes, index) => ({
+          mediaKey: `clip-${index}`,
+          name: `clip-${index}.webm`,
+          mimeType: 'video/webm',
+          checksum: createHash('sha256').update(bytes).digest('hex'),
+          sizeBytes: bytes.length,
+          sourceVersionId: `source-${index}`
+        })),
+        segments: sizes.map((size, index) => ({
+          ...size,
+          segmentId: `segment-${index}`,
+          mediaKey: `clip-${index}`,
+          startMs: index * 1000,
+          endMs: (index + 1) * 1000,
+          codec: 'vp8',
+          frameRate: 10
+        })),
+        events: [],
+        coverage: { stopReason: 'finished', gaps: [], droppedFrames: 0 }
+      })
+      const payload: RecordedBrowserPayload = {
+        receiving: {
+          projectId: 'viewport',
+          sessionId: 'session',
+          artifactId: 'recording',
+          versionId: 'index-v1'
+        },
+        indexChecksum: createHash('sha256').update(JSON.stringify(recording)).digest('hex'),
+        recording,
+        media: recording.media.map((media) => ({
+          mediaKey: media.mediaKey,
+          artifactId: media.mediaKey,
+          versionId: `${media.mediaKey}-v1`,
+          checksum: media.checksum,
+          sizeBytes: media.sizeBytes
+        }))
+      }
+      let liveCalls = 0
+      const forbidden = async (): Promise<never> => {
+        liveCalls++
+        throw new Error('Sizing saved footage has no runtime')
+      }
+      viewers = new ObservationViewers({
+        observer: new RunObservationOwner({ authorize: forbidden, read: forbidden }),
+        authorizeScope: forbidden,
+        recorded: {
+          authorizeScope: async () => undefined,
+          read: forbidden,
+          readBrowser: async () => payload
+        },
+        onRevoked: (id) => host?.closeViewer(id)
+      })
+      host = new ReplayViewerHttpHost({
+        viewers,
+        projectViews: { open: forbidden, closeViewer: () => undefined },
+        readAsset: createReplayViewerAssetReader(resolve('out/replay-viewer')),
+        readRecordingMedia: async (_, mediaKey) => {
+          const index = recording.media.findIndex((media) => media.mediaKey === mediaKey)
+          expect(index).toBeGreaterThanOrEqual(0)
+          return { body: clips[index], mimeType: 'video/webm' }
+        }
+      })
+      const caller = createCallerContext({
+        clientId: '2',
+        lifecycleClientId: 'viewport-browser',
+        leaseId: 'viewport-browser',
+        surface: 'electron',
+        location: 'local',
+        principalKind: 'human',
+        actionOrigin: 'human'
+      })
+      const access = await host.openRecorded(payload.receiving, caller, {
+        format: 'web-recording',
+        desktopParent: 'file:'
+      })
+      await build({
+        stdin: {
+          resolveDir: process.cwd(),
+          sourcefile: 'viewport-parent.tsx',
+          loader: 'tsx',
+          contents: `
+import {useRef,useState} from 'react'
+import {createRoot} from 'react-dom/client'
+import {useBrowserRecordingTransportHost} from './src/renderer/src/pages/workspace/replay/use-browser-recording-transport'
+const url=${JSON.stringify(access.url)}
+function App(){
+ const iframeRef=useRef(null),[offset,setOffset]=useState(500)
+ const playback={recordedAt:100000+offset,playing:false,speed:1,presentation:'research',onSeekRecordedAt:at=>setOffset(at-100000)}
+ const bridge=useBrowserRecordingTransportHost({iframeRef,playback,enabled:true,origin:new URL(url).origin})
+ return <main style={{height:'100dvh',display:'flex',flexDirection:'column'}}>
+ <input aria-label="Research position" type="range" min="0" max="2999" value={offset} onChange={event=>setOffset(Number(event.target.value))} style={{flexShrink:0,height:32,margin:0}}/>
+ <iframe ref={iframeRef} name="open-science-research-clock" onLoad={bridge.onLoad} title="Research recording" src={url} sandbox="allow-scripts allow-same-origin allow-forms" style={{display:'block',width:'100%',flex:1,minHeight:0,border:0}}/>
+ </main>
+}
+createRoot(document.getElementById('root')).render(<App/> )`
+        },
+        outfile: join(directory, 'parent.js'),
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        jsx: 'automatic',
+        define: { 'process.env.NODE_ENV': '"production"' },
+        logLevel: 'silent'
+      })
+      const html = join(directory, 'index.html')
+      await writeFile(
+        html,
+        '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0"><div id="root"></div><script src="./parent.js"></script></body></html>'
+      )
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } })
+      const errors: string[] = []
+      page.on('pageerror', (error) => errors.push(error.message))
+      await page.goto(pathToFileURL(html).href)
+      const child = page.frameLocator('iframe')
+      const video = child.getByLabel('Recorded webpage', { exact: true })
+      await expect(video).toBeVisible()
+      await expect(child.getByRole('button', { name: 'Play replay', exact: true })).toHaveCount(0)
+      const initialPlayer = await child.getByTestId('browser-recording-player').elementHandle()
+      const stage = child.getByTestId('recorded-media-scroll')
+      const surface = child.getByTestId('recorded-video-surface')
+      for (const [index, size] of sizes.entries()) {
+        await page
+          .getByRole('slider', { name: 'Research position' })
+          .fill(String(index * 1000 + 500))
+        await expect(video).toHaveAttribute('src', `/api/recording/media?mediaKey=clip-${index}`)
+        await expect
+          .poll(() =>
+            video.evaluate((element: HTMLVideoElement) => ({
+              width: element.videoWidth,
+              height: element.videoHeight,
+              time: Math.round(element.currentTime * 1000),
+              ready: element.readyState >= 2
+            }))
+          )
+          .toEqual({ ...size, time: 500, ready: true })
+        if (index > 0) {
+          await expect(stage).toHaveAttribute('data-size-mode', 'actual')
+          await expect
+            .poll(async () => {
+              const box = await surface.boundingBox()
+              return box && { width: box.width, height: box.height }
+            })
+            .toEqual(size)
+        }
+        const decoder = await video.elementHandle()
+        for (const width of [360, 480, 720, 1200]) {
+          await page.setViewportSize({ width, height: 800 })
+          await expect
+            .poll(() =>
+              page.locator('iframe').evaluate((element) => element.getBoundingClientRect().width)
+            )
+            .toBe(width)
+          await page.evaluate(
+            () =>
+              new Promise<void>((done) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => done()))
+              )
+          )
+          await child.getByRole('button', { name: 'Fit to window', exact: true }).click()
+          await expect(
+            child.getByRole('button', { name: 'Fit to window', exact: true })
+          ).toHaveAttribute('aria-pressed', 'true')
+          await expect
+            .poll(async () => {
+              const box = await surface.boundingBox(),
+                bounds = await stage.boundingBox()
+              if (!box || !bounds) return false
+              return (
+                box.x >= bounds.x - 1 &&
+                box.y >= bounds.y - 1 &&
+                box.x + box.width <= bounds.x + bounds.width + 1 &&
+                box.y + box.height <= bounds.y + bounds.height + 1 &&
+                Math.abs(box.width / box.height - size.width / size.height) < 0.01
+              )
+            })
+            .toBe(true)
+          const frame = page.frames().find((item) => item.parentFrame() === page.mainFrame())!
+          const fitOverflow = await frame.evaluate(() => ({
+            width: document.documentElement.scrollWidth - innerWidth,
+            height: document.documentElement.scrollHeight - innerHeight
+          }))
+          expect(fitOverflow.width).toBeLessThanOrEqual(1)
+          expect(fitOverflow.height).toBeLessThanOrEqual(1)
+          await child.getByRole('button', { name: 'Actual size (100%)', exact: true }).click()
+          await expect
+            .poll(async () => {
+              const box = await surface.boundingBox()
+              return box && { width: box.width, height: box.height }
+            })
+            .toEqual(size)
+          const nativeOverflow = await frame.evaluate(() => ({
+            width: document.documentElement.scrollWidth - innerWidth,
+            height: document.documentElement.scrollHeight - innerHeight
+          }))
+          expect(nativeOverflow.width).toBeLessThanOrEqual(1)
+          expect(nativeOverflow.height).toBeLessThanOrEqual(1)
+          expect(
+            await decoder!.evaluate((element) => element === document.querySelector('video'))
+          ).toBe(true)
+          expect(
+            await video.evaluate((element: HTMLVideoElement) =>
+              Math.round(element.currentTime * 1000)
+            )
+          ).toBe(500)
+          expect(await page.getByRole('slider', { name: 'Research position' }).inputValue()).toBe(
+            String(index * 1000 + 500)
+          )
+        }
+        expect(
+          await initialPlayer!.evaluate(
+            (element) =>
+              element === document.querySelector('[data-testid="browser-recording-player"]')
+          )
+        ).toBe(true)
+        await decoder?.dispose()
+      }
+      expect(liveCalls).toBe(0)
+      expect(errors).toEqual([])
+    } finally {
+      await browser.close()
+      await host?.close()
+      await viewers?.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  },
+  45000
 )

@@ -1,3 +1,7 @@
+import {
+  projectReplayNotebookInspection,
+  projectReplayStepInspection
+} from '../../renderer/src/lib/replay/inspection'
 import { projectReplayScene } from '../../renderer/src/lib/replay/scene'
 import { createHash, randomUUID } from 'node:crypto'
 import type { CallerContext } from '../caller-context'
@@ -378,12 +382,40 @@ export class ResearchReplayService {
     const position = researchReplayPositionSchema.parse(value),
       row = await this.get(viewerId, caller)
     const branch = row.data.document.branches.find((item) => item.id === position.branchId),
-      step = branch?.steps.find((item) => item.id === position.stepId)
-    if (!branch || !step || position.timeMs > branch.durationMs)
+      originalStep = branch?.steps.find((item) => item.id === position.stepId)
+    if (!branch || !originalStep || position.timeMs > branch.durationMs)
       throw new ResearchReplayError('invalid')
     const origin = row.origins[position.branchId]
-    const scene = projectReplayScene(row.data.document, position.branchId, position.timeMs, origin)
-    if (scene.step?.id !== step.id) throw new ResearchReplayError('invalid')
+    if (
+      (position.notebookRunId || position.inspectStep) &&
+      (Boolean(position.notebookRunId && position.inspectStep) ||
+        position.scope === 'session' ||
+        position.resourceId ||
+        position.recordingId ||
+        position.offsetMs !== undefined)
+    )
+      throw new ResearchReplayError('invalid')
+    const scene = position.notebookRunId
+      ? projectReplayNotebookInspection(
+          row.data.document,
+          position.branchId,
+          position.stepId,
+          position.notebookRunId,
+          position.timeMs,
+          origin
+        )
+      : position.inspectStep
+        ? projectReplayStepInspection(
+            row.data.document,
+            position.branchId,
+            position.stepId,
+            position.timeMs,
+            origin,
+            position.inspectStep === 'saved-history'
+          )
+        : projectReplayScene(row.data.document, position.branchId, position.timeMs, origin)
+    if (!scene?.step || scene.step.id !== originalStep.id) throw new ResearchReplayError('invalid')
+    const step = scene.step
     if (
       position.recordedAt !== undefined &&
       (origin === undefined || Math.abs(position.recordedAt - origin - position.timeMs) > 1)

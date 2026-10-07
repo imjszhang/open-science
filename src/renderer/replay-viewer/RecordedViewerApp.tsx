@@ -224,6 +224,7 @@ const RecordedBrowserViewerApp = ({
     window.parent !== window &&
     window.name === 'open-science-research-clock'
   const transport = useBrowserRecordingTransportReceiver({ enabled: embedded })
+  const researchPresentation = embedded && transport.playback?.presentation === 'research'
   const [selection, setSelection] = useState<BrowserRecordingMoment>()
   useEffect(() => {
     const controller = new AbortController()
@@ -242,11 +243,15 @@ const RecordedBrowserViewerApp = ({
   )
   return (
     <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
-      <header className="shrink-0 border-b border-border-200 p-3">
-        <h1 className="text-sm font-medium">{payload.recording.title ?? t('Project recording')}</h1>
-        <p className="mt-1 text-xs text-text-300">{t('Read-only research history')}</p>
-      </header>
-      {selection ? (
+      {!researchPresentation ? (
+        <header className="shrink-0 border-b border-border-200 p-3">
+          <h1 className="text-sm font-medium">
+            {payload.recording.title ?? t('Project recording')}
+          </h1>
+          <p className="mt-1 text-xs text-text-300">{t('Read-only research history')}</p>
+        </header>
+      ) : null}
+      {selection && !researchPresentation ? (
         <ReferencePanel
           key={selection.selectionId}
           presentation={context.presentation}
@@ -256,6 +261,8 @@ const RecordedBrowserViewerApp = ({
         />
       ) : null}
       <BrowserRecordingPlayer
+        presentationMode={researchPresentation ? 'research' : undefined}
+        onActionChange={researchPresentation ? transport.onActionChange : undefined}
         transport={
           embedded
             ? {

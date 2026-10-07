@@ -7627,6 +7627,19 @@
     "Jump to recorded footage": "Ir a las imágenes grabadas",
     "Loading replay…": "Cargando reproducción…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "La reproducción sigue las marcas de tiempo de investigación registradas; los intervalos sin registros no implican inactividad.",
-    "Could not reference this research evidence.": "No se pudo citar esta evidencia de investigación."
+    "Could not reference this research evidence.": "No se pudo citar esta evidencia de investigación.",
+    "Recorded media size": "Tamaño del medio grabado",
+    "Fit to window": "Ajustar a la ventana",
+    "Actual size (100%)": "Tamaño real (100 %)",
+    "Playback options": "Opciones de reproducción",
+    "Ask about this run": "Preguntar sobre esta ejecución",
+    "Ask about this record": "Preguntar sobre este registro",
+    "Ask about this content": "Preguntar sobre este contenido",
+    "Collapse preview": "Reducir la vista previa",
+    "Expand preview": "Ampliar la vista previa",
+    "Original conversation": "Conversación original",
+    "Question options": "Opciones de pregunta",
+    "Result details": "Detalles del resultado",
+    "Saved reference details": "Detalles de la referencia guardada"
   }
 }

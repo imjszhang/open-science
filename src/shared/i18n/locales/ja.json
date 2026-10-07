@@ -7299,6 +7299,19 @@
     "Jump to recorded footage": "録画された映像へ移動",
     "Loading replay…": "リプレイを読み込み中…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "再生は記録された研究時刻に従います。記録の空白は活動がなかったことを意味しません。",
-    "Could not reference this research evidence.": "この研究の証拠を参照できませんでした。"
+    "Could not reference this research evidence.": "この研究の証拠を参照できませんでした。",
+    "Recorded media size": "記録メディアのサイズ",
+    "Fit to window": "ウィンドウに合わせる",
+    "Actual size (100%)": "実際のサイズ（100%）",
+    "Playback options": "再生オプション",
+    "Ask about this run": "この実行について質問",
+    "Ask about this record": "この記録について質問",
+    "Ask about this content": "この内容について質問",
+    "Collapse preview": "プレビューを折りたたむ",
+    "Expand preview": "プレビューを展開",
+    "Original conversation": "元の会話",
+    "Question options": "質問オプション",
+    "Result details": "結果の詳細",
+    "Saved reference details": "保存済み参照の詳細"
   }
 }

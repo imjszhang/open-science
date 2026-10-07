@@ -259,3 +259,84 @@ it('does not accept a bridge in a top-level standalone viewer', () => {
   expect(port.postMessage).not.toHaveBeenCalled()
   expect(result.current.playback).toBeUndefined()
 })
+
+it('routes a research footer request only through the current admitted recording channel', () => {
+  const { iframeRef } = makeFrame()
+  const { result } = renderHook(() =>
+    useBrowserRecordingTransportHost({
+      iframeRef,
+      origin,
+      enabled: true,
+      playback: { ...state(), presentation: 'research' }
+    })
+  )
+  expect(result.current.action).toBeUndefined()
+  act(() => result.current.ask())
+  expect(channels[0].port1.postMessage).not.toHaveBeenCalled()
+  act(() => channels[0].port1.receive(recordingTransportMessage({ type: 'ready' })))
+  act(() =>
+    channels[0].port1.receive(
+      recordingTransportMessage({ type: 'action', revision: 1, disabled: false, pending: false })
+    )
+  )
+  expect(result.current.action).toEqual({ disabled: false, pending: false })
+  act(() => result.current.ask())
+  expect(channels[0].port1.postMessage).toHaveBeenLastCalledWith(
+    recordingTransportMessage({ type: 'ask', revision: 1 })
+  )
+  const stale = channels[0].port1.onmessage!
+  act(() => result.current.onLoad())
+  expect(result.current.action).toBeUndefined()
+  act(() =>
+    stale({
+      data: recordingTransportMessage({
+        type: 'action',
+        revision: 1,
+        disabled: false,
+        pending: false
+      })
+    } as MessageEvent)
+  )
+  expect(result.current.action).toBeUndefined()
+})
+
+it('captures a decoded moment only for the current research clock revision and enabled action', () => {
+  const parent = {} as Window
+  vi.spyOn(window, 'parent', 'get').mockReturnValue(parent)
+  const { result } = renderHook(() => useBrowserRecordingTransportReceiver({ enabled: true }))
+  const port = new Port(),
+    ask = vi.fn()
+  act(() => offer(parent, port))
+  act(() => result.current.onActionChange({ label: 'Ask', onAsk: ask }))
+  act(() =>
+    port.receive(
+      recordingTransportMessage({
+        type: 'state',
+        revision: 2,
+        playback: { playing: false, speed: 1, presentation: 'research' }
+      })
+    )
+  )
+  expect(port.postMessage).toHaveBeenLastCalledWith(
+    recordingTransportMessage({ type: 'action', revision: 2, disabled: false, pending: false })
+  )
+  act(() => port.receive(recordingTransportMessage({ type: 'ask', revision: 1 })))
+  expect(ask).not.toHaveBeenCalled()
+  act(() => port.receive(recordingTransportMessage({ type: 'ask', revision: 2 })))
+  expect(ask).toHaveBeenCalledTimes(1)
+  act(() => result.current.onActionChange({ label: 'Ask', disabled: true, onAsk: ask }))
+  act(() => port.receive(recordingTransportMessage({ type: 'ask', revision: 2 })))
+  expect(ask).toHaveBeenCalledTimes(1)
+  act(() =>
+    port.receive(
+      recordingTransportMessage({
+        type: 'state',
+        revision: 3,
+        playback: { playing: false, speed: 1 }
+      })
+    )
+  )
+  act(() => result.current.onActionChange({ label: 'Ask', onAsk: ask }))
+  act(() => port.receive(recordingTransportMessage({ type: 'ask', revision: 3 })))
+  expect(ask).toHaveBeenCalledTimes(1)
+})

@@ -1,3 +1,4 @@
+import { toSessionDiscussionSnapshot } from './replay/replay-context'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigationStore } from '@/stores/navigation-store'
@@ -242,7 +243,7 @@ export const useWorkspaceSessionDiscussion = ({
       .saveSelectionSnapshot({
         projectId: pending.projectId,
         sourceSessionId: pending.sourceSessionId,
-        context: { ...structuredClone(pending), id }
+        context: toSessionDiscussionSnapshot(pending, id)
       })
       .then(() => {
         const current = latest.current

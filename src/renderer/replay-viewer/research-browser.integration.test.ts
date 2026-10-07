@@ -187,9 +187,9 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
         firstOffset = payload.recording.startedAt + payload.recording.segments[0].startMs - origin
       await expect(slider).toHaveAttribute('aria-valuemax', String(branch.durationMs))
       await expect(slider).toHaveAttribute('aria-valuenow', '0')
-      await expect(page.getByRole('button', { name: 'Project replay', exact: true })).toBeVisible()
+      await expect(page.getByRole('tab', { name: 'Project replay', exact: true })).toBeVisible()
       if (evidenceDir) await page.screenshot({ path: join(evidenceDir, '00-context.png') })
-      await page.getByRole('button', { name: 'Project replay', exact: true }).click()
+      await page.getByRole('tab', { name: 'Project replay', exact: true }).click()
       await expect(
         page.getByText('The project recording has not started yet.', { exact: true })
       ).toBeVisible()
@@ -215,21 +215,22 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
       await expect
         .poll(() => video.evaluate((element: HTMLVideoElement) => element.paused))
         .toBe(true)
-      await page.getByRole('button', { name: 'Results', exact: true }).click()
+      await page.getByRole('tab', { name: 'Results', exact: true }).click()
       await expect(slider).toHaveAttribute('aria-valuenow', String(paused))
-      await page.getByRole('button', { name: 'All saved results', exact: true }).click()
+      await page.getByRole('combobox', { name: 'Result visibility' }).selectOption('all')
       await expect(
         page.getByText('Showing results from the entire research, including later records.', {
           exact: true
         })
       ).toBeVisible()
-      await page.getByRole('button', { name: 'Project replay', exact: true }).click()
+      await page.getByRole('tab', { name: 'Project replay', exact: true }).click()
       await expect(slider).toHaveAttribute('aria-valuenow', String(paused))
       await expect(video).toBeVisible()
       await expect(
         page.getByRole('button', { name: 'Ask about this moment', exact: true })
       ).toBeEnabled()
       await page.getByRole('button', { name: 'Ask about this moment', exact: true }).click()
+      await page.getByText('Saved reference details', { exact: true }).click()
       const reference = page.getByRole('textbox', { name: 'Recorded moment reference' })
       await expect(reference).toBeVisible()
       const selected = JSON.parse(await reference.inputValue()),
@@ -269,6 +270,7 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
       await page.reload()
       await expect(page.getByTestId('research-replay-viewer')).toBeVisible()
       await expect(slider).toHaveAttribute('aria-valuenow', String(dragged))
+      await page.getByText('Saved reference details', { exact: true }).click()
       const afterReload = JSON.parse(
         await page.getByRole('textbox', { name: 'Recorded moment reference' }).inputValue()
       )
@@ -280,6 +282,46 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
       await expect(
         page.getByRole('button', { name: 'Ask about this moment', exact: true })
       ).toBeEnabled()
+      await page.getByText('Saved reference details', { exact: true }).click()
+      for (const width of [360, 480, 720, 1200]) {
+        await page.setViewportSize({ width, height: 800 })
+        const footer = page.getByTestId('replay-question-footer')
+        await expect(footer).toBeVisible()
+        const layout = await page.evaluate(() => {
+          const footer = document
+            .querySelector('[data-testid="replay-question-footer"]')!
+            .getBoundingClientRect()
+          const stage = document
+            .querySelector('[data-testid="recorded-media-scroll"]')!
+            .getBoundingClientRect()
+          return {
+            overflow: document.documentElement.scrollWidth > innerWidth,
+            footerBottom: footer.bottom,
+            stageHeight: stage.height,
+            height: innerHeight
+          }
+        })
+        expect(layout.overflow).toBe(false)
+        expect(layout.footerBottom).toBeLessThanOrEqual(layout.height + 1)
+        expect(layout.stageHeight).toBeGreaterThan(120)
+        await expect(slider).toHaveAttribute('aria-valuenow', String(dragged))
+        if (evidenceDir) await page.screenshot({ path: join(evidenceDir, `width-${width}.png`) })
+      }
+      await page.getByRole('button', { name: 'Enter full screen', exact: true }).click()
+      await expect
+        .poll(() => page.evaluate(() => document.fullscreenElement?.getAttribute('data-testid')))
+        .toBe('replay-panel')
+      await page.getByTestId('replay-information-trigger').click()
+      await expect(page.getByRole('dialog')).toBeVisible()
+      expect(
+        await page
+          .getByRole('dialog')
+          .evaluate((element) => document.fullscreenElement?.contains(element))
+      ).toBe(true)
+      await page.keyboard.press('Escape')
+      if (await page.getByRole('button', { name: 'Exit full screen', exact: true }).count())
+        await page.getByRole('button', { name: 'Exit full screen', exact: true }).click()
+      await expect(slider).toHaveAttribute('aria-valuenow', String(dragged))
       if (evidenceDir) {
         await page.screenshot({ path: join(evidenceDir, '02-reference.png') })
         await writeFile(

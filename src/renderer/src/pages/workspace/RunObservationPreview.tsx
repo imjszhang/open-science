@@ -9,6 +9,8 @@ import {
 } from '@/stores/run-observation-question-store'
 import type { ObservationQuestionRecovery } from './replay/use-observation-question-recovery'
 import { useObservationRecordingStatus } from './replay/use-observation-recording-status'
+import { useReplayMaterialAction } from './replay/replay-material-action'
+import { exitResearchReplayFullscreen } from './replay/exit-research-fullscreen'
 import { ObservationRecordingStatus } from './replay/ObservationRecordingStatus'
 import { showRecordedObservation } from './replay/open-run-observation'
 import {
@@ -35,6 +37,7 @@ export type RunObservationPreviewProps = {
   isActive: boolean
   questionRecovery?: ObservationQuestionRecovery
   playback?: EmbeddedBrowserRecordingPlayback
+  presentationMode?: 'research'
 } & (
   | {
       mode?: 'live'
@@ -150,9 +153,26 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     origin: access ? new URL(access.url).origin : undefined,
     enabled: props.mode === 'recorded' && props.format === 'web-recording' && !!props.playback,
     playback: props.playback
-      ? { ...props.playback, playing: props.playback.playing && props.isActive }
+      ? {
+          ...props.playback,
+          presentation: props.presentationMode,
+          playing: props.playback.playing && props.isActive
+        }
       : undefined
   })
+  useReplayMaterialAction(
+    props.presentationMode === 'research' &&
+      props.mode === 'recorded' &&
+      props.format === 'web-recording' &&
+      props.isActive
+      ? {
+          label: t('Ask about this moment'),
+          disabled: !recordingTransport.action || recordingTransport.action.disabled,
+          pending: recordingTransport.action?.pending,
+          onAsk: recordingTransport.ask
+        }
+      : undefined
+  )
   const [openFailed, setOpenFailed] = useState(false)
   const [savedBrowserTarget, setSavedBrowserTarget] = useState<RecordedObservationTarget>()
   const [publishedBrowserTargetKey, setPublishedBrowserTargetKey] = useState<string>()
@@ -387,6 +407,11 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
           // Freeze this exact explicit Ask action before navigation or later observations.
           failedSelection.current = selectedEvidence && structuredClone(selectedEvidence)
           try {
+            if (current.current.presentationMode === 'research') {
+              const exiting = exitResearchReplayFullscreen()
+              if (exiting) await exiting
+              if (disposed || !current.current.isActive) return
+            }
             await deliver()
             if (!disposed) {
               failedSelection.current = undefined

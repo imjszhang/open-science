@@ -1436,6 +1436,10 @@ export type ResearchReplayView = {
 export type ResearchReplayPosition = {
   branchId: string
   stepId: string
+  /** Explicit inspection of this saved run at the current research clock. */
+  notebookRunId?: string
+  /** Inspect an explicit conversation record while retaining the master clock. */
+  inspectStep?: 'visible' | 'saved-history'
   scope?: 'step' | 'session'
   timeMs: number
   recordedAt?: number

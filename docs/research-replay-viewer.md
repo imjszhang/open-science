@@ -33,14 +33,46 @@ anchor instead of treating the old reading duration as elapsed experiment time.
 
 ## Presentation
 
-The context strip remains visible in narrow layouts. It labels original research conversation,
-shows the recorded current activity and can expand into paginated saved conversation inspection.
-Manual inspection pauses automatic following; returning to playback restores that view.
+Read-only research entrypoints opt into `presentationMode="research"`. One primary material fills
+the available area: original conversation, Notebook, project recording, or results. The header,
+one-line current context, shared timeline and question footer remain visible while content scrolls.
+Source information, branch selection, original records and source files remain in secondary details.
+Normal conversations, live observations, independent recordings and canonical 1280 × 720 capture
+retain their existing presentation paths.
+
+Manual conversation or Notebook inspection pauses following and selects its associated saved step
+without changing the clock. Playback restores following. The footer asks about the active record,
+saved run, decoded moment or immutable result; current-step and whole-research actions are in its
+menu. Notebook references identify the exact selected saved run and owning step through an optional
+application-only `notebookRunId`. The current research clock determines which output was visible;
+concurrent steps cannot redirect the reference to another run. This is not a cell selector or a
+change to `.science`.
+Conversation inspection likewise preserves the selected step identity: `inspectStep` distinguishes
+content visible at the master clock from an explicitly opened full saved-history record. The
+backend validates each selector against the authorized source. Default current-step selections
+retain their strict playhead checks. Material actions are scoped to the mounted research provider
+and withdrawn on inactivity.
 
 Notebook, project replay and results remain independent material adapters. They receive the master
 position and transport; no material owns a second embedded play clock. Native and browser windows
 have independent positions. A recording gap distinguishes not-started, ended and unrecorded
-intervals, and offers an explicit jump to actual footage or a switch to Notebook.
+intervals in the media stage, with an explicit jump to actual footage. Later local runs and
+unaligned recordings remain available separately.
+
+`RecordedMediaViewport` only owns sizing and scrolling. Fit uses the remaining stage dimensions;
+100% uses decoded media dimensions and allows internal scrolling. Changing size or source does not
+replace the research clock. Video and screenshot adapters keep independent decoding/resource
+lifecycles and cannot reference buffering, stale, missing or undecoded content. Native recorded
+iframes use the existing exact-origin MessageChannel to expose availability and request a current
+decoded-moment reference; the channel carries no execution capability or artifact contents.
+
+Fullscreen contains the entire Replay including its controls. It is separate from expanding the
+native preview pane. An optional overlay portal scope keeps menus/tooltips inside the fullscreen
+element; ordinary UI still uses its original portal container. Keyboard tab navigation supports
+arrow keys, Home and End. The Codex reference footer keeps copying visible and raw JSON inside
+expandable details, with a manual-copy fallback; it does not inject or send a Codex message.
+Native questions freeze the selected reference before leaving Replay fullscreen and handing it to
+the conversation or chooser. Replacing the source while that handoff is pending cancels delivery.
 
 Optional skipping only skips intervals with no new recorded evidence. It is disabled by default,
 preserves real timestamps and displays the skipped interval. It does not claim the program was idle.

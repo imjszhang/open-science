@@ -7766,6 +7766,19 @@
     "Jump to recorded footage": "Перейти к записанному видео",
     "Loading replay…": "Загрузка воспроизведения…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "Воспроизведение следует записанным меткам времени исследования; пробелы не означают отсутствие активности.",
-    "Could not reference this research evidence.": "Не удалось сослаться на эти материалы исследования."
+    "Could not reference this research evidence.": "Не удалось сослаться на эти материалы исследования.",
+    "Recorded media size": "Размер записанного медиа",
+    "Fit to window": "Вписать в окно",
+    "Actual size (100%)": "Исходный размер (100 %)",
+    "Playback options": "Параметры воспроизведения",
+    "Ask about this run": "Спросить об этом запуске",
+    "Ask about this record": "Спросить об этой записи",
+    "Ask about this content": "Спросить об этом содержимом",
+    "Collapse preview": "Свернуть предпросмотр",
+    "Expand preview": "Развернуть предпросмотр",
+    "Original conversation": "Исходный диалог",
+    "Question options": "Параметры вопроса",
+    "Result details": "Сведения о результате",
+    "Saved reference details": "Сведения о сохранённой ссылке"
   }
 }

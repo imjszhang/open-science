@@ -7459,6 +7459,19 @@
     "Jump to recorded footage": "Zur Aufnahme springen",
     "Loading replay…": "Wiedergabe wird geladen…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "Die Wiedergabe folgt den aufgezeichneten Forschungszeitpunkten; Lücken bedeuten keine Inaktivität.",
-    "Could not reference this research evidence.": "Diese Forschungsbelege konnten nicht referenziert werden."
+    "Could not reference this research evidence.": "Diese Forschungsbelege konnten nicht referenziert werden.",
+    "Recorded media size": "Größe der aufgezeichneten Medien",
+    "Fit to window": "An Fenster anpassen",
+    "Actual size (100%)": "Originalgröße (100 %)",
+    "Playback options": "Wiedergabeoptionen",
+    "Ask about this run": "Zu diesem Lauf fragen",
+    "Ask about this record": "Zu diesem Eintrag fragen",
+    "Ask about this content": "Zu diesem Inhalt fragen",
+    "Collapse preview": "Vorschau verkleinern",
+    "Expand preview": "Vorschau erweitern",
+    "Original conversation": "Ursprüngliche Konversation",
+    "Question options": "Frageoptionen",
+    "Result details": "Ergebnisdetails",
+    "Saved reference details": "Details zur gespeicherten Referenz"
   }
 }

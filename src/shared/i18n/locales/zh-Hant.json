@@ -7299,6 +7299,19 @@
     "Jump to recorded footage": "跳至已錄製畫面",
     "Loading replay…": "正在載入回放…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "播放遵循已記錄的研究時間；記錄空缺不代表沒有活動。",
-    "Could not reference this research evidence.": "無法引用此研究證據。"
+    "Could not reference this research evidence.": "無法引用此研究證據。",
+    "Recorded media size": "錄製畫面尺寸",
+    "Fit to window": "符合視窗大小",
+    "Actual size (100%)": "原始尺寸（100%）",
+    "Playback options": "播放選項",
+    "Ask about this run": "詢問本次執行",
+    "Ask about this record": "詢問此紀錄",
+    "Ask about this content": "詢問目前內容",
+    "Collapse preview": "收合預覽",
+    "Expand preview": "展開預覽",
+    "Original conversation": "原始對話",
+    "Question options": "提問選項",
+    "Result details": "結果詳情",
+    "Saved reference details": "已儲存的引用詳情"
   }
 }

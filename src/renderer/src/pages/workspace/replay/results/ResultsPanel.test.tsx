@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ResultsPanel, type ReplayResultEntry } from './ResultsPanel'
+import { ReplayMaterialActionProvider, type ReplayMaterialAction } from '../replay-material-action'
 import { RecordedResourcePreview } from './RecordedResourcePreview'
 import { createArtifactVersionLocator } from '../../../../../../shared/artifact-provenance'
 import { readRecordedResource } from './recorded-resource-reader'
@@ -171,5 +172,98 @@ describe('result publication times', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Show technical attachments' }))
     expect(screen.getByRole('button', { name: /clip.webm/ })).toBeTruthy()
     expect(screen.queryByText('Final result')).toBeNull()
+  })
+})
+
+describe('compact research Results', () => {
+  it('keeps current/all/unknown publication rules while moving immutable metadata into details', async () => {
+    const known = { ...entry('early.txt'), availableAt: 100 },
+      unknown = entry('unknown.txt')
+    const read = vi
+      .fn()
+      .mockResolvedValue({ content: 'Saved result', mimeType: 'text/plain', truncated: false })
+    render(
+      <ResultsPanel
+        presentationMode="research"
+        entries={[known, unknown]}
+        recordedAt={200}
+        read={read}
+      />
+    )
+    expect(screen.getByRole('combobox', { name: 'Result visibility' })).toHaveProperty(
+      'value',
+      'current'
+    )
+    expect(screen.queryByRole('button', { name: /unknown.txt/ })).toBeNull()
+    expect(screen.getByText(/Some results have no saved publication time/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'early.txt' }))
+    await screen.findByText('Saved result')
+    const details = screen.getByText('Result details').closest('details')!
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('file-v1')
+    expect(details.textContent).toContain('Project recording')
+    expect(details.textContent).toContain('Stage not specified')
+    fireEvent.change(screen.getByRole('combobox', { name: 'Result visibility' }), {
+      target: { value: 'all' }
+    })
+    expect(screen.getByRole('button', { name: 'unknown.txt' })).toBeTruthy()
+    expect(
+      screen.getByText('Showing results from the entire research, including later records.')
+    ).toBeTruthy()
+  })
+  it('registers the exact selected file once for the shared footer and clears inactive actions', async () => {
+    const selected = entry('report.txt'),
+      ask = vi.fn(),
+      changed = vi.fn<(action: ReplayMaterialAction | undefined) => void>()
+    const read = vi
+      .fn()
+      .mockResolvedValue({ content: 'Report', mimeType: 'text/plain', truncated: false })
+    const view = render(
+      <ReplayMaterialActionProvider onActionChange={changed}>
+        <ResultsPanel entries={[selected]} read={read} onAskFile={ask} />
+      </ReplayMaterialActionProvider>
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'report.txt' }))
+    await screen.findByText('Report')
+    expect(screen.queryByRole('button', { name: 'Ask about this file' })).toBeNull()
+    const action = changed.mock.calls.at(-1)![0]!
+    expect(action.label).toBe('Ask about this file')
+    await act(async () => action.onAsk())
+    expect(ask).toHaveBeenCalledExactlyOnceWith(selected)
+    view.rerender(
+      <ReplayMaterialActionProvider onActionChange={changed}>
+        <ResultsPanel entries={[selected]} active={false} read={read} onAskFile={ask} />
+      </ReplayMaterialActionProvider>
+    )
+    expect(changed).toHaveBeenLastCalledWith(undefined)
+    // Even a stale footer callback cannot ask while its source material is inactive.
+    await act(async () => action.onAsk())
+    expect(ask).toHaveBeenCalledTimes(1)
+  })
+  it('withdraws the shared file action when seeking before the selected version was published', async () => {
+    const selected = { ...entry('later.txt'), availableAt: 300 },
+      changed = vi.fn<(action: ReplayMaterialAction | undefined) => void>()
+    const read = vi
+        .fn()
+        .mockResolvedValue({ content: 'Later output', mimeType: 'text/plain', truncated: false }),
+      ask = vi.fn()
+    const view = render(
+      <ReplayMaterialActionProvider onActionChange={changed}>
+        <ResultsPanel entries={[selected]} recordedAt={400} read={read} onAskFile={ask} />
+      </ReplayMaterialActionProvider>
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'later.txt' }))
+    await screen.findByText('Later output')
+    expect(changed.mock.calls.at(-1)![0]?.label).toBe('Ask about this file')
+    view.rerender(
+      <ReplayMaterialActionProvider onActionChange={changed}>
+        <ResultsPanel entries={[selected]} recordedAt={100} read={read} onAskFile={ask} />
+      </ReplayMaterialActionProvider>
+    )
+    expect(changed).toHaveBeenLastCalledWith(undefined)
+    expect(screen.queryByText('Later output')).toBeNull()
+    expect(
+      screen.getByText('No results have a known publication time before this moment.')
+    ).toBeTruthy()
   })
 })

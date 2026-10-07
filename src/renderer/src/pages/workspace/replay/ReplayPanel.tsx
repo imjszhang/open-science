@@ -1,3 +1,4 @@
+import { OverlayPortalContainer } from '@/components/ui/overlay-portal-container'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { useSessionReplayStore } from '@/stores/session-replay-store'
 import {
@@ -8,7 +9,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -23,7 +24,9 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp
+  ChevronUp,
+  Expand,
+  Shrink
 } from 'lucide-react'
 import type {
   ReplayDocument,
@@ -46,6 +49,7 @@ import {
 import { createReplayPresentation } from './replay-presentation'
 import { ReplayStage, type ReplayMaterialView } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
+import { ReplayMaterialActionProvider, type ReplayMaterialAction } from './replay-material-action'
 import { advanceResearchReplay, type ReplayRecordedRange } from './replay-recorded-gaps'
 import { formatReplayTime } from './replay-navigation'
 import type {
@@ -66,6 +70,8 @@ import { useObservationPhaseLabel } from './replay-observation-labels'
 import { ReplaySourceDetails } from './ReplaySourceDetails'
 import {
   captureDiscussionStep,
+  captureDiscussionNotebookRun,
+  captureDiscussionInspectedStep,
   captureDiscussionSession,
   subscribeReplaySeek,
   consumeReplaySeek,
@@ -138,6 +144,10 @@ const unavailableNotebookReader: ReplayNotebookRunReader = async () => ({
 })
 
 export type ReplayPanelProps = {
+  /** Opt in only for the read-only original research surface. */
+  presentationMode?: 'research'
+  footerReference?: React.ReactNode
+  info?: React.ReactNode
   host?: ReplayPanelHost | null
   /** Actual recording coverage; timestamps are absolute, never inferred activity durations. */
   recordedCoverage?: Readonly<Record<string, readonly ReplayRecordedRange[]>>
@@ -222,6 +232,9 @@ const defaultNotebookReader: ReplayNotebookRunReader = (source, index, options) 
 
 const ReplayPanelContent = ({
   document: incomingDocument,
+  presentationMode,
+  footerReference,
+  info,
   host = nativeReplayHost,
   recordedCoverage,
   recordedTimeOrigins,
@@ -261,8 +274,19 @@ const ReplayPanelContent = ({
         : liveSource,
     [recorded, liveSource]
   )
+  const researchPresentation = presentationMode === 'research' && !live
   const phaseLabel = useObservationPhaseLabel()
-  const [materialViewId, setMaterialViewId] = useState(materialViewRequest?.id ?? 'notebook')
+  const [materialViewId, setMaterialViewId] = useState(
+    materialViewRequest?.id ?? (researchPresentation ? 'conversation' : 'notebook')
+  )
+  const [materialAction, setMaterialAction] = useState<ReplayMaterialAction>()
+  const [inspectedContent, setInspectedContent] = useState<{
+    kind: 'conversation' | 'notebook'
+    stepId: string
+    runId?: string
+    savedHistory?: boolean
+  }>()
+  const [fullscreen, setFullscreen] = useState(false)
   // Inspecting freezes both record navigation and bounded evidence. New logs never replace
   // the evidence a user is reading or about to reference in a question.
   const [inspection, setInspection] = useState<{
@@ -334,16 +358,20 @@ const ReplayPanelContent = ({
   const [materialsOverride, setMaterialsOverride] = useState<boolean | undefined>(
     materialViewRequest ? true : undefined
   )
-  const materialsOpen = materialsOverride ?? ((!live || !!recorded) && (expanded || wide))
+  const materialsOpen = researchPresentation
+    ? materialViewId !== 'conversation' || Boolean(selectedResourceId)
+    : (materialsOverride ?? ((!live || !!recorded) && (expanded || wide)))
   const [handledMaterialRequest, setHandledMaterialRequest] = useState(materialViewRequest)
   if (materialViewRequest && materialViewRequest !== handledMaterialRequest) {
     setHandledMaterialRequest(materialViewRequest)
     setMaterialViewId(materialViewRequest.id)
+    if (materialViewRequest.id !== materialViewId) setMaterialAction(undefined)
+    setInspectedContent(undefined)
     setMaterialsOverride(true)
   }
 
   const [filesOverride, setFilesOverride] = useState<boolean>()
-  const filesOpen = filesOverride ?? (expanded || wide)
+  const filesOpen = filesOverride ?? (!researchPresentation && (expanded || wide))
   const [previousExpanded, setPreviousExpanded] = useState(expanded)
   if (expanded !== previousExpanded) {
     setPreviousExpanded(expanded)
@@ -362,7 +390,21 @@ const ReplayPanelContent = ({
   const [conversationFocusRequest, setConversationFocusRequest] = useState(0)
   const [filePage, setFilePage] = useState(0)
   const informationTitleId = useId()
+  const [informationOpen, setInformationOpen] = useState(false)
+  const [informationActive, setInformationActive] = useState(active)
+  if (informationActive !== active) {
+    setInformationActive(active)
+    if (!active) setInformationOpen(false)
+  }
+  const researchContentId = useId()
+  const questionActionChosen = useRef(false)
   const panel = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!researchPresentation) return
+    const update = (): void => setFullscreen(document.fullscreenElement === panel.current)
+    document.addEventListener('fullscreenchange', update)
+    return () => document.removeEventListener('fullscreenchange', update)
+  }, [researchPresentation])
   const [tooltipBoundary, setTooltipBoundary] = useState<HTMLDivElement | null>(null)
   const [seekMissing, setSeekMissing] = useState(false)
   const [resources, setResources] = useState<ReplayResourceMap>({})
@@ -684,7 +726,7 @@ const ReplayPanelContent = ({
       if (id && !selectedResourceId) beforeFile.current = materialsOpen
       setSelectedResourceId(id)
       setMaterialsOverride(id ? true : beforeFile.current)
-      if (id && !wide) setFilesOverride(false)
+      if (id && (!wide || researchPresentation)) setFilesOverride(false)
       if (id) {
         const index = materialCatalog.files.findIndex((resource) => resource.id === id)
         setFilePage(Math.floor(index / DRAWER_PAGE_SIZE))
@@ -702,7 +744,15 @@ const ReplayPanelContent = ({
         })
       }
     },
-    [materialCatalog.files, pause, selectedResourceId, materialsId, materialsOpen, wide]
+    [
+      materialCatalog.files,
+      pause,
+      selectedResourceId,
+      materialsId,
+      materialsOpen,
+      wide,
+      researchPresentation
+    ]
   )
   const seek = useCallback(
     (position: number) => {
@@ -711,6 +761,7 @@ const ReplayPanelContent = ({
       setSelectedResourceId(undefined)
       setPositionMs(position)
       setSkipped(undefined)
+      setInspectedContent(undefined)
       setConversationFocusRequest((request) => request + 1)
       setNotebookFollowing(true)
 
@@ -788,6 +839,7 @@ const ReplayPanelContent = ({
     }
     if (!branch?.steps.length) return
     setSelectedResourceId(undefined)
+    setInspectedContent(undefined)
     setConversationFocusRequest((request) => request + 1)
     setNotebookFollowing(true)
 
@@ -832,11 +884,183 @@ const ReplayPanelContent = ({
       </nav>
     ) : null
 
+  const branchSelector =
+    replayDocument.branches.length > 1 ? (
+      <Select
+        value={scene.branchId}
+        onOpenChange={(open) => {
+          if (open) pause()
+        }}
+        onValueChange={(value) => {
+          pause()
+          setSelectedResourceId(undefined)
+          setInspectedContent(undefined)
+          const saved = branchPositions.get(value)
+          const restored =
+            saved && viewRef.current
+              ? restoredPosition(replayDocument, {
+                  ...viewRef.current,
+                  ...saved,
+                  anchor: undefined
+                })
+              : undefined
+          setBranchId(value)
+          setPositionMs(restored?.positionMs ?? 0)
+          setNotebookFollowing(true)
+
+          setNotebookLimit(undefined)
+          setFilePage(0)
+        }}
+      >
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              asChild
+              onFocus={(event) => {
+                if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
+              }}
+            >
+              <SelectTrigger
+                aria-label={t('Replay branch')}
+                className="relative size-8 shrink-0 justify-center border-transparent bg-transparent p-0 [&>svg:last-child]:hidden"
+              >
+                <span>
+                  <GitBranch size={16} aria-hidden="true" />
+                  <span
+                    aria-hidden="true"
+                    className="absolute right-0.5 top-0 rounded-sm bg-bg-000 px-0.5 text-[9px] leading-3 tabular-nums"
+                  >
+                    {replayDocument.branches.findIndex((item) => item.id === scene.branchId) + 1}
+                  </span>
+                </span>
+                <span className="sr-only">
+                  <SelectValue />
+                </span>
+              </SelectTrigger>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              align="end"
+              sideOffset={6}
+              collisionBoundary={tooltipBoundary}
+              collisionPadding={8}
+            >
+              {t('Replay branch')} ·{' '}
+              {branch?.kind === 'unattributed'
+                ? t('Related material')
+                : t('Branch {{index}}', {
+                    index:
+                      replayDocument.branches.findIndex((item) => item.id === scene.branchId) + 1
+                  })}
+              {branch?.label ? ` · ${branch.label}` : ''}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <SelectContent
+          align="end"
+          collisionPadding={12}
+          className="max-w-[min(24rem,calc(100vw-1.5rem))]"
+        >
+          {replayDocument.branches.map((item, index) => (
+            <SelectItem
+              key={item.id}
+              value={item.id}
+              className="break-words"
+              icon={
+                item.kind === 'unattributed' ? (
+                  <Library size={14} aria-hidden="true" />
+                ) : (
+                  <GitBranch size={14} aria-hidden="true" />
+                )
+              }
+            >
+              {item.kind === 'unattributed'
+                ? t('Related material')
+                : t('Branch {{index}}', { index: index + 1 })}
+              {item.label ? ` · ${item.label}` : ''}
+              {item.parentBranchId
+                ? ` · ${t('From branch {{index}}', { index: replayDocument.branches.findIndex((parent) => parent.id === item.parentBranchId) + 1 })}`
+                : ''}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : null
+  const selectMaterial = (id: string): void => {
+    if (id === materialViewId) return
+    pause()
+    setMaterialAction(undefined)
+    setSelectedResourceId(undefined)
+    setInspectedContent(undefined)
+    setMaterialViewId(id)
+    onMaterialViewChange?.(id)
+  }
+  const inspectedStep =
+    inspectedContent?.kind === materialViewId
+      ? branch?.steps.find((step) => step.id === inspectedContent.stepId)
+      : undefined
+  const notebookStep =
+    inspectedStep ?? [...scene.visibleSteps].reverse().find((step) => step.runs.length)
+  const contentStep = materialViewId === 'notebook' ? notebookStep : (inspectedStep ?? scene.step)
+  const contentAction =
+    materialViewId !== 'conversation' && materialViewId !== 'notebook' ? materialAction : undefined
+  const askContent = (): void => {
+    pause()
+    if (contentAction) {
+      contentAction.onAsk()
+      return
+    }
+    if (!contentStep) return
+    if (materialViewId === 'notebook') {
+      const runId = inspectedContent?.runId ?? contentStep.runs.at(-1)?.runId
+      if (!runId) return
+      const captured = captureDiscussionNotebookRun(
+        replayDocument,
+        scene,
+        contentStep.id,
+        runId,
+        recordedTimeOrigins?.[scene.branchId],
+        runDetails,
+        resources
+      )
+      if (captured) onAskStep(captured)
+      return
+    }
+    if (!inspectedContent) {
+      onAskStep(captureDiscussionStep(replayDocument, scene, runDetails, resources))
+      return
+    }
+    const captured = captureDiscussionInspectedStep(
+      replayDocument,
+      scene,
+      contentStep.id,
+      inspectedContent.savedHistory,
+      recordedTimeOrigins?.[scene.branchId],
+      runDetails,
+      resources
+    )
+    if (captured) onAskStep(captured)
+  }
+  const contentLabel =
+    contentAction?.label ??
+    (materialViewId === 'notebook'
+      ? t('Ask about this run')
+      : materialViewId === 'conversation'
+        ? t('Ask about this record')
+        : t('Ask about this content'))
+  const contentDisabled =
+    discussionPending ||
+    Boolean(contentAction?.disabled || contentAction?.pending) ||
+    (materialViewId === 'conversation' || materialViewId === 'notebook'
+      ? !contentStep
+      : !contentAction)
+
   return (
     <div
       ref={panel}
       className="flex h-full min-h-0 min-w-0 flex-col bg-bg-10"
       data-testid="replay-panel"
+      data-replay-presentation={researchPresentation ? 'research' : undefined}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return
         if (event.key === ' ') {
@@ -863,24 +1087,28 @@ const ReplayPanelContent = ({
         className="flex shrink-0 items-center gap-1 border-b border-border-200 bg-bg-000 px-2 py-1"
       >
         <div className="min-w-0 flex-1">
-          <p className="px-2 text-[11px] text-text-300" data-testid="replay-process-kind">
-            {live
-              ? live.recorded
-                ? t('Experiment run · Saved recording')
-                : isObservationTerminal(live.snapshot)
-                  ? t('Experiment run · Run history')
-                  : t('Experiment run · Live observation')
-              : t('Session process · Reconstructed from records')}
-          </p>
+          {!researchPresentation ? (
+            <p className="px-2 text-[11px] text-text-300" data-testid="replay-process-kind">
+              {live
+                ? live.recorded
+                  ? t('Experiment run · Saved recording')
+                  : isObservationTerminal(live.snapshot)
+                    ? t('Experiment run · Run history')
+                    : t('Experiment run · Live observation')
+                : t('Session process · Reconstructed from records')}
+            </p>
+          ) : null}
           <Popover
+            open={informationOpen}
             onOpenChange={(open) => {
+              setInformationOpen(open)
               if (open) pause()
             }}
           >
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
-                size={live ? 'sm' : 'default'}
+                size={live || researchPresentation ? 'sm' : 'default'}
                 className="min-w-0 max-w-full justify-start gap-1.5 px-2 text-[13px] font-semibold"
                 data-testid="replay-information-trigger"
                 aria-label={t('Session information: {{title}}', {
@@ -888,6 +1116,11 @@ const ReplayPanelContent = ({
                 })}
               >
                 <span className="truncate">{replayDocument.source.title}</span>
+                {researchPresentation ? (
+                  <span className="shrink-0 text-xs font-normal text-text-300">
+                    {t('Read-only')}
+                  </span>
+                ) : null}
                 <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
               </Button>
             </PopoverTrigger>
@@ -923,6 +1156,18 @@ const ReplayPanelContent = ({
                       )
                     : t('Presentation timing is reconstructed; recorded results are unchanged.')}
               </p>
+              {researchPresentation ? (
+                <div className="my-3 flex flex-wrap items-center gap-2">
+                  {branchSelector}
+                  <PopoverClose asChild>
+                    <Button variant="outline" size="sm" onClick={() => setFilesOverride(true)}>
+                      <Files size={14} aria-hidden="true" />
+                      {t('View files')}
+                    </Button>
+                  </PopoverClose>
+                  {info}
+                </div>
+              ) : null}
               {replayDocument.source.packageOrigin ? (
                 <div className="border-t border-border pt-3">
                   <ReplaySourceDetails source={replayDocument.source} onInspect={pause} />
@@ -931,7 +1176,7 @@ const ReplayPanelContent = ({
             </PopoverContent>
           </Popover>
         </div>
-        {!live || recorded ? (
+        {!researchPresentation && (!live || recorded) ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -953,7 +1198,7 @@ const ReplayPanelContent = ({
             </Tooltip>
           </TooltipProvider>
         ) : null}
-        {onChooseConversation && !live ? (
+        {onChooseConversation && !live && !researchPresentation ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -982,109 +1227,8 @@ const ReplayPanelContent = ({
             </Tooltip>
           </TooltipProvider>
         ) : null}
-        {replayDocument.branches.length > 1 ? (
-          <Select
-            value={scene.branchId}
-            onOpenChange={(open) => {
-              if (open) pause()
-            }}
-            onValueChange={(value) => {
-              pause()
-              setSelectedResourceId(undefined)
-              const saved = branchPositions.get(value)
-              const restored =
-                saved && viewRef.current
-                  ? restoredPosition(replayDocument, {
-                      ...viewRef.current,
-                      ...saved,
-                      anchor: undefined
-                    })
-                  : undefined
-              setBranchId(value)
-              setPositionMs(restored?.positionMs ?? 0)
-              setNotebookFollowing(true)
-
-              setNotebookLimit(undefined)
-              setFilePage(0)
-            }}
-          >
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  asChild
-                  onFocus={(event) => {
-                    if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
-                  }}
-                >
-                  <SelectTrigger
-                    aria-label={t('Replay branch')}
-                    className="relative size-8 shrink-0 justify-center border-transparent bg-transparent p-0 [&>svg:last-child]:hidden"
-                  >
-                    <span>
-                      <GitBranch size={16} aria-hidden="true" />
-                      <span
-                        aria-hidden="true"
-                        className="absolute right-0.5 top-0 rounded-sm bg-bg-000 px-0.5 text-[9px] leading-3 tabular-nums"
-                      >
-                        {replayDocument.branches.findIndex((item) => item.id === scene.branchId) +
-                          1}
-                      </span>
-                    </span>
-                    <span className="sr-only">
-                      <SelectValue />
-                    </span>
-                  </SelectTrigger>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  align="end"
-                  sideOffset={6}
-                  collisionBoundary={tooltipBoundary}
-                  collisionPadding={8}
-                >
-                  {t('Replay branch')} ·{' '}
-                  {branch?.kind === 'unattributed'
-                    ? t('Related material')
-                    : t('Branch {{index}}', {
-                        index:
-                          replayDocument.branches.findIndex((item) => item.id === scene.branchId) +
-                          1
-                      })}
-                  {branch?.label ? ` · ${branch.label}` : ''}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <SelectContent
-              align="end"
-              collisionPadding={12}
-              className="max-w-[min(24rem,calc(100vw-1.5rem))]"
-            >
-              {replayDocument.branches.map((item, index) => (
-                <SelectItem
-                  key={item.id}
-                  value={item.id}
-                  className="break-words"
-                  icon={
-                    item.kind === 'unattributed' ? (
-                      <Library size={14} aria-hidden="true" />
-                    ) : (
-                      <GitBranch size={14} aria-hidden="true" />
-                    )
-                  }
-                >
-                  {item.kind === 'unattributed'
-                    ? t('Related material')
-                    : t('Branch {{index}}', { index: index + 1 })}
-                  {item.label ? ` · ${item.label}` : ''}
-                  {item.parentBranchId
-                    ? ` · ${t('From branch {{index}}', { index: replayDocument.branches.findIndex((parent) => parent.id === item.parentBranchId) + 1 })}`
-                    : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
-        {!live || recorded ? (
+        {!researchPresentation ? branchSelector : null}
+        {!researchPresentation && (!live || recorded) ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -1123,43 +1267,62 @@ const ReplayPanelContent = ({
             </Tooltip>
           </TooltipProvider>
         ) : null}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger
-              asChild
-              onFocus={(event) => {
-                if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
-              }}
-            >
-              <Button
-                ref={filesTrigger}
-                variant={filesOpen ? 'secondary' : 'ghost'}
-                size="icon"
-                aria-label={t('View files')}
-                aria-expanded={filesOpen}
-                aria-controls={filesId}
-                onClick={() => {
-                  setFilesOverride(!filesOpen)
-                  if (!filesOpen)
-                    requestAnimationFrame(() =>
-                      panel.current?.querySelector<HTMLElement>(`[id="${filesId}"]`)?.focus()
-                    )
+        {!researchPresentation ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                asChild
+                onFocus={(event) => {
+                  if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
                 }}
               >
-                <Files size={16} aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              align="end"
-              sideOffset={6}
-              collisionBoundary={tooltipBoundary}
-              collisionPadding={8}
-            >
-              {t('View files')}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+                <Button
+                  ref={filesTrigger}
+                  variant={filesOpen ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label={t('View files')}
+                  aria-expanded={filesOpen}
+                  aria-controls={filesId}
+                  onClick={() => {
+                    setFilesOverride(!filesOpen)
+                    if (!filesOpen)
+                      requestAnimationFrame(() =>
+                        panel.current?.querySelector<HTMLElement>(`[id="${filesId}"]`)?.focus()
+                      )
+                  }}
+                >
+                  <Files size={16} aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                align="end"
+                sideOffset={6}
+                collisionBoundary={tooltipBoundary}
+                collisionPadding={8}
+              >
+                {t('View files')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
+        {researchPresentation ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={fullscreen ? t('Exit full screen') : t('Enter full screen')}
+            onClick={() => {
+              if (document.fullscreenElement === panel.current) void document.exitFullscreen?.()
+              else void panel.current?.requestFullscreen?.().catch(() => undefined)
+            }}
+          >
+            {fullscreen ? (
+              <Shrink size={16} aria-hidden="true" />
+            ) : (
+              <Expand size={16} aria-hidden="true" />
+            )}
+          </Button>
+        ) : null}
         {onToggleExpanded ? (
           <TooltipProvider>
             <Tooltip>
@@ -1173,7 +1336,15 @@ const ReplayPanelContent = ({
                   variant="ghost"
                   type="button"
                   size="icon"
-                  aria-label={expanded ? t('Exit full screen') : t('Enter full screen')}
+                  aria-label={
+                    researchPresentation
+                      ? expanded
+                        ? t('Collapse preview')
+                        : t('Expand preview')
+                      : expanded
+                        ? t('Exit full screen')
+                        : t('Enter full screen')
+                  }
                   onClick={onToggleExpanded}
                 >
                   {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
@@ -1186,12 +1357,66 @@ const ReplayPanelContent = ({
                 collisionBoundary={tooltipBoundary}
                 collisionPadding={8}
               >
-                {expanded ? t('Exit full screen') : t('Enter full screen')}
+                {researchPresentation
+                  ? expanded
+                    ? t('Collapse preview')
+                    : t('Expand preview')
+                  : expanded
+                    ? t('Exit full screen')
+                    : t('Enter full screen')}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         ) : null}
       </div>
+      {researchPresentation ? (
+        <div
+          role="tablist"
+          aria-label={t('Research materials')}
+          onKeyDown={(event) => {
+            const tabs = [
+              ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+            ]
+            const current = tabs.findIndex((tab) => tab === document.activeElement)
+            const next =
+              event.key === 'ArrowRight'
+                ? (current + 1) % tabs.length
+                : event.key === 'ArrowLeft'
+                  ? (current - 1 + tabs.length) % tabs.length
+                  : event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? tabs.length - 1
+                      : -1
+            if (next < 0) return
+            event.preventDefault()
+            tabs[next]?.click()
+            tabs[next]?.focus()
+          }}
+          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border-200 bg-bg-000 px-2 py-1"
+        >
+          {[
+            { id: 'conversation', label: t('Original conversation') },
+            { id: 'notebook', label: t('Notebook') },
+            ...(materialViews ?? [])
+          ].map((view) => (
+            <Button
+              key={view.id}
+              role="tab"
+              aria-selected={materialViewId === view.id}
+              aria-controls={researchContentId}
+              tabIndex={materialViewId === view.id ? 0 : -1}
+              data-replay-material-view={view.id}
+              variant={materialViewId === view.id ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-8 shrink-0 px-2 text-xs"
+              onClick={() => selectMaterial(view.id)}
+            >
+              {view.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
       {live ? (
         <div
           className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1 text-xs"
@@ -1263,149 +1488,172 @@ const ReplayPanelContent = ({
             : t('The saved step is unavailable. Replay starts at the beginning.')}
         </p>
       ) : null}
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        <ReplayStage
-          sourceIdentity={live?.sourceIdentity}
-          renderResource={renderResource}
-          followPrimary={
-            !live || (!live.recorded && !inspection && active && !liveProjectTabActive)
-          }
-          primaryMode={liveProjectTabActive ? 'project' : 'record'}
-          liveProjectActive={
-            liveProjectTabActive &&
-            observationMode === 'follow' &&
-            live?.connection === 'connected' &&
-            live.snapshot.phase === 'running' &&
-            live.snapshot.run?.status === 'running'
-          }
-          primaryLabel={live ? t('Execution record') : undefined}
-          primaryContent={
-            live && currentObservation ? (
-              <ReplayLiveRecord
-                historicalOnly={!!recorded}
-                snapshot={currentObservation}
-                latestSnapshot={live.snapshot}
-                executionContext={live.executionContext ?? live.snapshot.executionContext}
-                mode={observationMode!}
-                recordedSurface={live.renderRecordedSurface?.(currentObservation)}
-                historyTruncated={live.historyTruncated}
-                onProjectActiveChange={setLiveProjectTabActive}
-                projectActivation={
-                  observationMode === 'follow' &&
-                  live.connection === 'connected' &&
-                  !live.recorded &&
-                  live.snapshot.phase === 'running' &&
-                  live.snapshot.run?.status === 'running'
-                    ? live.projectActivation
-                    : undefined
-                }
-                runtimeSurface={
-                  live.connection === 'connected' &&
-                  !live.recorded &&
-                  live.snapshot.phase === 'running' &&
-                  live.snapshot.run?.status === 'running'
-                    ? live.runtimeSurface
-                    : undefined
-                }
-              />
-            ) : undefined
-          }
-          fitContainer
-          selectedResource={selectedResource}
-          onSelectResource={selectResource}
-          wide={wide}
-          materialsOpen={materialsOpen}
-          materialsId={materialsId}
-          materialViews={materialViews}
-          materialPlayback={{
-            branchId: scene.branchId,
-            positionMs: scene.positionMs,
-            recordedAt:
-              recordedTimeOrigins?.[scene.branchId] !== undefined
-                ? recordedTimeOrigins[scene.branchId] + scene.positionMs
-                : scene.step?.recordedAt,
-            continuous: recordedTimeOrigins?.[scene.branchId] !== undefined,
-            playing: playing && active && ready && !scene.ended,
-            speed,
-            onSeekRecordedAt: (recordedAt) => {
-              const origin = recordedTimeOrigins?.[scene.branchId]
-              if (origin !== undefined) seek(recordedAt - origin)
-              else {
-                // Snapshot navigation has discrete anchors. Use the latest known state;
-                // never stretch its presentation duration to simulate elapsed recording time.
-                const step = branch?.steps
-                  .filter((step) => step.recordedAt !== undefined && step.recordedAt <= recordedAt)
-                  .reduce<ReplayStep | undefined>(
-                    (latest, step) =>
-                      !latest || step.recordedAt! >= latest.recordedAt! ? step : latest,
-                    undefined
-                  )
-                if (step) seek(step.startMs)
-                else pause()
-              }
+      <div
+        className="min-h-0 min-w-0 flex-1 overflow-hidden"
+        id={researchPresentation ? researchContentId : undefined}
+        role={researchPresentation ? 'tabpanel' : undefined}
+        aria-label={
+          researchPresentation
+            ? materialViewId === 'conversation'
+              ? t('Original conversation')
+              : materialViewId === 'notebook'
+                ? t('Notebook')
+                : materialViews?.find((view) => view.id === materialViewId)?.label
+            : undefined
+        }
+      >
+        <ReplayMaterialActionProvider
+          enabled={researchPresentation}
+          onActionChange={setMaterialAction}
+        >
+          <ReplayStage
+            presentationMode={researchPresentation ? 'research' : undefined}
+            onSelectContent={researchPresentation ? setInspectedContent : undefined}
+            selectedContent={researchPresentation ? inspectedContent : undefined}
+            sourceIdentity={live?.sourceIdentity}
+            renderResource={renderResource}
+            followPrimary={
+              !live || (!live.recorded && !inspection && active && !liveProjectTabActive)
             }
-          }}
-          materialsActive={active}
-          materialViewId={materialViewId}
-          onMaterialViewChange={(id) => {
-            pause()
-            setMaterialViewId(id)
-            onMaterialViewChange?.(id)
-          }}
-          filesOpen={filesOpen}
-          filesId={filesId}
-          onOpenFiles={() => setFilesOverride(true)}
-          onCloseFiles={() => {
-            setFilesOverride(false)
-            filesTrigger.current?.focus()
-          }}
-          onCloseMaterials={() => {
-            setSelectedResourceId(undefined)
-            setMaterialsOverride(false)
-            materialsTrigger.current?.focus()
-          }}
-          onSeek={seek}
-          notebookRuns={pageRuns}
-          fileResources={pageFiles}
-          notebookHistoryControl={
-            notebookStart > 0 ? (
-              <div className="flex justify-center px-3 py-2 [overflow-anchor:none]">
-                <Button
-                  variant="secondary"
-                  className="max-w-full gap-1.5"
-                  onClick={() => {
-                    pause()
-                    setNotebookFollowing(false)
-                    setNotebookLimit(
-                      (count) => (count ?? REPLAY_MATERIAL_RUN_LIMIT) + REPLAY_MATERIAL_RUN_LIMIT
+            primaryMode={liveProjectTabActive ? 'project' : 'record'}
+            liveProjectActive={
+              liveProjectTabActive &&
+              observationMode === 'follow' &&
+              live?.connection === 'connected' &&
+              live.snapshot.phase === 'running' &&
+              live.snapshot.run?.status === 'running'
+            }
+            primaryLabel={live ? t('Execution record') : undefined}
+            primaryContent={
+              live && currentObservation ? (
+                <ReplayLiveRecord
+                  historicalOnly={!!recorded}
+                  snapshot={currentObservation}
+                  latestSnapshot={live.snapshot}
+                  executionContext={live.executionContext ?? live.snapshot.executionContext}
+                  mode={observationMode!}
+                  recordedSurface={live.renderRecordedSurface?.(currentObservation)}
+                  historyTruncated={live.historyTruncated}
+                  onProjectActiveChange={setLiveProjectTabActive}
+                  projectActivation={
+                    observationMode === 'follow' &&
+                    live.connection === 'connected' &&
+                    !live.recorded &&
+                    live.snapshot.phase === 'running' &&
+                    live.snapshot.run?.status === 'running'
+                      ? live.projectActivation
+                      : undefined
+                  }
+                  runtimeSurface={
+                    live.connection === 'connected' &&
+                    !live.recorded &&
+                    live.snapshot.phase === 'running' &&
+                    live.snapshot.run?.status === 'running'
+                      ? live.runtimeSurface
+                      : undefined
+                  }
+                />
+              ) : undefined
+            }
+            fitContainer
+            selectedResource={selectedResource}
+            onSelectResource={selectResource}
+            wide={researchPresentation ? false : wide}
+            materialsOpen={materialsOpen}
+            materialsId={materialsId}
+            materialViews={materialViews}
+            materialPlayback={{
+              branchId: scene.branchId,
+              positionMs: scene.positionMs,
+              recordedAt:
+                recordedTimeOrigins?.[scene.branchId] !== undefined
+                  ? recordedTimeOrigins[scene.branchId] + scene.positionMs
+                  : scene.step?.recordedAt,
+              continuous: recordedTimeOrigins?.[scene.branchId] !== undefined,
+              playing: playing && active && ready && !scene.ended,
+              speed,
+              onSeekRecordedAt: (recordedAt) => {
+                const origin = recordedTimeOrigins?.[scene.branchId]
+                if (origin !== undefined) seek(recordedAt - origin)
+                else {
+                  // Snapshot navigation has discrete anchors. Use the latest known state;
+                  // never stretch its presentation duration to simulate elapsed recording time.
+                  const step = branch?.steps
+                    .filter(
+                      (step) => step.recordedAt !== undefined && step.recordedAt <= recordedAt
                     )
-                  }}
-                >
-                  <ChevronUp size={14} aria-hidden="true" />
-                  {t('Load earlier runs')}
-                </Button>
-              </div>
-            ) : null
-          }
-          filesPagination={renderMaterialPagination(currentFilePage, lastFilePage, setFilePage)}
-          document={replayDocument}
-          scene={scene}
-          resources={resources}
-          presentation={presentation}
-          preparationId={preparationId}
-          runDetails={runDetails}
-          followNotebook={notebookFollowing && notebookLimit === undefined}
-          conversationFocusRequest={conversationFocusRequest}
-          onInspect={() => {
-            setNotebookFollowing(false)
-            pause()
-          }}
-          onReady={(result) => {
-            setReady(result.resourcesReady)
-            setDegraded(result.degraded)
-            setRetryable(result.retryable)
-          }}
-        />
+                    .reduce<ReplayStep | undefined>(
+                      (latest, step) =>
+                        !latest || step.recordedAt! >= latest.recordedAt! ? step : latest,
+                      undefined
+                    )
+                  if (step) seek(step.startMs)
+                  else pause()
+                }
+              }
+            }}
+            materialsActive={active}
+            materialViewId={materialViewId}
+            onMaterialViewChange={selectMaterial}
+            filesOpen={filesOpen}
+            filesId={filesId}
+            onOpenFiles={() => setFilesOverride(true)}
+            onCloseFiles={() => {
+              setFilesOverride(false)
+              if (researchPresentation)
+                panel.current
+                  ?.querySelector<HTMLElement>('[data-testid="replay-information-trigger"]')
+                  ?.focus()
+              else filesTrigger.current?.focus()
+            }}
+            onCloseMaterials={() => {
+              setSelectedResourceId(undefined)
+              setMaterialsOverride(false)
+              materialsTrigger.current?.focus()
+            }}
+            onSeek={seek}
+            notebookRuns={pageRuns}
+            fileResources={pageFiles}
+            notebookHistoryControl={
+              notebookStart > 0 ? (
+                <div className="flex justify-center px-3 py-2 [overflow-anchor:none]">
+                  <Button
+                    variant="secondary"
+                    className="max-w-full gap-1.5"
+                    onClick={() => {
+                      pause()
+                      setNotebookFollowing(false)
+                      setNotebookLimit(
+                        (count) => (count ?? REPLAY_MATERIAL_RUN_LIMIT) + REPLAY_MATERIAL_RUN_LIMIT
+                      )
+                    }}
+                  >
+                    <ChevronUp size={14} aria-hidden="true" />
+                    {t('Load earlier runs')}
+                  </Button>
+                </div>
+              ) : null
+            }
+            filesPagination={renderMaterialPagination(currentFilePage, lastFilePage, setFilePage)}
+            document={replayDocument}
+            scene={scene}
+            resources={resources}
+            presentation={presentation}
+            preparationId={preparationId}
+            runDetails={runDetails}
+            followNotebook={notebookFollowing && notebookLimit === undefined}
+            conversationFocusRequest={conversationFocusRequest}
+            onInspect={() => {
+              setNotebookFollowing(false)
+              pause()
+            }}
+            onReady={(result) => {
+              setReady(result.resourcesReady)
+              setDegraded(result.degraded)
+              setRetryable(result.retryable)
+            }}
+          />
+        </ReplayMaterialActionProvider>
       </div>
       {degraded ? (
         <div
@@ -1442,6 +1690,8 @@ const ReplayPanelContent = ({
         </p>
       ) : null}
       <ReplayControls
+        compact={researchPresentation}
+        hideAsk={researchPresentation}
         skipNoNewRecords={
           recordedTimeOrigins?.[scene.branchId] !== undefined && !live
             ? skipNoNewRecords
@@ -1475,22 +1725,148 @@ const ReplayPanelContent = ({
         onAsk={ask}
         discussionPending={discussionPending}
       />
+      {researchPresentation ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border-200 bg-bg-000 px-3 py-2"
+          data-testid="replay-question-footer"
+        >
+          <div className="flex min-w-0 items-center">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={contentDisabled}
+              onClick={askContent}
+              className="min-w-0 rounded-r-none"
+            >
+              <MessageSquare size={14} aria-hidden="true" />
+              <span className="truncate">{contentLabel}</span>
+            </Button>
+            <Popover
+              onOpenChange={(open) => {
+                if (open) {
+                  questionActionChosen.current = false
+                  pause()
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="rounded-l-none border-l border-border-200 px-2"
+                  aria-label={t('Question options')}
+                >
+                  <ChevronDown size={14} aria-hidden="true" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="start"
+                className="flex w-64 flex-col gap-1 p-1"
+                onCloseAutoFocus={(event) => {
+                  // Explicit questions transfer focus to the discussion destination; ordinary
+                  // Escape/outside dismissal still restores focus to this trigger.
+                  if (questionActionChosen.current) event.preventDefault()
+                  questionActionChosen.current = false
+                }}
+              >
+                <PopoverClose asChild>
+                  <Button
+                    variant="ghost"
+                    className="justify-start"
+                    disabled={!scene.step || discussionPending}
+                    onClick={() => {
+                      questionActionChosen.current = true
+                      ask()
+                    }}
+                  >
+                    {t('Ask about this step')}
+                  </Button>
+                </PopoverClose>
+                <PopoverClose asChild>
+                  <Button
+                    variant="ghost"
+                    className="justify-start"
+                    disabled={!branch?.steps.length || discussionPending}
+                    onClick={() => {
+                      questionActionChosen.current = true
+                      askSession()
+                    }}
+                  >
+                    {t('Discuss the entire research')}
+                  </Button>
+                </PopoverClose>
+                {onChooseConversation ? (
+                  <PopoverClose asChild>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      disabled={!scene.step || discussionPending}
+                      onClick={() => {
+                        questionActionChosen.current = true
+                        pause()
+                        if (scene.step)
+                          onChooseConversation(
+                            captureDiscussionStep(replayDocument, scene, runDetails, resources)
+                          )
+                      }}
+                    >
+                      {t('Add to another conversation…')}
+                    </Button>
+                  </PopoverClose>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          </div>
+          {footerReference ? (
+            <div className="min-w-0 basis-64 flex-1">{footerReference}</div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+/** Fullscreen keeps existing portal controls in the same top-layer subtree without remounting evidence. */
+const ResearchReplayPortal = ({
+  enabled,
+  children
+}: {
+  enabled: boolean
+  children: React.ReactNode
+}): React.JSX.Element => {
+  const [container, setContainer] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    const update = (): void =>
+      setContainer(
+        document.fullscreenElement instanceof HTMLElement ? document.fullscreenElement : null
+      )
+    update()
+    document.addEventListener('fullscreenchange', update)
+    return () => document.removeEventListener('fullscreenchange', update)
+  }, [enabled])
+  return (
+    <OverlayPortalContainer.Provider value={enabled ? container : null}>
+      {children}
+    </OverlayPortalContainer.Provider>
   )
 }
 
 // A source replacement is a new player, even when two imports have the same package fingerprint.
 export const ReplayPanel = (props: ReplayPanelProps): React.JSX.Element => (
-  <ReplayPanelContent
-    key={JSON.stringify([
-      props.document.source.projectId,
-      props.document.source.sessionId,
-      props.recorded?.sourceIdentity ??
-        props.live?.sourceIdentity ??
-        props.document.source.fingerprint
-    ])}
-    {...props}
-  />
+  <ResearchReplayPortal enabled={props.presentationMode === 'research'}>
+    <ReplayPanelContent
+      key={JSON.stringify([
+        props.document.source.projectId,
+        props.document.source.sessionId,
+        props.recorded?.sourceIdentity ??
+          props.live?.sourceIdentity ??
+          props.document.source.fingerprint
+      ])}
+      {...props}
+    />
+  </ResearchReplayPortal>
 )
 
 export type { SessionDiscussionCapture, ReplayViewState }

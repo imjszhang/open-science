@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { chromium, expect } from '@playwright/test'
-import { it } from 'vitest'
+import { it, vi } from 'vitest'
 import { createCallerContext } from '../../main/caller-context'
 import { ObservationViewers } from '../../main/run-observation/viewers'
 import { RunObservationOwner } from '../../main/run-observation/owner'
@@ -113,6 +113,11 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       }
       let liveCalls = 0
       let mediaReads = 0
+      const selectedOffsets: number[] = []
+      let releaseFirstSelection: (() => void) | undefined
+      const firstSelectionGate = new Promise<void>((resolve) => {
+        releaseFirstSelection = resolve
+      })
       const forbidden = async (): Promise<never> => {
         liveCalls += 1
         throw new Error('Historical playback never starts a runtime')
@@ -123,10 +128,42 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         recorded: {
           authorizeScope: async () => undefined,
           read: forbidden,
-          readBrowser: async () => payload
+          readBrowser: async () => payload,
+          selectBrowserMoment: async (target, offsetMs) => {
+            expect(target).toEqual(payload.receiving)
+            selectedOffsets.push(offsetMs)
+            if (selectedOffsets.length === 1) await firstSelectionGate
+            const segment = recording.segments.find(
+              (item) => item.startMs <= offsetMs && item.endMs > offsetMs
+            )!
+            const media = recording.media.find((item) => item.mediaKey === segment.mediaKey)!
+            const resolved = payload.media.find((item) => item.mediaKey === segment.mediaKey)!
+            return {
+              kind: 'recorded-project-moment' as const,
+              selectionId: randomUUID(),
+              selectedAt: Date.now(),
+              receiving: target,
+              indexChecksum: payload.indexChecksum,
+              recordingId: recording.recordingId,
+              offsetMs,
+              segmentId: segment.segmentId,
+              mediaKey: segment.mediaKey,
+              segmentOffsetMs: offsetMs - segment.startMs,
+              resource: {
+                ...target,
+                artifactId: resolved.artifactId,
+                versionId: resolved.versionId,
+                name: media.name,
+                mimeType: 'video/webm' as const,
+                checksum,
+                sizeBytes: bytes.length
+              }
+            }
+          }
         },
         onRevoked: (id) => host?.closeViewer(id)
       })
+      const selectionWrites = vi.spyOn(viewers, 'selectBrowserMoment')
       host = new ReplayViewerHttpHost({
         viewers,
         projectViews: { open: forbidden, closeViewer: () => undefined },
@@ -161,10 +198,26 @@ import {useEffect,useRef,useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {useBrowserRecordingTransportHost} from './src/renderer/src/pages/workspace/replay/use-browser-recording-transport'
 const viewerUrl=${JSON.stringify(access.url)}
+const OriginalChannel=window.MessageChannel
+window.__recordingPorts=[]
+window.MessageChannel=class extends OriginalChannel {
+ constructor(){
+  super();window.__recordingPorts.push(this.port1)
+  const post=this.port1.postMessage.bind(this.port1)
+  this.port1.postMessage=(message,...rest)=>{
+   if(message.type==='state')window.__recordingRevision=message.revision
+   post(message,...rest)
+  }
+ }
+}
 function Bridge({iframeRef,playback,onLoad}){
  const bridge=useBrowserRecordingTransportHost({iframeRef,playback,origin:new URL(viewerUrl).origin,enabled:true})
  onLoad.current=bridge.onLoad
- return null
+ window.__recordingAsk=bridge.ask
+ return <div aria-label="Research footer">
+  <button disabled={!bridge.action||bridge.action.disabled||bridge.action.pending} onClick={bridge.ask}>Ask moment in research</button>
+  <output aria-label="Research ask pending">{bridge.action?.pending?'pending':'idle'}</output>
+ </div>
 }
 function App(){
  const iframeRef=useRef(null),onLoad=useRef(()=>{}),[attached,setAttached]=useState(true)
@@ -177,7 +230,7 @@ function App(){
   request=requestAnimationFrame(tick)
   return()=>cancelAnimationFrame(request)
  },[playing,speed])
- const playback={recordedAt:100000+offset,playing,speed,onSeekRecordedAt:at=>{setSeeks(value=>value+1);seek(at-100000)}}
+ const playback={recordedAt:100000+offset,playing,speed,presentation:'research',onSeekRecordedAt:at=>{setSeeks(value=>value+1);seek(at-100000)}}
  return <>
   <button onClick={()=>setPlaying(value=>!value)}>{playing?'Pause research':'Play research'}</button>
   <select aria-label="Research speed" value={speed} onChange={event=>setSpeed(Number(event.target.value))}><option value="1">1x</option><option value="2">2x</option></select>
@@ -229,12 +282,23 @@ createRoot(document.getElementById('root')).render(<App/>)
       expect(await actualFrame.evaluate(() => window.name)).toBe('open-science-research-clock')
       expect(allowsNavigation(new URL('/', access.url).href)).toBe(true)
       // The presentation flag belongs to the frame, not an authenticated navigation URL.
+      const previousPort = await page.evaluate(
+        () => (window as unknown as { __recordingPorts: MessagePort[] }).__recordingPorts.length - 1
+      )
       await actualFrame.goto(actualFrame.url())
       await expect(child.getByTestId('browser-recording-player')).toBeVisible()
       expect(await actualFrame.evaluate(() => window.name)).toBe('open-science-research-clock')
       expect(allowsNavigation(actualFrame.url())).toBe(true)
       await expect(child.getByRole('button', { name: 'Play replay', exact: true })).toHaveCount(0)
       await expect(child.getByRole('slider')).toHaveCount(0)
+      await expect(
+        child.getByRole('button', { name: 'Ask about this moment', exact: true })
+      ).toHaveCount(0)
+      const askInResearch = page.getByRole('button', {
+        name: 'Ask moment in research',
+        exact: true
+      })
+      await expect(askInResearch).toBeDisabled()
       await expect(child.getByRole('combobox', { name: 'Playback speed' })).toHaveCount(0)
       await expect(child.getByLabel('Recorded webpage', { exact: true })).toHaveCount(0)
       const seek = async (offset: number): Promise<void> => {
@@ -252,6 +316,62 @@ createRoot(document.getElementById('root')).render(<App/>)
           video.evaluate((element: HTMLVideoElement) => Math.round(element.currentTime * 1000))
         )
         .toBe(200)
+      await expect(askInResearch).toBeEnabled()
+      // This channel belonged to the frame before its reload. Real closed MessagePorts must
+      // never invoke a newly admitted frame's action, even while its current footer is enabled.
+      await page.evaluate((index) => {
+        const state = window as unknown as {
+          __recordingPorts: MessagePort[]
+          __recordingRevision: number
+        }
+        state.__recordingPorts[index].postMessage({
+          channel: 'open-science-browser-recording-transport',
+          version: 1,
+          type: 'ask',
+          revision: state.__recordingRevision
+        })
+      }, previousPort)
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      )
+      expect(selectionWrites.mock.calls).toHaveLength(0)
+      expect(selectedOffsets).toEqual([])
+      await askInResearch.click()
+      await expect.poll(() => selectedOffsets.length).toBe(1)
+      expect(selectedOffsets).toEqual([3200])
+      await expect(page.getByLabel('Research ask pending')).toHaveText('pending')
+      await expect(askInResearch).toBeDisabled()
+      // A direct repeat bypasses the fixture button but still cannot bypass the receiver's
+      // current pending action. It must not issue a second evidence-selection request.
+      await page.evaluate(() =>
+        (window as unknown as { __recordingAsk: () => void }).__recordingAsk()
+      )
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      )
+      expect(selectedOffsets).toEqual([3200])
+      releaseFirstSelection!()
+      await expect(page.getByLabel('Research ask pending')).toHaveText('idle')
+      await expect(askInResearch).toBeEnabled()
+      expect(selectionWrites.mock.calls).toHaveLength(1)
+      const captured = await viewers.browserMomentSelection(access.viewerId, { caller })
+      // Reading the immutable reference revalidates its media, but does not write a selection.
+      expect(selectedOffsets).toEqual([3200, 3200])
+      expect(captured).toMatchObject({
+        offsetMs: 3200,
+        segmentId: 'part-1',
+        segmentOffsetMs: 200,
+        resource: { artifactId: 'clip-1-file', versionId: 'clip-1-version' }
+      })
+      await expect(
+        child.getByRole('button', { name: 'Ask about this moment', exact: true })
+      ).toHaveCount(0)
       await page.getByRole('combobox', { name: 'Research speed' }).selectOption('2')
       await expect
         .poll(() => video.evaluate((element: HTMLVideoElement) => element.playbackRate))
@@ -283,7 +403,7 @@ createRoot(document.getElementById('root')).render(<App/>)
       await child.getByText('Recorded actions and events', { exact: true }).click()
       await child.getByRole('button', { name: /Recorded action/ }).click()
       await expect(page.getByLabel('Research offset')).toHaveText('4400')
-      await expect(page.getByLabel('Seek requests')).toHaveText('1')
+      await expect(page.getByLabel('Seek requests')).toHaveText('2')
       await expect(page.getByRole('button', { name: 'Play research', exact: true })).toBeVisible()
       await expect
         .poll(() =>
@@ -295,6 +415,7 @@ createRoot(document.getElementById('root')).render(<App/>)
         child.getByText('Recording was paused at this time.', { exact: true })
       ).toBeVisible()
       await expect(video).toHaveCount(0)
+      await expect(askInResearch).toBeDisabled()
       await page.getByRole('button', { name: 'Play research', exact: true }).click()
       await expect(video).toHaveAttribute('src', '/api/recording/media?mediaKey=clip-2')
       await expect(page.getByRole('button', { name: 'Pause research', exact: true })).toBeVisible()
@@ -303,6 +424,30 @@ createRoot(document.getElementById('root')).render(<App/>)
         .toBe(false)
       await page.getByRole('button', { name: 'Detach research clock', exact: true }).click()
       await expect(video).toHaveCount(0)
+      await expect(askInResearch).toHaveCount(0)
+      await page.evaluate(() => {
+        const state = window as unknown as {
+          __recordingAsk: () => void
+          __recordingPorts: MessagePort[]
+          __recordingRevision: number
+        }
+        state.__recordingAsk()
+        for (const port of state.__recordingPorts)
+          port.postMessage({
+            channel: 'open-science-browser-recording-transport',
+            version: 1,
+            type: 'ask',
+            revision: state.__recordingRevision
+          })
+      })
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      )
+      expect(selectionWrites.mock.calls).toHaveLength(1)
+      expect(selectedOffsets).toEqual([3200, 3200])
       await expect(child.getByRole('button', { name: 'Play replay', exact: true })).toHaveCount(0)
       expect(liveCalls).toBe(0)
       expect(mediaReads).toBeGreaterThan(2)
@@ -331,6 +476,13 @@ createRoot(document.getElementById('root')).render(<App/>)
               gapContinuesOnMaster: true,
               recordedEventSeeksMaster: true,
               detachmentClearsVideo: true,
+              parentFooterSelectsDecodedMoment: true,
+              noDuplicateChildAsk: true,
+              pendingSelectionDisablesFooter: true,
+              stalePortCannotAskNewFrame: true,
+              detachedAskIgnored: true,
+              selectedOffsetMs: captured?.offsetMs,
+              selectionWrites: selectionWrites.mock.calls.length,
               standaloneRetainsControls: true,
               liveCalls,
               mediaReads,

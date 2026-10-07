@@ -16,7 +16,10 @@ import { createInitialSessionState, useSessionStore } from '@/stores/session-sto
 import { useProjectStore } from '@/stores/project-store'
 import { createLinearConversationGraph } from '../../../../shared/conversation-graph'
 import type { ComposerDoc } from './composer/composer-doc'
-import type { SessionDiscussionSnapshot } from '../../../../shared/session-replay'
+import {
+  saveSessionDiscussionSnapshotRequestSchema,
+  type SessionDiscussionSnapshot
+} from '../../../../shared/session-replay'
 
 const context: SessionDiscussionCapture = {
   projectId: 'p',
@@ -458,4 +461,54 @@ describe('durable step-scoped Ask snapshots', () => {
     expect(useSessionStore.getState().selectedSessionId).toBeUndefined()
     expect(useSessionStore.getState().sessions).toHaveLength(1)
   })
+})
+
+it('saves inspected evidence through the unchanged strict native snapshot contract', async () => {
+  const saveSelectionSnapshot = vi.fn(async (request: unknown) => {
+    saveSessionDiscussionSnapshotRequestSchema.parse(request)
+  })
+  vi.stubGlobal('api', { sessionReplay: { saveSelectionSnapshot } })
+  const actions = { changeDoc: vi.fn(), addAnnotation: vi.fn(), setError: vi.fn() }
+  renderHook(() =>
+    useWorkspaceSessionDiscussion({
+      draftKey: 'target',
+      editable: true,
+      composer: { view: { doc: doc('Explain this run'), annotations: [] }, actions }
+    })
+  )
+  const inspected: SessionDiscussionCapture = {
+    ...context,
+    stepOffsetMs: 50000,
+    recordedAt: 55000,
+    phase: 'result',
+    notebookInspection: { runId: 'saved-run', timeMs: 50000 },
+    records: [
+      {
+        id: 'notebook-run:saved-run',
+        scope: 'step',
+        title: 'Saved run',
+        text: 'EXACT SAVED OUTPUT',
+        status: 'recorded',
+        truncated: false
+      }
+    ],
+    evidence: [
+      { kind: 'notebook-run', id: 'saved-run', projectId: 'p', sessionId: 'source', part: 'record' }
+    ]
+  }
+  act(() => useSessionReplayStore.getState().ask(inspected, destination))
+  await waitFor(() => expect(actions.addAnnotation).toHaveBeenCalledOnce())
+  expect(saveSelectionSnapshot.mock.calls[0][0]).toMatchObject({
+    context: {
+      stepOffsetMs: 50000,
+      recordedAt: 55000,
+      phase: 'result',
+      records: inspected.records,
+      evidence: inspected.evidence
+    }
+  })
+  expect(
+    (saveSelectionSnapshot.mock.calls[0][0] as { context: unknown }).context
+  ).not.toHaveProperty('notebookInspection')
+  expect(actions.setError).toHaveBeenLastCalledWith(null)
 })

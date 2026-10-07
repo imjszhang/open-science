@@ -108,7 +108,7 @@ describe('complete browser research Replay', () => {
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
     ).toBe('10000')
     expect(screen.getAllByText('Compare fruit collection decisions.').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Project replay' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
     await screen.findByText('The project recording has not started yet.')
     expect(screen.getAllByRole('slider')).toHaveLength(1)
     expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
@@ -117,7 +117,7 @@ describe('complete browser research Replay', () => {
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
     ).toBe('2000')
-    fireEvent.click(screen.getByRole('button', { name: 'Results' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Results' }))
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
     ).toBe('2000')
@@ -194,7 +194,7 @@ describe('complete browser research Replay', () => {
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
     ).toBe('26000')
-    fireEvent.click(screen.getByRole('button', { name: 'Project replay' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
     await screen.findByText('The project recording has not started yet.')
     fireEvent.click(screen.getByRole('button', { name: 'Jump to recorded footage' }))
     await screen.findByLabelText('Recorded webpage')
@@ -204,7 +204,7 @@ describe('complete browser research Replay', () => {
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
     ).toBe('26000')
-    fireEvent.click(screen.getByRole('button', { name: 'Results' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Results' }))
     expect(
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
     ).toBe('26000')
@@ -214,7 +214,8 @@ describe('complete browser research Replay', () => {
     const view = render(<ResearchReplayViewerApp context={context} client={client} />)
     await screen.findByTestId('research-replay-viewer')
     seek(4500)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask about this step' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this record' }))
+    fireEvent.click(await screen.findByText('Saved reference details'))
     const reference = (await screen.findByRole('textbox', {
       name: 'Recorded step reference'
     })) as HTMLTextAreaElement
@@ -275,5 +276,90 @@ describe('complete browser research Replay', () => {
       screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuemax')
     ).toBe('10000')
     expect(screen.getAllByText('Compare fruit collection decisions.').length).toBeGreaterThan(0)
+  })
+})
+
+it('sends the inspected Notebook run and actual master clock after an overlapping message', async () => {
+  const research = researchFixture()
+  const runStep = research.document.branches[0].steps[1]
+  runStep.kind = 'notebook'
+  runStep.message = undefined
+  runStep.recordedEndAt = 7000
+  runStep.endMs = 6000
+  runStep.durationMs = 4500
+  const run = {
+    runId: 'saved-run',
+    cellId: 'cell',
+    source: 'agent' as const,
+    kernelKind: 'python' as const,
+    status: 'completed' as const,
+    startedAt: 2500,
+    endedAt: 7000
+  }
+  runStep.runs = [run]
+  runStep.evidence = [
+    {
+      kind: 'notebook-run',
+      id: run.runId,
+      projectId: context.target.projectId,
+      sessionId: context.target.sessionId
+    }
+  ]
+  const later = research.document.branches[0].steps[2]
+  later.recordedAt = 5000
+  later.startMs = 4000
+  const { client, fetcher } = makeClient(research)
+  vi.spyOn(client, 'notebook').mockResolvedValue({
+    status: 'ready',
+    bytes: 100,
+    run: {
+      ...run,
+      script: 'print(7)',
+      outputs: [],
+      text: { stdout: 'SAVED SEVEN', stderr: '', traceback: '', plain: [] },
+      workingFiles: []
+    }
+  })
+  render(<ResearchReplayViewerApp context={context} client={client} />)
+  await screen.findByTestId('research-replay-viewer')
+  fireEvent.click(screen.getByRole('tab', { name: 'Notebook' }))
+  seek(8000)
+  const cell = await waitFor(() => {
+    const item = document.querySelector('[data-replay-run-item="saved-run"]')
+    expect(item).toBeTruthy()
+    expect(item?.textContent).toContain('SAVED SEVEN')
+    return item!
+  })
+  fireEvent.pointerDown(cell)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this run' }))
+  await waitFor(() =>
+    expect(fetcher.mock.calls.some(([path]) => path === '/api/research/select')).toBe(true)
+  )
+  const request = fetcher.mock.calls.find(([path]) => path === '/api/research/select')!
+  expect(JSON.parse(String(request[1]?.body))).toMatchObject({
+    stepId: runStep.id,
+    notebookRunId: run.runId,
+    timeMs: 8000,
+    recordedAt: 9000
+  })
+  expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('8000')
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Ask about this run' })).not.toHaveProperty(
+      'disabled',
+      true
+    )
+  )
+  fireEvent.click(screen.getByRole('tab', { name: 'Original conversation' }))
+  fireEvent.pointerDown(document.querySelector('[data-replay-step="request"]')!)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this record' }))
+  await waitFor(() =>
+    expect(fetcher.mock.calls.filter(([path]) => path === '/api/research/select')).toHaveLength(2)
+  )
+  const inspectedRecord = fetcher.mock.calls.filter(([path]) => path === '/api/research/select')[1]
+  expect(JSON.parse(String(inspectedRecord[1]?.body))).toMatchObject({
+    stepId: 'request',
+    inspectStep: 'visible',
+    timeMs: 8000,
+    recordedAt: 9000
   })
 })

@@ -262,3 +262,121 @@ describe('scoped research Replay source and evidence', () => {
     ).rejects.toMatchObject({ code: 'invalid' })
   })
 })
+
+it('captures an explicitly inspected Notebook run at the actual clock across overlapping messages', async () => {
+  const h = researchReplayHarness()
+  h.session.messages[1].createdAt = 3000
+  h.session.activities = [
+    {
+      id: 'tool',
+      kind: 'tool',
+      title: 'Execute',
+      status: 'completed',
+      createdAt: 2000,
+      updatedAt: 4000,
+      sortIndex: 1,
+      eventIds: [],
+      executionInvocationId: 'invoke',
+      promptMessageId: 'q',
+      rawInput: { code: 'print(1)' },
+      rawOutput: 'SAVED RUN RESULT'
+    }
+  ]
+  vi.mocked(h.dependencies.reader.notebook.runIndex!).mockResolvedValue([
+    {
+      runId: 'run',
+      cellId: 'cell',
+      source: 'agent',
+      kernelKind: 'python',
+      status: 'completed',
+      startedAt: 2000,
+      endedAt: 4000,
+      promptMessageId: 'q',
+      executionInvocationId: 'invoke',
+      hasOutput: true
+    }
+  ])
+  const view = await h.service.open(h.target, h.caller)
+  const source = await h.service.document(view.viewerId, h.caller)
+  const branch = source.document.branches[0]
+  const step = branch.steps.find((item) => item.runs.some((run) => run.runId === 'run'))!
+  const origin = source.timing.recordedTimeOrigins[branch.id]
+  for (const recordedAt of [3500, 4000]) {
+    const timeMs = recordedAt - origin
+    expect(projectReplayScene(source.document, branch.id, timeMs, origin).step?.id).not.toBe(
+      step.id
+    )
+    const position = {
+      branchId: branch.id,
+      stepId: step.id,
+      timeMs,
+      recordedAt,
+      notebookRunId: 'run'
+    }
+    const selected = await h.service.select(view.viewerId, position, h.caller)
+    expect(selected.position).toEqual(position)
+    expect(selected.step.id).toBe(step.id)
+    expect(selected.step.runs.map((run) => run.runId)).toEqual(['run'])
+    expect(selected.phase).toBe(recordedAt === 4000 ? 'result' : 'activity')
+    expect(JSON.stringify(selected).includes('SAVED RUN RESULT')).toBe(recordedAt === 4000)
+    expect(selected.evidence.find((item) => item.kind === 'notebook-run')?.part).toBe(
+      recordedAt === 4000 ? 'record' : 'input'
+    )
+    await expect(
+      h.service.select(view.viewerId, { ...position, notebookRunId: undefined }, h.caller)
+    ).rejects.toMatchObject({ code: 'invalid' })
+    const inspectedStep = await h.service.select(
+      view.viewerId,
+      { ...position, notebookRunId: undefined, inspectStep: 'visible' },
+      h.caller
+    )
+    expect(inspectedStep.step.id).toBe(step.id)
+    expect(inspectedStep.phase).toBe(selected.phase)
+    expect(JSON.stringify(inspectedStep).includes('SAVED RUN RESULT')).toBe(recordedAt === 4000)
+  }
+  for (const position of [
+    { timeMs: 0, notebookRunId: 'run' },
+    { timeMs: 3000, notebookRunId: 'foreign' },
+    { timeMs: 3000, notebookRunId: 'run', recordingId: 'anything' },
+    { timeMs: 3000, notebookRunId: 'run', scope: 'session' }
+  ])
+    await expect(
+      h.service.select(
+        view.viewerId,
+        { branchId: branch.id, stepId: step.id, ...position },
+        h.caller
+      )
+    ).rejects.toMatchObject({ code: 'invalid' })
+  expect(h.dependencies.readRun).not.toHaveBeenCalled()
+})
+
+it('distinguishes full saved-history inspection from future evidence on the visible clock', async () => {
+  const h = researchReplayHarness()
+  const access = await h.service.open(h.target, h.caller)
+  const { document, timing } = await h.service.document(access.viewerId, h.caller)
+  const branch = document.branches[0]
+  const future = branch.steps.find((step) => step.message?.role === 'agent')!
+  const position = {
+    branchId: branch.id,
+    stepId: future.id,
+    timeMs: 0,
+    recordedAt: timing.recordedTimeOrigins[branch.id]
+  }
+  await expect(
+    h.service.select(access.viewerId, { ...position, inspectStep: 'visible' }, h.caller)
+  ).rejects.toMatchObject({ code: 'invalid' })
+  const saved = await h.service.select(
+    access.viewerId,
+    { ...position, inspectStep: 'saved-history' },
+    h.caller
+  )
+  expect(saved.step.message?.content).toBe(future.message?.content)
+  expect(saved.position).toMatchObject({ ...position, inspectStep: 'saved-history' })
+  await expect(
+    h.service.select(
+      access.viewerId,
+      { ...position, stepId: 'foreign', inspectStep: 'saved-history' },
+      h.caller
+    )
+  ).rejects.toMatchObject({ code: 'invalid' })
+})

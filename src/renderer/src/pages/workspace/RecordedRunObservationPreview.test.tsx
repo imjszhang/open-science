@@ -267,9 +267,9 @@ describe('recorded Run observation preview', () => {
         capture: {
           source: 'host-view',
           association: 'current-observation',
-          startedAt: 210,
-          finishedAt: 220,
-          observedAt: 200,
+          startedAt: 180,
+          finishedAt: 190,
+          observedAt: 100,
           width: 1,
           height: 1
         }
@@ -301,11 +301,13 @@ describe('recorded Run observation preview', () => {
       />
     )
     showMaterial('Project replay')
-    await screen.findByRole('img', { name: 'Recorded project image' })
-    expect(screen.getByText('1970-01-01T00:00:00.220Z')).toBeTruthy()
+    const capturedImage = await screen.findByRole('img', { name: 'Recorded project image' })
+    fireEvent.load(capturedImage)
+    expect(screen.getByText('1970-01-01T00:00:00.190Z')).toBeTruthy()
     expect(document.querySelector('iframe')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
-    expect(screen.getByRole('img', { name: 'Recorded project image' })).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'Recorded project image' })).toBeNull()
+    expect(screen.getByText('No project image was recorded at this time.')).toBeTruthy()
   })
   it.each([
     [

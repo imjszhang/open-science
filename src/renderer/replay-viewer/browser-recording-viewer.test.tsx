@@ -11,6 +11,7 @@ import { ReplayViewerClient } from './client'
 const json = (value: unknown): Response =>
   new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
 beforeEach(() => {
+  vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(2)
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined)

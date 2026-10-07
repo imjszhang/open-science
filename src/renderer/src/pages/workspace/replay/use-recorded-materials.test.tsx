@@ -394,7 +394,7 @@ describe('useRecordedMaterials read-only ownership', () => {
     useRunObservationQuestionStore.setState({ destination })
     render(<Harness document={documentFixture()} discovery={discovery([candidate()])} />)
     select()
-    await screen.findByRole('img')
+    fireEvent.load(await screen.findByRole('img'))
     expect(api.observations.readProjectRecording).toHaveBeenCalledWith({ target: receiving })
     expect(api.observations.readRecorded).not.toHaveBeenCalled()
     expect(api.artifacts.readPreview).toHaveBeenCalledWith(
@@ -436,7 +436,7 @@ describe('useRecordedMaterials read-only ownership', () => {
       />
     )
     expect(screen.getByRole('option', { name: 'Independent project recording' })).toBeTruthy()
-    await screen.findByRole('img')
+    fireEvent.load(await screen.findByRole('img'))
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
       JSON.stringify(receiving)
     )
@@ -457,7 +457,7 @@ describe('useRecordedMaterials read-only ownership', () => {
     )
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'Choose discovered recording' }))
-    await screen.findByRole('img')
+    fireEvent.load(await screen.findByRole('img'))
     expect(JSON.parse(screen.getByTestId('material-request').textContent!)).toEqual({
       id: 'project',
       revision: 1
@@ -473,9 +473,9 @@ describe('useRecordedMaterials read-only ownership', () => {
       const props = { document: documentFixture(), discovery: discovery([candidate()]) }
       const { rerender, unmount } = render(<Harness {...props} />)
       select()
-      await screen.findByRole('img')
+      fireEvent.load(await screen.findByRole('img'))
       fireEvent.click(screen.getByRole('button', { name: 'Ask about this frame' }))
-      expect(api.observations.selectRecordedFile).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(api.observations.selectRecordedFile).toHaveBeenCalledTimes(1))
       if (change === 'unmount') unmount()
       if (change === 'navigation')
         act(() => useNavigationStore.setState({ explicitNavigationRevision: 1 }))

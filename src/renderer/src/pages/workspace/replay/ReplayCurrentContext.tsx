@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ReplayScene, ReplayStep } from '../../../../../shared/replay'
 import { useReplayTranslation } from './replay-presentation'
@@ -6,11 +8,13 @@ import { replayExcerpt } from './replay-content'
 
 /** Compact historical context survives narrow layouts and material changes. */
 export function ReplayCurrentContext({
+  compact = false,
   scene,
   steps,
   onHistory,
   onNotebook
 }: {
+  compact?: boolean
   scene: ReplayScene
   steps: readonly ReplayStep[]
   onHistory: () => void
@@ -33,6 +37,62 @@ export function ReplayCurrentContext({
           : scene.step?.kind === 'review'
             ? t('Review')
             : t('Original research conversation')
+  if (compact)
+    return (
+      <section
+        className="shrink-0 border-b border-border-200 bg-bg-10 px-3 py-1"
+        aria-label={t('Current research context')}
+        data-testid="replay-current-context"
+      >
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-full min-w-0 justify-start gap-2 px-0 text-xs"
+              aria-label={t('Expand context')}
+            >
+              <span className="shrink-0 text-text-300">
+                {scene.step
+                  ? t('Step {{step}}', { step: scene.stepIndex + 1 })
+                  : t('Research replay')}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {scene.step?.title || (message ? replayExcerpt(message.content, 180) : description)}
+              </span>
+              <ChevronDown size={12} className="shrink-0 text-text-300" aria-hidden="true" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="max-h-[min(24rem,var(--radix-popover-content-available-height))] w-[min(28rem,calc(100vw-1.5rem))] overflow-auto p-3 text-sm"
+          >
+            <p className="mb-2 text-xs text-text-300">
+              {description} · {t('Read-only research history')}
+            </p>
+            <p className="whitespace-pre-wrap break-words">
+              {message
+                ? replayExcerpt(message.content, 6000)
+                : t('No original conversation is saved for this step.')}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-1">
+              <PopoverClose asChild>
+                <Button variant="outline" size="sm" onClick={onHistory}>
+                  {t('Browse original conversation')}
+                </Button>
+              </PopoverClose>
+              {onNotebook ? (
+                <PopoverClose asChild>
+                  <Button variant="ghost" size="sm" onClick={onNotebook}>
+                    {t('View related Notebook')}
+                  </Button>
+                </PopoverClose>
+              ) : null}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </section>
+    )
   return (
     <section
       aria-label={t('Current research context')}

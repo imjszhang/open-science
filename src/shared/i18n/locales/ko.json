@@ -7297,6 +7297,19 @@
     "Jump to recorded footage": "녹화된 화면으로 이동",
     "Loading replay…": "리플레이 불러오는 중…",
     "Playback follows recorded research timestamps; gaps do not imply inactivity.": "재생은 기록된 연구 시각을 따릅니다. 기록이 없는 구간이 활동이 없었다는 뜻은 아닙니다.",
-    "Could not reference this research evidence.": "이 연구 근거를 참조할 수 없습니다."
+    "Could not reference this research evidence.": "이 연구 근거를 참조할 수 없습니다.",
+    "Recorded media size": "녹화 미디어 크기",
+    "Fit to window": "창에 맞추기",
+    "Actual size (100%)": "실제 크기(100%)",
+    "Playback options": "재생 옵션",
+    "Ask about this run": "이 실행에 대해 질문",
+    "Ask about this record": "이 기록에 대해 질문",
+    "Ask about this content": "이 내용에 대해 질문",
+    "Collapse preview": "미리보기 접기",
+    "Expand preview": "미리보기 펼치기",
+    "Original conversation": "원본 대화",
+    "Question options": "질문 옵션",
+    "Result details": "결과 세부 정보",
+    "Saved reference details": "저장된 참조 세부 정보"
   }
 }
