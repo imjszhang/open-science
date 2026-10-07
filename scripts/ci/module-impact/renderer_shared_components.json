@@ -507,7 +507,11 @@
       "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
       "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
       "src/renderer/src/components/ResearchExecutionConfigurationDialog.test.tsx",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
+      "src/renderer/src/lib/replay/recorded-results.test.ts",
+      "src/renderer/src/pages/workspace/replay/ProjectReplay.test.tsx"
     ]
   },
   "capabilityOverlays": [],

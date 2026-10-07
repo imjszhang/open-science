@@ -209,7 +209,12 @@
       "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
       "src/renderer/src/pages/home/HomePage.persistence.test.tsx",
       "src/renderer/src/pages/home/HomePage.render.test.tsx",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/main/notebook/offline-plan-admission.test.ts",
+      "src/main/project-recordings/recorder.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/main/notebook/screened-auxiliary-output.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

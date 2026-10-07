@@ -52,3 +52,20 @@ provenance; the existence of a generated diagram does not establish that it was 
 The index contains source version IDs plus checksums and sizes. Those sender IDs are evidence only;
 the receiving reader must resolve them through its import receipt and local immutable Artifact
 scope. Missing references must not launch the project or fetch a sender path/URL.
+
+## Regression ownership
+
+CI registers this sink and its shared contracts in `scripts/ci/module-impact/main_run_observation.json`.
+This is test routing, not a requirement for a Notebook Run or the live observation owner: the sink
+still accepts state/event-only output and operates without a viewer. The renderer's independent
+project track, Results reader and material-selection lifecycle belong to `replay_observation`.
+Pinned offline plan admission belongs to `research_reproduction`; screened publication belongs to
+`notebook_application`. Existing source-regression capability overlays remain in force.
+
+Run the colocated declaration/recorder/managed-adapter and shared project-recording tests for
+capture and publication changes. For receiving-side changes, also run `recorded-results.test.ts`,
+`ResultsPanel.test.tsx`, `ProjectReplay.test.tsx` and `use-recorded-materials.test.tsx`. These checks
+cover immutable receiving identities, missing evidence, independent state-only records and stale
+asynchronous replies; they do not establish scientific reproduction or installed-client acceptance.
+The module ownership and consumer-coverage guards ensure changes to their dependencies retain these
+tests in selective CI runs.

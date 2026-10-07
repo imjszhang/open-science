@@ -345,7 +345,8 @@
       "src/renderer/src/stores/research-run-store.test.ts",
       "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
       "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
     ]
   },
   "capabilityOverlays": [],

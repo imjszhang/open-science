@@ -1,5 +1,22 @@
 # Replay demos and research execution
 
+## Current read-only Replay contract
+
+The later read-only Replay implementation supersedes the demo placement described in the historical
+ledger below. Replay displays saved project frames, declared states/events, Notebook records and
+Results. Project replay and Notebook are independent material views; opening either starts no
+environment, program or live viewer. Missing material remains an explicit gap. Local historical
+demo receipts are read as history and never resumed by browsing Replay.
+
+A new offline execution belongs to an ordinary writable Session through the managed execution API,
+including Codex's `execution.inspectOfflinePlans` / `execution.executeOfflinePlan` path. It is a new
+execution with its own outputs, not an action inside the read-only recording. Independent project
+recording indexes and declared state/event files are ordinary Artifacts; `.science` and legacy
+observation archive v1 remain unchanged. See the
+[recording owner and regression boundaries](../src/main/project-recordings/README.md).
+
+## Historical implementation ledger
+
 Implementation started 2026-10-07 from `cb4d16c76`. This ledger describes the accepted
 product contract and records evidence as work completes. Product implementation is recorded at
 `c078dc8b5`, with acceptance support in `9e2df696c` and viewer fixes in `9442595c9` and `2cf23e346`;

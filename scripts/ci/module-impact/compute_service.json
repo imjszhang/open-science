@@ -622,7 +622,11 @@
       "src/main/research-demos/ipc.test.ts",
       "src/main/research-execution-profiles/ipc.test.ts",
       "src/main/research-demos/inspection.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/main/notebook/offline-plan-admission.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/main/project-recordings/recorder.test.ts",
+      "src/main/notebook/screened-auxiliary-output.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

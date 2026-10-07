@@ -55,7 +55,21 @@
     "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.tsx",
     "src/renderer/src/stores/research-demo-store.test.ts",
     "src/renderer/src/stores/research-demo-store.ts",
-    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx"
+    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx",
+    "src/renderer/src/lib/replay/recorded-results.test.ts",
+    "src/renderer/src/lib/replay/recorded-results.ts",
+    "src/renderer/src/lib/replay/static-html.ts",
+    "src/renderer/src/pages/workspace/replay/DemoViewingNotice.test.tsx",
+    "src/renderer/src/pages/workspace/replay/DemoViewingNotice.tsx",
+    "src/renderer/src/pages/workspace/replay/ProjectReplay.test.tsx",
+    "src/renderer/src/pages/workspace/replay/ProjectReplay.tsx",
+    "src/renderer/src/pages/workspace/replay/RecordedReplayView.tsx",
+    "src/renderer/src/pages/workspace/replay/results/RecordedResourcePreview.tsx",
+    "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
+    "src/renderer/src/pages/workspace/replay/results/ResultsPanel.tsx",
+    "src/renderer/src/pages/workspace/replay/results/recorded-resource-reader.ts",
+    "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx"
   ],
   "interfacePaths": [
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
@@ -92,7 +106,16 @@
     "src/renderer/src/pages/workspace/use-research-run-observer.ts",
     "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.tsx",
     "src/renderer/src/stores/research-demo-store.ts",
-    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx"
+    "src/renderer/src/pages/workspace/replay/ExecutionPurposeNotice.tsx",
+    "src/renderer/src/lib/replay/recorded-results.ts",
+    "src/renderer/src/lib/replay/static-html.ts",
+    "src/renderer/src/pages/workspace/replay/DemoViewingNotice.tsx",
+    "src/renderer/src/pages/workspace/replay/ProjectReplay.tsx",
+    "src/renderer/src/pages/workspace/replay/RecordedReplayView.tsx",
+    "src/renderer/src/pages/workspace/replay/results/RecordedResourcePreview.tsx",
+    "src/renderer/src/pages/workspace/replay/results/ResultsPanel.tsx",
+    "src/renderer/src/pages/workspace/replay/results/recorded-resource-reader.ts",
+    "src/renderer/src/pages/workspace/replay/use-recorded-materials.tsx"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -116,7 +139,12 @@
       "src/renderer/src/pages/workspace/replay/recording-discovery.test.ts",
       "src/renderer/src/pages/workspace/use-research-run-observer.test.tsx",
       "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
-      "src/renderer/src/stores/research-demo-store.test.ts"
+      "src/renderer/src/stores/research-demo-store.test.ts",
+      "src/renderer/src/lib/replay/recorded-results.test.ts",
+      "src/renderer/src/pages/workspace/replay/DemoViewingNotice.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ProjectReplay.test.tsx",
+      "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
     ],
     "contract": [],
     "consumer": [

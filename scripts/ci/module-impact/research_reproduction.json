@@ -36,7 +36,10 @@
     "src/shared/research-execution-profile.ts",
     "src/main/research-execution-profiles/document.ts",
     "src/main/research-execution-profiles/store-recovery.test.ts",
-    "src/main/research-demos/owner.macos.integration.test.ts"
+    "src/main/research-demos/owner.macos.integration.test.ts",
+    "src/main/notebook/offline-plan-admission.test.ts",
+    "src/main/notebook/offline-plan-admission.ts",
+    "src/shared/offline-execution.ts"
   ],
   "interfacePaths": [
     "src/shared/research-reproduction.ts",
@@ -56,7 +59,9 @@
     "src/renderer/src/components/ResearchExecutionConfigurationDialog.tsx",
     "src/shared/research-demo.ts",
     "src/shared/research-execution-profile.ts",
-    "src/main/research-execution-profiles/document.ts"
+    "src/main/research-execution-profiles/document.ts",
+    "src/main/notebook/offline-plan-admission.ts",
+    "src/shared/offline-execution.ts"
   ],
   "consumerModules": ["main_session_package"],
   "testFiles": {
@@ -76,7 +81,8 @@
       "src/main/research-execution-profiles/store.test.ts",
       "src/renderer/src/components/ResearchExecutionConfigurationDialog.test.tsx",
       "src/main/research-execution-profiles/store-recovery.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/main/notebook/offline-plan-admission.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -245,7 +251,9 @@
       "src/main/credential-identity/macos.test.ts",
       "src/main/credential-identity/probe-logging.test.ts",
       "src/main/notebook/research-acceptance.test.ts",
-      "src/main/notebook/research-acceptance-resume.test.ts"
+      "src/main/notebook/research-acceptance-resume.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
     ]
   },
   "capabilityOverlays": [],

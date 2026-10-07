@@ -38,7 +38,17 @@
     "src/shared/run-observation-recording-status.ts",
     "src/main/run-observation/capture-package.integration.test.ts",
     "src/main/run-observation/execution-context.ts",
-    "src/main/run-observation/execution-context.test.ts"
+    "src/main/run-observation/execution-context.test.ts",
+    "src/main/project-recordings/README.md",
+    "src/main/project-recordings/declarations.test.ts",
+    "src/main/project-recordings/declarations.ts",
+    "src/main/project-recordings/managed-adapter.test.ts",
+    "src/main/project-recordings/managed-adapter.ts",
+    "src/main/project-recordings/recorder.test.ts",
+    "src/main/project-recordings/recorder.ts",
+    "src/shared/project-recording-data.ts",
+    "src/shared/project-recording.test.ts",
+    "src/shared/project-recording.ts"
   ],
   "interfacePaths": [
     "src/main/managed-run-observation.ts",
@@ -62,7 +72,12 @@
     "src/main/run-observation/project-export-reader.ts",
     "src/shared/run-observation-capture.ts",
     "src/shared/run-observation-recording-status.ts",
-    "src/main/run-observation/execution-context.ts"
+    "src/main/run-observation/execution-context.ts",
+    "src/main/project-recordings/declarations.ts",
+    "src/main/project-recordings/managed-adapter.ts",
+    "src/main/project-recordings/recorder.ts",
+    "src/shared/project-recording-data.ts",
+    "src/shared/project-recording.ts"
   ],
   "consumerModules": ["main_runtime_view", "replay_observation"],
   "testFiles": {
@@ -83,7 +98,11 @@
       "src/main/run-observation/project-export-reader.test.ts",
       "src/shared/run-observation-capture.test.ts",
       "src/main/run-observation/capture-package.integration.test.ts",
-      "src/main/run-observation/execution-context.test.ts"
+      "src/main/run-observation/execution-context.test.ts",
+      "src/main/project-recordings/declarations.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/main/project-recordings/recorder.test.ts",
+      "src/shared/project-recording.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -725,7 +744,13 @@
       "src/main/research-demos/owner.test.ts",
       "src/main/research-demos/inspection.test.ts",
       "src/renderer/src/stores/research-demo-store.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/ProjectReplay.test.tsx",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/main/notebook/offline-plan-admission.test.ts",
+      "src/renderer/src/pages/workspace/replay/DemoViewingNotice.test.tsx",
+      "src/renderer/src/lib/replay/recorded-results.test.ts",
+      "src/main/notebook/screened-auxiliary-output.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],

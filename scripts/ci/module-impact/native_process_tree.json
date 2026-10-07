@@ -611,7 +611,11 @@
       "src/main/research-demos/owner.test.ts",
       "src/main/research-demos/inspection.test.ts",
       "src/main/notebook/managed-confinement.macos.integration.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/main/notebook/offline-plan-admission.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/main/project-recordings/recorder.test.ts",
+      "src/main/notebook/screened-auxiliary-output.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],

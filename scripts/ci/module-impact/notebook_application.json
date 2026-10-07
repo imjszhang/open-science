@@ -329,7 +329,9 @@
     "src/main/notebook/research-acceptance.test-support.ts",
     "src/main/notebook/research-acceptance.test.ts",
     "src/main/notebook/research-acceptance-resume.test-support.ts",
-    "src/main/notebook/research-acceptance-resume.test.ts"
+    "src/main/notebook/research-acceptance-resume.test.ts",
+    "src/main/notebook/screened-auxiliary-output.test.ts",
+    "src/main/notebook/screened-auxiliary-output.ts"
   ],
   "interfacePaths": [
     "src/main/managed-execution-external-port.ts",
@@ -424,7 +426,8 @@
     "src/main/notebook/dependency-analysis.scipy-sparse-composition.test.ts",
     "src/main/notebook/dependency-analysis.scipy-sparse.test.ts",
     "src/main/notebook/research-acceptance.test-support.ts",
-    "src/main/notebook/research-acceptance-resume.test-support.ts"
+    "src/main/notebook/research-acceptance-resume.test-support.ts",
+    "src/main/notebook/screened-auxiliary-output.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -637,7 +640,8 @@
       "src/main/notebook/dependency-analysis.r-deseq2.test.ts",
       "src/main/notebook/notebook-path-utils.test.ts",
       "src/main/notebook/research-acceptance.test.ts",
-      "src/main/notebook/research-acceptance-resume.test.ts"
+      "src/main/notebook/research-acceptance-resume.test.ts",
+      "src/main/notebook/screened-auxiliary-output.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",
@@ -1101,7 +1105,10 @@
       "src/main/research-demos/ipc.test.ts",
       "src/main/research-execution-profiles/ipc.test.ts",
       "src/main/research-demos/inspection.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/main/project-recordings/recorder.test.ts",
+      "src/main/project-recordings/managed-adapter.test.ts",
+      "src/main/notebook/offline-plan-admission.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],
