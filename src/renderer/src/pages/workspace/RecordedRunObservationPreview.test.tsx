@@ -144,6 +144,34 @@ describe('recorded Run observation preview', () => {
     if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle)
     fireEvent.click(screen.getByRole('button', { name }))
   }
+  it.each(['Project replay', 'Results'])(
+    'does not move the %s tab before its first pointer click selects it',
+    (label) => {
+      const { archive, media } = attachmentFixture()
+      render(
+        <RecordedRunObservationPreview
+          archive={archive}
+          receiving={receiving}
+          media={media}
+          title="Recorded experiment"
+          readResource={vi.fn(async () => ({ status: 'unavailable' as const }))}
+          onAskArchiveSelection={vi.fn()}
+        />
+      )
+      fireEvent.click(screen.getByRole('button', { name: /^Research materials$/ }))
+      const tab = screen.getByRole('button', { name: new RegExp(`^${label}$`) })
+      fireEvent.pointerDown(tab)
+      expect(screen.queryByText('Inspecting recorded evidence')).toBeNull()
+      expect(tab.getAttribute('aria-pressed')).toBe('false')
+      fireEvent.pointerUp(tab)
+      fireEvent.click(tab)
+      expect(tab.getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByRole('button', { name: /^Notebook$/ }).getAttribute('aria-pressed')).toBe(
+        'false'
+      )
+      expect(screen.getByText('Inspecting recorded evidence')).toBeTruthy()
+    }
+  )
   it('keeps results independent of frame and Notebook selection, with exact file-level Ask', async () => {
     const { archive, media } = attachmentFixture(),
       ask = vi.fn(),

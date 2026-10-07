@@ -999,6 +999,8 @@ const ReplayStageContent = ({
   const style = replayPresentationStyle(presentation)
   const isLiveInteraction = (target: EventTarget): boolean =>
     target instanceof Element && Boolean(target.closest('[data-replay-live-interaction]'))
+  const isMaterialViewInteraction = (target: EventTarget): boolean =>
+    target instanceof Element && Boolean(target.closest('button[data-replay-material-view]'))
   // Viewport padding must still handle host dismissal while leaving the project live.
   const isLiveProjectViewportInteraction = (target: EventTarget): boolean =>
     liveProjectActive && target instanceof Node && Boolean(transcript.current?.contains(target))
@@ -1031,7 +1033,14 @@ const ReplayStageContent = ({
         const selectingFile =
           event.target instanceof Element &&
           Boolean(event.target.closest('button[data-replay-material-item]'))
-        if (!selectingFile && !isLiveProjectViewportInteraction(event.target)) onInspect?.()
+        // Material tabs already pause and select together on click. Do not move their
+        // hit targets by inserting the inspection banner between pointerdown and pointerup.
+        if (
+          !selectingFile &&
+          !isMaterialViewInteraction(event.target) &&
+          !isLiveProjectViewportInteraction(event.target)
+        )
+          onInspect?.()
         if (filesOpen && !wide && !filesPane.current?.contains(event.target as Node))
           onCloseFiles?.()
       }}
@@ -1054,6 +1063,7 @@ const ReplayStageContent = ({
         }
         if (
           !isLiveProjectViewportInteraction(event.target) &&
+          !isMaterialViewInteraction(event.target) &&
           ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)
         )
           onInspect?.()
@@ -1185,6 +1195,7 @@ const ReplayStageContent = ({
                   {[{ id: 'notebook', label: t('Notebook') }, ...materialViews].map((view) => (
                     <Button
                       key={view.id}
+                      data-replay-material-view={view.id}
                       data-replay-notebook-heading={view.id === 'notebook' ? true : undefined}
                       size="sm"
                       variant={materialViewId === view.id ? 'secondary' : 'ghost'}

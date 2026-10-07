@@ -703,3 +703,88 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
   },
   60000
 )
+
+it
+  .skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')
+  .each(['Project replay', 'Results'] as const)(
+  'switches narrow recorded materials on the first real pointer click: %s',
+  async (label) => {
+    const { recordedFixture } =
+      await import('../../main/run-observation/recorded-viewer.test-support')
+    const { payload, bytes } = recordedFixture()
+    const observer = new RunObservationOwner({
+      authorize: async () => {
+        throw new Error('No live authority')
+      },
+      read: async () => {
+        throw new Error('No local Run')
+      }
+    })
+    const viewers = new ObservationViewers({
+      observer,
+      authorizeScope: async () => {
+        throw new Error('No live scope')
+      },
+      recorded: { authorizeScope: async () => undefined, read: async () => payload },
+      onRevoked: (viewerId) => host.closeViewer(viewerId)
+    })
+    const host = new ReplayViewerHttpHost({
+      viewers,
+      projectViews: {
+        open: async () => {
+          throw new Error('Viewing saved materials cannot open a project')
+        },
+        closeViewer: () => undefined
+      },
+      readAsset: createReplayViewerAssetReader(resolve('out/replay-viewer')),
+      readRecordingMedia: async () => ({ body: bytes, mimeType: 'text/html' })
+    })
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const caller = createCallerContext({
+        clientId: 'recorded-materials',
+        lifecycleClientId: 'recorded-materials',
+        leaseId: 'recorded-materials',
+        surface: 'task',
+        location: 'local',
+        principalKind: 'automation',
+        actionOrigin: 'automation'
+      })
+      const access = await host.openRecorded(payload.receiving, caller)
+      const page = await browser.newPage({ viewport: { width: 640, height: 820 } })
+      await page.goto(access.url)
+      await expect(page.getByText('Actual author output', { exact: true })).toBeVisible()
+      await expect(page.getByText('Inspecting recorded evidence', { exact: true })).toHaveCount(0)
+      await page.getByRole('button', { name: 'Research materials', exact: true }).click()
+      const tab = page.getByRole('button', { name: label, exact: true })
+      await expect(tab).toHaveAttribute('aria-pressed', 'false')
+      // The press interval exposes any capture-phase layout shift before pointerup/click.
+      await tab.click({ delay: 80 })
+      await expect(tab).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByRole('button', { name: 'Notebook', exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      )
+      if (label === 'Project replay') {
+        await expect(
+          page.getByText(
+            'No project images were recorded. Other research materials remain available.',
+            { exact: true }
+          )
+        ).toBeVisible()
+      } else {
+        await page.getByRole('button', { name: /^project.html Step result/ }).click({ delay: 80 })
+        await expect(
+          page
+            .frameLocator('iframe[title="project.html"]')
+            .getByRole('heading', { name: 'Recorded project export' })
+        ).toBeVisible()
+      }
+    } finally {
+      await browser.close()
+      await host.close()
+      await viewers.close()
+    }
+  },
+  30000
+)
