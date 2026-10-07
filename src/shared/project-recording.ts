@@ -78,6 +78,7 @@ export const projectRecordingProvenanceSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('capture'),
       source: z.enum(['project-export', 'host-view']),
+      sourceKey: id.optional(),
       startedAt: time,
       finishedAt: time,
       width: z.number().int().positive().max(16_000_000),
@@ -109,6 +110,8 @@ export const projectRecordingStateSchema = z
     recordedAt: time,
     label: z.string().min(1).max(512).optional(),
     source: z.literal('author-declared'),
+    sourceId: id.optional(),
+    reportedAt: time.optional(),
     value: projectRecordingValueSchema
   })
   .strict()
@@ -119,6 +122,8 @@ export const projectRecordingEventSchema = z
     recordedAt: time,
     name: z.string().min(1).max(512),
     source: z.literal('author-declared'),
+    sourceId: id.optional(),
+    reportedAt: time.optional(),
     data: projectRecordingValueSchema.optional()
   })
   .strict()
@@ -238,8 +243,20 @@ const freeze = <T>(value: T): T => {
   return value
 }
 export function projectRecordingToTrack(recording: ProjectRecording): ProjectReplayTrack {
-  const { format: _format, version: _version, ...value } = validateProjectRecording(recording)
-  return freeze({ ...value, format: 'project-recording' as const })
+  const value = validateProjectRecording(recording)
+  return freeze({
+    format: 'project-recording',
+    recordingId: value.recordingId,
+    title: value.title,
+    startedAt: value.startedAt,
+    endedAt: value.endedAt,
+    source: value.source,
+    media: value.media,
+    frames: value.frames,
+    states: value.states,
+    events: value.events,
+    coverage: value.coverage
+  })
 }
 
 /** Original observation keys remain source evidence. Images get their own time/sequence;
@@ -288,7 +305,14 @@ export function projectLegacyObservationToTrack(input: RunObservationArchive): P
         : {}),
       ...(source.runId ? { runId: source.runId } : {})
     },
-    media: archive.media.map(({ stepKeys: _steps, capture: _capture, ...media }) => media),
+    media: archive.media.map((media) => ({
+      mediaKey: media.mediaKey,
+      name: media.name,
+      mimeType: media.mimeType,
+      checksum: media.checksum,
+      sizeBytes: media.sizeBytes,
+      ...(media.sourceVersionId ? { sourceVersionId: media.sourceVersionId } : {})
+    })),
     frames,
     states: [],
     events: [],
