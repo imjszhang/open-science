@@ -538,6 +538,8 @@ describe('preload bridge — public surface inventory', () => {
       'researchDemos.inspect',
       'researchDemos.list',
       'researchDemos.question',
+      'researchDemos.readHistory',
+      'researchDemos.readReceipt',
       'researchDemos.start',
       'researchDemos.stop',
       'researchExecutionProfiles.inspect',

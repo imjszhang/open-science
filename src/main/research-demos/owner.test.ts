@@ -137,6 +137,49 @@ async function fixture(options: Parameters<typeof demoFixture>[0] = {}): Promise
 }
 
 describe('Replay demo orchestration', () => {
+  it('reads old history without refreshing a run or recovering/cleaning journal files', async () => {
+    const f = await fixture()
+    f.setStatus('completed')
+    await f.owner.start(f.request)
+    await vi.waitFor(() => expect(f.service.releaseEnvironment).toHaveBeenCalledOnce())
+    const directory = join(f.dependencies.dataRoot, 'research-demos', 'runs')
+    const name = (await readdir(directory)).find((name) => name.endsWith('.json'))!
+    const path = join(directory, name)
+    const before = await readFile(path, 'utf8')
+    const orphan = path + '.999999999.tmp'
+    await writeFile(orphan, before)
+    for (const method of [
+      'getOperation',
+      'inspectExecution',
+      'recordingStatus',
+      'prepare',
+      'executeDemo',
+      'createSession'
+    ] as const)
+      f.service[method].mockClear()
+    f.setStatus('failed')
+    const history = await f.owner.readHistory(demoSource)
+    const receipt = await f.owner.readReceipt({ ...demoSource, requestId: f.request.requestId })
+    expect(history.receipts).toEqual([receipt])
+    expect(receipt).toMatchObject({
+      source: demoSource,
+      sessionId: 'carrier',
+      state: 'completed',
+      purpose: 'offline-demo'
+    })
+    expect(await readFile(path, 'utf8')).toBe(before)
+    expect(await readFile(orphan, 'utf8')).toBe(before)
+    for (const method of [
+      'getOperation',
+      'inspectExecution',
+      'recordingStatus',
+      'prepare',
+      'executeDemo',
+      'createSession'
+    ] as const)
+      expect(f.service[method]).not.toHaveBeenCalled()
+  })
+
   it('retains the verified viewing budget in the receipt and only passes it through the Main demo entry', async () => {
     const f = await fixture({
       editDemo: (demo) => {

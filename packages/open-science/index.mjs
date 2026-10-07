@@ -238,6 +238,8 @@ export class OpenScienceClient {
           'runtimes',
           'createSession',
           'inspectMaterials',
+          'inspectOfflinePlans',
+          'executeOfflinePlan',
           'preflight',
           'requestConfiguration',
           'getConfiguration',

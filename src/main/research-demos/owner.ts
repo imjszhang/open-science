@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdir } from 'node:fs/promises'
+import { readdir, open } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -343,6 +343,65 @@ export class ResearchDemoOwner {
     const source = researchDemoSourceSchema.parse(value)
     this.assertOpen(source)
     return this.tracked(() => this.listInternal(source))
+  }
+  /** Immutable historical projection. Does not refresh execution, reconcile or repair journals. */
+  async readHistory(value: unknown): Promise<ResearchDemoHistory> {
+    const source = researchDemoSourceSchema.parse(value)
+    this.assertOpen(source)
+    return this.tracked(async () => {
+      await createResearchMaterialInspectionAuthority(this.dependencies.materials, source)
+      const receipts: ResearchDemoReceipt[] = []
+      for (const key of await this.keys('runs')) {
+        const record = await this.readHistoricalRecord(key)
+        if (record && sourceKey(record.receipt.source) === sourceKey(source))
+          receipts.push(record.receipt)
+      }
+      this.assertOpen(source)
+      return { receipts: receipts.sort((a, b) => b.createdAt - a.createdAt) }
+    })
+  }
+  async readReceipt(value: unknown): Promise<ResearchDemoReceipt> {
+    const request = researchDemoReferenceSchema.parse(value)
+    const source = researchDemoSourceSchema.parse({
+      projectId: request.projectId,
+      sourceSessionId: request.sourceSessionId,
+      sourceImportId: request.sourceImportId
+    })
+    this.assertOpen(source)
+    return this.tracked(async () => {
+      await createResearchMaterialInspectionAuthority(this.dependencies.materials, source)
+      const record = await this.readHistoricalRecord(recordKey(source, request.requestId))
+      if (!record) throw new Error('research-demo-not-found')
+      this.assertOpen(source)
+      return record.receipt
+    })
+  }
+  private async readHistoricalRecord(key: string): Promise<Record | undefined> {
+    let file: Awaited<ReturnType<typeof open>>
+    try {
+      file = await open(this.path(key), 'r')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
+    try {
+      const limit = 128 * 1024
+      if ((await file.stat()).size > limit) throw new Error('research-demo-history-limit')
+      const bytes = Buffer.alloc(limit + 1)
+      let length = 0
+      while (length < bytes.length) {
+        const { bytesRead } = await file.read(bytes, length, bytes.length - length, length)
+        if (!bytesRead) break
+        length += bytesRead
+      }
+      if (length > limit) throw new Error('research-demo-history-limit')
+      const record = recordSchema.parse(JSON.parse(bytes.subarray(0, length).toString('utf8')))
+      if (record.key !== key || recordKey(record.receipt.source, record.receipt.requestId) !== key)
+        throw new Error('research-demo-history-identity')
+      return record
+    } finally {
+      await file.close()
+    }
   }
   private async listInternal(value: unknown): Promise<ResearchDemoHistory> {
     const source = researchDemoSourceSchema.parse(value)

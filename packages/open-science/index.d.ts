@@ -699,7 +699,48 @@ export type ResearchExecutionConfigurationSnapshot = {
   expiresAt: number
   profileId?: string
 }
+export type InspectOfflinePlansRequest = ManagedSessionScope & {
+  sourceSessionId: string
+  sourceIdentity?: string
+}
+export type ExecuteOfflinePlanRequest = InspectOfflinePlansRequest & {
+  sourceIdentity: string
+  planVersionId: string
+  requestId: string
+}
+export type OfflinePlanInspection = {
+  source: { projectId: string; sessionId: string; identity: string; title?: string }
+  confinement: 'offline-project-process'
+  plans: Array<{
+    planVersionId: string
+    title: string
+    description?: string
+    descriptorVersionId?: string
+    planKey?: string
+    status: 'ready' | 'blocked'
+    blockers: string[]
+    substitutions: string[]
+    runtimeId?: string
+    entrypoint?: { materialKey: string; path?: string }
+    outputs?: Array<{ path: string; filename: string; contentType?: string; optional?: boolean }>
+    timeoutMs?: number
+    hasProjectView: boolean
+    demoViewing?: { mode: 'process-lifetime' | 'until-stop-or-timeout'; timeoutMs: number }
+  }>
+}
 export type ManagedExecutionClient = {
+  /** Read package-provided offline plans. Does not prepare or execute anything. */
+  inspectOfflinePlans(
+    request: InspectOfflinePlansRequest,
+    options?: RequestOptions
+  ): Promise<OfflinePlanInspection>
+  /** Run a fixed offline plan in an ordinary writable Session, never in the imported record.
+   * The project process cannot use credentials or external hosts; the orchestrating Agent can use a model.
+   * Observe/cancel by the same requestId. Release the returned environmentId when finished. */
+  executeOfflinePlan(
+    request: ExecuteOfflinePlanRequest,
+    options?: RequestOptions
+  ): Promise<SessionOperationSnapshot & { environmentId: string }>
   /** Ask the local user to configure services in the trusted desktop. Never executes a research run. */
   requestConfiguration(
     request: ResearchExecutionPreflightRequest & { requestId: string },

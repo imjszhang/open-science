@@ -185,6 +185,16 @@ Update the report from the actual outcome; do not label an engineering check or 
 run as full scientific reproduction. The application's collection receipt preserves material and
 Run identities but does not infer scientific equivalence or replace this explanation.
 
+For an explicitly requested package offline run, first call
+`host.managedExecution.inspectOfflinePlans({ sourceSessionId })`. Explain the selected plan's
+substitutions and blockers. Then call `host.managedExecution.executeOfflinePlan` with the returned
+`sourceIdentity`, `planVersionId`, the same `sourceSessionId`, and a stable `requestId`. Main
+prepares the fixed materials and executes in this current writable Session/turn; no hidden Session
+is created. It returns `environmentId` for the usual collection/release lifecycle. Do not pass
+commands, profiles, credentials or network overrides. Offline means the project process cannot
+access external services; your orchestration model may still consume tokens. This is a new run
+under declared substitutions, never historical playback or an implicit fallback for real research.
+
 Prepare verified materials using the returned source identity and an available runtime. Execute
 the selected script through `host.managedExecution.execute` in the current foreground turn. Its
 inputs and work/output directories are owned by Open Science; use the documented environment
@@ -195,8 +205,8 @@ new Session type or separate reproduction workflow just to execute the materials
 For a task whose process should remain viewable, pass `recordObservation: true` to `execute`.
 This is independent of having a project Web interface. To expose a project's own interface, declare
 `projectView: { title, entryPath }` with the bounded managed `localServicePort`; do not provide an
-arbitrary host URL. Main owns the exact Run/service generation, and the existing Replay preview
-can show it. Opening a viewer, pausing follow or closing the pane does not restart or stop the Run.
+arbitrary host URL. Main owns the exact Run/service generation, and the ordinary execution observation preview
+can show it. Historical Replay only reads saved records. Opening a viewer, pausing follow or closing the pane does not restart or stop the Run.
 Explain a compatibility adaptation such as `adaptFrameAncestors` when it is necessary.
 
 Observation recording, Artifact publication and the experimental outcome are separate results.
@@ -324,7 +334,6 @@ Never read Session storage with shell or SQLite to bypass a failed Host read.
 List file Versions with `kind: 'artifact-version'` or `'upload-version'`, and review outcomes with
 `kind: 'review'`. File IDs are immutable Version IDs. Text files up to 8 MiB are readable;
 binary files return metadata, not pixels. For an image in the current Project, pass its returned `viewImage` object to `host.viewImage` to inspect that exact Version. Cross-Project images require the source preview or an attachment; do not infer visual content from metadata. Reviewer internal logs are excluded.
-
 
 ### Research execution and Replay demos
 

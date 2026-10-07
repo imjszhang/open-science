@@ -17,6 +17,8 @@ export const MANAGED_EXECUTION_EXTERNAL_METHODS = [
   'runtimes',
   'createSession',
   'inspectMaterials',
+  'inspectOfflinePlans',
+  'executeOfflinePlan',
   'preflight',
   'requestConfiguration',
   'getConfiguration',

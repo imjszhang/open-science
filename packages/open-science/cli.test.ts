@@ -2529,6 +2529,8 @@ describe('managed execution CLI', () => {
     ['runtimes', 'runtimes'],
     ['session-create', 'createSession'],
     ['materials', 'inspectMaterials'],
+    ['offline-plans', 'inspectOfflinePlans'],
+    ['offline-run', 'executeOfflinePlan'],
     ['prepare', 'prepare'],
     ['run', 'execute'],
     ['status', 'getOperation'],

@@ -8,6 +8,8 @@ export function registerResearchDemoIpc(owner: ResearchDemoOwner): void {
     ['research-demos:inspect', 'inspect'],
     ['research-demos:start', 'start'],
     ['research-demos:list', 'list'],
+    ['research-demos:read-history', 'readHistory'],
+    ['research-demos:read-receipt', 'readReceipt'],
     ['research-demos:get', 'get'],
     ['research-demos:stop', 'stop'],
     ['research-demos:carriers', 'carriers'],

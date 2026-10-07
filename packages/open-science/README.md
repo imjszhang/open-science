@@ -217,6 +217,17 @@ console.log(latest)
 ```
 
 For a real reproduction, select the original research plan and call
+For an explicitly selected package offline plan, use
+`execution.inspectOfflinePlans({...scope, sourceSessionId})`, then
+`execution.executeOfflinePlan({...scope, sourceSessionId, sourceIdentity, planVersionId, requestId})`.
+Use an ordinary writable destination Session; the source can be an imported read-only research.
+Main freezes the plan/material versions and derives the command and offline confinement. Commands,
+profiles, credentials and network overrides are rejected. The response is the normal operation
+snapshot plus `environmentId`; observe/cancel by the same `requestId` and release the environment
+when outputs are published. CLI equivalents are `execution offline-plans` and `execution offline-run`.
+The project process is offline; an Agent orchestrating it may still use a model. These are new
+results under declared substitutions, not historical playback or proof of full reproduction.
+
 `execution.preflight({...scope, sourceSessionId, sourceIdentity, descriptorVersionId, planKey})`.
 This read-only check reports missing materials, compatible runtimes and credential slots; it never
 substitutes an offline Replay demonstration. `ready` means local prerequisites, not validated remote
@@ -415,7 +426,6 @@ content checks remain enforced. A successful transfer can return `cleanupPending
 publication succeeded but private staging cleanup must be retried. Remote callers cannot use host
 file paths. These methods do not open desktop dialogs or weaken desktop command restrictions.
 
-
 ### Saved Replay observations
 
 Set `recordObservation: true` on `execution.execute` to capture bounded process observations as
@@ -470,7 +480,10 @@ if (frame) {
     offset = chunk.nextOffset
   }
   const image = Buffer.concat(chunks)
-  if (image.length !== frame.sizeBytes || createHash('sha256').update(image).digest('hex') !== frame.checksum)
+  if (
+    image.length !== frame.sizeBytes ||
+    createHash('sha256').update(image).digest('hex') !== frame.checksum
+  )
     throw new Error('Captured image verification failed')
   // The agent can now inspect or display these verified bytes using its own image tools.
 }

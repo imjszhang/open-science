@@ -20,10 +20,17 @@ function setup(): {
   call: (method: string, request?: unknown) => Promise<unknown>
 } {
   const owner = Object.fromEntries(
-    ['inspect', 'start', 'list', 'get', 'stop', 'carriers', 'question'].map((method) => [
-      method,
-      vi.fn(async () => ({}))
-    ])
+    [
+      'inspect',
+      'start',
+      'list',
+      'get',
+      'readHistory',
+      'readReceipt',
+      'stop',
+      'carriers',
+      'question'
+    ].map((method) => [method, vi.fn(async () => ({}))])
   )
   registerResearchDemoIpc(owner as unknown as ResearchDemoOwner)
   return {
@@ -38,7 +45,7 @@ function setup(): {
 describe('Replay demo desktop admission', () => {
   it('exposes only the explicit lifecycle and validates a live local desktop caller', async () => {
     const f = setup()
-    expect(seam.register).toHaveBeenCalledTimes(7)
+    expect(seam.register).toHaveBeenCalledTimes(9)
     await f.call('start', { requestId: 'request' })
     expect(f.owner.start).toHaveBeenCalledWith({ requestId: 'request' }, expect.any(AbortSignal))
     seam.caller.mockReturnValue({ ...createElectronCallerContext(1), location: 'remote' })

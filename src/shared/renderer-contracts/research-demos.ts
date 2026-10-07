@@ -11,6 +11,12 @@ import type {
 import { callable, ELECTRON } from './definition'
 
 export const contracts = {
+  'researchDemos.readHistory': callable<
+    (request: ResearchDemoSource) => Promise<ResearchDemoHistory>
+  >()('research-demos', ['research-demos:read-history', ELECTRON]),
+  'researchDemos.readReceipt': callable<
+    (request: ResearchDemoReference) => Promise<ResearchDemoReceipt>
+  >()('research-demos', ['research-demos:read-receipt', ELECTRON]),
   'researchDemos.question': callable<
     (request: ResearchDemoQuestionRequest) => Promise<ResearchDemoQuestion>
   >()('research-demos', ['research-demos:question', ELECTRON]),

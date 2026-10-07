@@ -60,6 +60,22 @@ export async function inspectResearchDemos(
   runtimes: Awaited<ReturnType<ManagedExecutionService['runtimes']>>,
   signal?: AbortSignal
 ): Promise<{ inspection: ResearchDemoInspection; resolved: ResolvedResearchDemo[] }> {
+  const resolved = await inspectOfflinePlanMaterials(authority, runtimes, signal)
+  return {
+    inspection: {
+      source: { ...source, identity: authority.source.identity, title: authority.source.title },
+      candidates: resolved.map((result) => result.candidate)
+    },
+    resolved
+  }
+}
+
+/** Shared package-plan discovery. Does not require an import or a Replay carrier Session. */
+export async function inspectOfflinePlanMaterials(
+  authority: ResearchMaterialAuthority,
+  runtimes: Awaited<ReturnType<ManagedExecutionService['runtimes']>>,
+  signal?: AbortSignal
+): Promise<ResolvedResearchDemo[]> {
   const candidates = authority.versions.filter(
     (version) => version.filename === 'research-demo.json'
   )
@@ -159,13 +175,7 @@ export async function inspectResearchDemos(
       candidate.blockers.push('service-unavailable')
     candidate.status = candidate.blockers.length ? 'blocked' : 'ready'
   }
-  return {
-    inspection: {
-      source: { ...source, identity: authority.source.identity, title: authority.source.title },
-      candidates: resolved.map((result) => result.candidate)
-    },
-    resolved
-  }
+  return resolved
 }
 
 /** Literal argv, not caller-supplied shell source. The runtime/path prefix is Main-owned. */

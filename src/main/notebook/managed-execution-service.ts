@@ -20,6 +20,11 @@ import type {
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
+  executeOfflinePlanRequestSchema,
+  type OfflinePlanInspection
+} from '../../shared/offline-execution'
+import { OfflinePlanAdmission } from './offline-plan-admission'
+import {
   createManagedSessionRequestSchema,
   collectManagedOutputsRequestSchema,
   executeManagedEnvironmentRequestSchema,
@@ -456,8 +461,10 @@ export class ManagedExecutionService {
   >()
 
   private readonly observationCoordinator: ManagedRunObservationCoordinator
+  private readonly offlinePlans: OfflinePlanAdmission
 
   constructor(private readonly dependencies: ManagedExecutionServiceDependencies) {
+    this.offlinePlans = new OfflinePlanAdmission({ ...dependencies, service: this })
     this.observationCoordinator = new ManagedRunObservationCoordinator({
       dataRoot: dependencies.dataRoot,
       artifacts: dependencies.artifacts,
@@ -1608,7 +1615,44 @@ export class ManagedExecutionService {
     return this.startExecution(value, 'research')
   }
 
-  /** Main-only Replay entry. Public schemas cannot request this purpose or inject its policy. */
+  inspectOfflinePlans(value: unknown, signal?: AbortSignal): Promise<OfflinePlanInspection> {
+    return this.offlinePlans.inspect(value, signal)
+  }
+
+  /** External clients select a package plan; Main retains its offline policy and provenance. */
+  async executeOfflinePlan(
+    value: unknown
+  ): Promise<Awaited<ReturnType<SessionOperationOwner['start']>> & { environmentId: string }> {
+    const { request, options } = await this.offlinePlans.prepare(value)
+    return { ...(await this.executeDemo(request, options)), environmentId: request.environmentId }
+  }
+
+  /** Borrow the current ordinary Session turn instead of starting a hidden/parallel Session. */
+  async executeOfflinePlanInTurn(
+    value: unknown,
+    context: ManagedExecutionTurnContext,
+    signal?: AbortSignal
+  ): Promise<ManagedExecutionResult & { environmentId: string }> {
+    const selected = executeOfflinePlanRequestSchema.parse(value)
+    if (
+      selected.projectId !== context.projectId ||
+      selected.sessionId !== context.sessionId ||
+      !context.provenanceContext.rootFrameId ||
+      context.provenanceContext.rootFrameId !== context.provenanceContext.agentFrameId
+    )
+      throw new Error('Offline execution requires the current Main Agent Session context.')
+    const { request, options } = await this.offlinePlans.prepare(
+      selected,
+      context.operationId,
+      signal
+    )
+    return {
+      ...(await this.executeDemoInTurn(request, context, signal, options)),
+      environmentId: request.environmentId
+    }
+  }
+
+  /** Main-only admitted offline execution. Public schemas cannot inject its policy. */
   async executeDemo(
     value: unknown,
     options: { inputVersionIds?: string[]; demoViewing?: RunObservationDemoViewingAdmission } = {}

@@ -5170,6 +5170,8 @@ describe('managed execution HTTP API', () => {
         requestConfiguration: vi.fn(),
         getConfiguration: vi.fn(),
         inspectMaterials: vi.fn(),
+        inspectOfflinePlans: vi.fn(),
+        executeOfflinePlan: vi.fn(),
         prepare: (value) => prepare(prepareManagedEnvironmentRequestSchema.parse(value)),
         execute: vi.fn(),
         getOperation: vi.fn(),
@@ -5457,6 +5459,8 @@ describe('managed execution HTTP API', () => {
       'runtimes',
       'createSession',
       'inspectMaterials',
+      'inspectOfflinePlans',
+      'executeOfflinePlan',
       'prepare',
       'execute',
       'getOperation',
@@ -5468,10 +5472,12 @@ describe('managed execution HTTP API', () => {
       'discardOutputs'
     ]) {
       const response = await post(base, method, { requestId: 'run-1' })
-      expect(response.status).toBe(['execute', 'collectOutputs'].includes(method) ? 202 : 200)
+      expect(response.status).toBe(
+        ['execute', 'executeOfflinePlan', 'collectOutputs'].includes(method) ? 202 : 200
+      )
       expect(await response.json()).toMatchObject({ data: { status: 'running' } })
     }
-    expect(call).toHaveBeenCalledTimes(12)
+    expect(call).toHaveBeenCalledTimes(14)
     expect(
       contexts.every(
         (context) =>
@@ -5548,6 +5554,8 @@ describe('managed execution HTTP API', () => {
         requestConfiguration: vi.fn(),
         getConfiguration: vi.fn(),
         inspectMaterials: vi.fn(),
+        inspectOfflinePlans: vi.fn(),
+        executeOfflinePlan: vi.fn(),
         prepare: vi.fn(),
         execute,
         getOperation: vi.fn(),
