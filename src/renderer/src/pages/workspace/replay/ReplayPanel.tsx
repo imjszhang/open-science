@@ -106,6 +106,8 @@ export type ReplayRecordedSource = Pick<
 >
 
 export type ReplayPanelProps = {
+  /** Present only for branches rebuilt from actual recorded timestamps. */
+  recordedTimeOrigins?: Readonly<Record<string, number>>
   materialViews?: readonly ReplayMaterialView[]
   materialViewRequest?: { id: string; revision: number }
   live?: ReplayLiveSource
@@ -169,6 +171,7 @@ const defaultNotebookReader: ReplayNotebookRunReader = (source, index, options) 
 
 const ReplayPanelContent = ({
   document: incomingDocument,
+  recordedTimeOrigins,
   materialViews,
   materialViewRequest,
   live: liveSource,
@@ -205,7 +208,7 @@ const ReplayPanelContent = ({
     [recorded, liveSource]
   )
   const phaseLabel = useObservationPhaseLabel()
-  const [materialViewId, setMaterialViewId] = useState('notebook')
+  const [materialViewId, setMaterialViewId] = useState(materialViewRequest?.id ?? 'notebook')
   // Inspecting freezes both record navigation and bounded evidence. New logs never replace
   // the evidence a user is reading or about to reference in a question.
   const [inspection, setInspection] = useState<{
@@ -256,7 +259,9 @@ const ReplayPanelContent = ({
   const [ready, setReady] = useState(false)
   const [wide, setWide] = useState(false)
   const [liveProjectTabActive, setLiveProjectTabActive] = useState(false)
-  const [materialsOverride, setMaterialsOverride] = useState<boolean>()
+  const [materialsOverride, setMaterialsOverride] = useState<boolean | undefined>(
+    materialViewRequest ? true : undefined
+  )
   const materialsOpen = materialsOverride ?? ((!live || !!recorded) && (expanded || wide))
   const [handledMaterialRequest, setHandledMaterialRequest] = useState(materialViewRequest)
   if (materialViewRequest && materialViewRequest !== handledMaterialRequest) {
@@ -301,7 +306,8 @@ const ReplayPanelContent = ({
     const result = projectReplayScene(
       replayDocument,
       target.id,
-      live && !inspection ? target.durationMs : positionMs
+      live && !inspection ? target.durationMs : positionMs,
+      recordedTimeOrigins?.[target.id]
     )
     // Observed snapshots expose only actual recorded data; never animate an imagined
     // input/activity/result boundary within a snapshot.
@@ -314,7 +320,7 @@ const ReplayPanelContent = ({
           visibleResourceIds: [...new Set(result.visibleSteps.flatMap((step) => step.resourceIds))]
         }
       : result
-  }, [replayDocument, branchId, positionMs, live, inspection])
+  }, [replayDocument, branchId, positionMs, live, inspection, recordedTimeOrigins])
   const branch = replayDocument.branches.find((item) => item.id === scene.branchId)
   const currentObservation = live
     ? observationHistory.find((snapshot) => observationRecordId(snapshot) === scene.step?.id)
@@ -338,14 +344,27 @@ const ReplayPanelContent = ({
     const ids = new Set<string>()
     for (const step of steps) {
       for (const run of step.runs) runs.set(run.runId, run)
-      if (step.id !== scene.step?.id || scene.showResults)
-        for (const id of step.resourceIds) ids.add(id)
+      const origin = recordedTimeOrigins?.[scene.branchId]
+      const showStepResults =
+        origin === undefined
+          ? step.id !== scene.step?.id || scene.showResults
+          : step.recordedEndAt === undefined || step.recordedEndAt <= origin + scene.positionMs
+      if (showStepResults) for (const id of step.resourceIds) ids.add(id)
     }
     return {
       runs: [...runs.values()],
       files: replayDocument.resources.filter((resource) => ids.has(resource.id))
     }
-  }, [branch, scene.stepIndex, scene.step?.id, scene.showResults, replayDocument.resources])
+  }, [
+    branch,
+    scene.stepIndex,
+    scene.step?.id,
+    scene.showResults,
+    replayDocument.resources,
+    recordedTimeOrigins,
+    scene.branchId,
+    scene.positionMs
+  ])
   const notebookStart = Math.max(
     0,
     materialCatalog.runs.length - (notebookLimit ?? REPLAY_MATERIAL_RUN_LIMIT)
@@ -1188,6 +1207,32 @@ const ReplayPanelContent = ({
           materialsOpen={materialsOpen}
           materialsId={materialsId}
           materialViews={materialViews}
+          materialPlayback={{
+            recordedAt:
+              recordedTimeOrigins?.[scene.branchId] !== undefined
+                ? recordedTimeOrigins[scene.branchId] + scene.positionMs
+                : scene.step?.recordedAt,
+            continuous: recordedTimeOrigins?.[scene.branchId] !== undefined,
+            playing: playing && active && ready && !scene.ended,
+            speed,
+            onSeekRecordedAt: (recordedAt) => {
+              const origin = recordedTimeOrigins?.[scene.branchId]
+              if (origin !== undefined) seek(recordedAt - origin)
+              else {
+                // Snapshot navigation has discrete anchors. Use the latest known state;
+                // never stretch its presentation duration to simulate elapsed recording time.
+                const step = branch?.steps
+                  .filter((step) => step.recordedAt !== undefined && step.recordedAt <= recordedAt)
+                  .reduce<ReplayStep | undefined>(
+                    (latest, step) =>
+                      !latest || step.recordedAt! >= latest.recordedAt! ? step : latest,
+                    undefined
+                  )
+                if (step) seek(step.startMs)
+                else pause()
+              }
+            }
+          }}
           materialsActive={active}
           materialViewId={materialViewId}
           onMaterialViewChange={(id) => {

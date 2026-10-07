@@ -197,6 +197,52 @@ const openMaterials = (): void => {
 }
 
 describe('research replay interaction', () => {
+  it('owns the material clock, forwards pause/speed/seek, and restores the requested material after a timeline change', async () => {
+    const doc = makeDocument()
+    doc.resources = []
+    doc.branches = [
+      { ...doc.branches[0], steps: [step('one', 0, 'First'), step('two', 1000, 'Second')] }
+    ]
+    let playback: import('./ReplayStage').ReplayMaterialPlayback | undefined
+    const views = [
+      {
+        id: 'project',
+        label: 'Project replay',
+        content: (_active: boolean, value?: import('./ReplayStage').ReplayMaterialPlayback) => {
+          playback = value
+          return null
+        }
+      }
+    ]
+    render(
+      <ReplayPanel
+        document={doc}
+        {...callbacks()}
+        materialViews={views}
+        materialViewRequest={{ id: 'project', revision: 1 }}
+        recordedTimeOrigins={{ main: 10000 }}
+      />
+    )
+    expect(
+      screen.getByRole('button', { name: 'Project replay' }).getAttribute('aria-pressed')
+    ).toBe('true')
+    expect(playback).toMatchObject({ recordedAt: 10000, continuous: true, playing: false })
+    seekProgress(1500)
+    expect(playback?.recordedAt).toBe(11500)
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    await waitFor(() => expect(playback?.playing).toBe(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }))
+    expect(playback?.playing).toBe(false)
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Playback speed' }), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('option', { name: '4×' }))
+    expect(playback?.speed).toBe(4)
+    act(() => playback?.onSeekRecordedAt(10500))
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe('500')
+    expect(playback).toMatchObject({ recordedAt: 10500, playing: false })
+  })
+
   it('exposes the visible playhead during playback and captures its latest position on demand', () => {
     const props = callbacks()
     const document = makeDocument()

@@ -75,6 +75,29 @@ afterEach(() => {
 })
 
 describe('desktop scoped Run observation preview', () => {
+  it('does not restart selection polling when a shared clock recreates callback props', async () => {
+    vi.useFakeTimers()
+    const api = install()
+    const view = render(
+      <RunObservationPreview title="Study" target={target} isActive onAskSelection={vi.fn()} />
+    )
+    await act(async () => {})
+    expect(api.selection).toHaveBeenCalledTimes(1)
+    for (let frame = 0; frame < 20; frame++) {
+      view.rerender(
+        <RunObservationPreview title="Study" target={target} isActive onAskSelection={vi.fn()} />
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16)
+      })
+    }
+    expect(api.selection).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(api.selection).toHaveBeenCalledTimes(2)
+  })
+
   it('opens the saved archive as a recorded preview and keeps the current draft and recorded Ask owner', async () => {
     const live = install()
     const archive = {

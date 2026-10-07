@@ -136,3 +136,128 @@ it('plays by recorded frame times and suspends the clock while its material pane
     vi.useRealTimers()
   }
 })
+
+it('follows the research timestamp without local playback controls or timer advancement', async () => {
+  const track = projectRecordingToTrack(fixture())
+  const readImage = vi.fn(async (key: string) => `data:image/png;base64,${key}`)
+  const onSeekRecordedAt = vi.fn()
+  const { rerender } = render(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      transport={{ recordedAt: 25, onSeekRecordedAt }}
+    />
+  )
+  await screen.findByRole('img')
+  expect(screen.getByRole('img').getAttribute('src')).toContain('image-0')
+  expect(screen.queryByRole('slider')).toBeNull()
+  expect(screen.queryByRole('button', { name: /(?:Play|Pause) replay/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Next image' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Previous image' })).toBeNull()
+  rerender(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      transport={{ recordedAt: 50, onSeekRecordedAt }}
+    />
+  )
+  await act(async () => {})
+  expect(screen.getByRole('img').getAttribute('src')).toContain('image-1')
+  expect(onSeekRecordedAt).not.toHaveBeenCalled()
+})
+
+it('drops controlled images before their first capture, outside recording coverage, and without an anchor', async () => {
+  const track = projectRecordingToTrack(fixture())
+  const readImage = vi.fn(async (key: string) => `data:image/png;base64,${key}`)
+  const onSeekRecordedAt = vi.fn()
+  const { rerender } = render(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      transport={{ recordedAt: 50, onSeekRecordedAt }}
+    />
+  )
+  await screen.findByRole('img')
+  for (const recordedAt of [5, 15, 81, undefined]) {
+    rerender(
+      <ProjectReplay
+        track={track}
+        readImage={readImage}
+        transport={{ recordedAt, onSeekRecordedAt }}
+      />
+    )
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(
+      screen.getByText(
+        recordedAt === undefined
+          ? 'This recording cannot be aligned with the research replay timeline.'
+          : 'No project image was recorded at this time.'
+      )
+    ).toBeTruthy()
+  }
+  expect(readImage).toHaveBeenCalledTimes(1)
+})
+
+it('does not cite a loading or hidden controlled image and seeks the master clock before asking', async () => {
+  const track = projectRecordingToTrack(fixture())
+  let finish!: (value: string) => void
+  const readImage = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        finish = resolve
+      })
+  )
+  const onSeekRecordedAt = vi.fn()
+  const onAskFrame = vi.fn()
+  const props = { track, readImage, onAskFrame, transport: { recordedAt: 55, onSeekRecordedAt } }
+  const { rerender } = render(<ProjectReplay {...props} />)
+  const askButton = screen.getByRole('button', { name: 'Ask about this frame' })
+  expect(askButton.hasAttribute('disabled')).toBe(true)
+  await act(async () => {
+    finish('data:image/png;base64,image-1')
+  })
+  fireEvent.click(askButton)
+  await act(async () => {})
+  expect(onSeekRecordedAt).toHaveBeenCalledWith(50)
+  expect(onAskFrame).toHaveBeenCalledWith(track.frames[1])
+  expect(onSeekRecordedAt.mock.invocationCallOrder[0]).toBeLessThan(
+    onAskFrame.mock.invocationCallOrder[0]
+  )
+  rerender(<ProjectReplay {...props} active={false} />)
+  expect(screen.queryByRole('img')).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this frame' }).hasAttribute('disabled')
+  ).toBe(true)
+})
+
+it('ignores a delayed image read after the research clock leaves its coverage', async () => {
+  const track = projectRecordingToTrack(fixture())
+  let finish!: (value: string) => void
+  const readImage = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        finish = resolve
+      })
+  )
+  const onSeekRecordedAt = vi.fn()
+  const { rerender } = render(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      transport={{ recordedAt: 50, onSeekRecordedAt }}
+    />
+  )
+  rerender(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      transport={{ recordedAt: 100, onSeekRecordedAt }}
+    />
+  )
+  expect(readImage.mock.calls[0]).toBeTruthy()
+  await act(async () => {
+    finish('data:image/png;base64,late')
+  })
+  expect(screen.queryByRole('img')).toBeNull()
+  expect(screen.getByText('No project image was recorded at this time.')).toBeTruthy()
+})

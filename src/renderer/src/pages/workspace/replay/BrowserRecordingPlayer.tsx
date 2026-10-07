@@ -1,22 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
 import { recordingTime, segmentAt } from './browser-recording-playback'
-import type { BrowserRecording } from '../../../../../shared/browser-recording'
+import type {
+  BrowserRecording,
+  BrowserRecordingSegment
+} from '../../../../../shared/browser-recording'
+
+export type BrowserRecordingTransport = {
+  /** Recording-relative time from the research clock. Undefined means no reliable alignment. */
+  offsetMs: number | undefined
+  playing: boolean
+  speed: number
+  /** Requests a seek (and pause) of the owning research clock. */
+  onSeek: (offsetMs: number) => void
+}
 
 export type BrowserRecordingPlayerProps = {
   recording: BrowserRecording
   active?: boolean
   mediaUrl: (mediaKey: string) => string | null
   onAskMoment?: (offsetMs: number) => void | Promise<void>
+  transport?: BrowserRecordingTransport
 }
 /** Passive media only: no project address, HTML, environment or execution capability enters here. */
 const BrowserRecordingPlayerContent = ({
   recording,
   active = true,
   mediaUrl,
-  onAskMoment
+  onAskMoment,
+  transport
 }: BrowserRecordingPlayerProps): React.JSX.Element => {
   const { t } = useTranslation()
   const video = useRef<HTMLVideoElement>(null)
@@ -33,9 +47,14 @@ const BrowserRecordingPlayerContent = ({
   const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
   active = active && visible && documentVisible
   const firstOffset = recording.segments[0]?.startMs ?? 0
-  const [offsetMs, setOffsetMs] = useState(firstOffset)
-  const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1)
+  const [localOffsetMs, setOffsetMs] = useState(firstOffset)
+  const [localPlaying, setPlaying] = useState(false)
+  const [localSpeed, setSpeed] = useState(1)
+  const controlled = transport !== undefined
+  const aligned = !controlled || Number.isFinite(transport.offsetMs)
+  const offsetMs = controlled ? (transport.offsetMs ?? Number.NaN) : localOffsetMs
+  const playing = transport?.playing ?? localPlaying
+  const speed = transport?.speed ?? localSpeed
   const [failedSource, setFailedSource] = useState<string>()
   const [decodedSource, setDecodedSource] = useState<string>()
   const [heldOffset, setHeldOffset] = useState<number>()
@@ -45,11 +64,12 @@ const BrowserRecordingPlayerContent = ({
   const desiredOffset = useRef(firstOffset)
   const segment = segmentAt(recording, offsetMs)
   const source = segment && active ? mediaUrl(segment.mediaKey) : null
+  const sourceIdentity = source && segment ? `${segment.segmentId}:${source}` : undefined
   const failed = Boolean(source && failedSource === source)
-  const loading = Boolean(source && !failed && decodedSource !== source)
+  const loading = Boolean(source && !failed && decodedSource !== sourceIdentity)
   const displayedOffset = loading && heldOffset !== undefined ? heldOffset : offsetMs
   if (!active) {
-    if (playing) setPlaying(false)
+    if (localPlaying) setPlaying(false)
     if (decodedSource !== undefined) setDecodedSource(undefined)
     if (heldOffset !== undefined) setHeldOffset(undefined)
   }
@@ -64,13 +84,15 @@ const BrowserRecordingPlayerContent = ({
       heldFrame.current.height = 0
     }
   }
-  const retainDecodedFrame = (): void => {
-    const element = video.current
+  const retainDecodedFrame = (
+    element = video.current,
+    capturedSegment: BrowserRecordingSegment | undefined = segment
+  ): void => {
     const canvas = heldFrame.current
     if (
       !element ||
       !canvas ||
-      !segment ||
+      !capturedSegment ||
       element.readyState < 2 ||
       !element.videoWidth ||
       !element.videoHeight
@@ -86,7 +108,10 @@ const BrowserRecordingPlayerContent = ({
       if (!context) return
       context.drawImage(element, 0, 0, canvas.width, canvas.height)
       setHeldOffset(
-        Math.min(segment.endMs - 1, segment.startMs + Math.round(element.currentTime * 1000))
+        Math.min(
+          capturedSegment.endMs - 1,
+          capturedSegment.startMs + Math.round(element.currentTime * 1000)
+        )
       )
     } catch {
       clearHeldFrame()
@@ -94,11 +119,15 @@ const BrowserRecordingPlayerContent = ({
   }
   const decoded = (element: HTMLVideoElement): void => {
     if (element !== video.current || !active || element.seeking) return
-    setDecodedSource(source ?? undefined)
+    setDecodedSource(sourceIdentity)
     clearHeldFrame()
   }
   const seek = (value: number): void => {
     const bounded = Math.max(0, Math.min(Math.max(0, recording.durationMs - 1), Math.round(value)))
+    if (transport) {
+      if (aligned) transport.onSeek(bounded)
+      return
+    }
     setPlaying(false)
     setFailedSource(undefined)
     clearHeldFrame()
@@ -153,20 +182,70 @@ const BrowserRecordingPlayerContent = ({
       element?.removeAttribute('src')
       element?.load()
     }
-  }, [source])
+  }, [sourceIdentity])
+  const retainAtControlledTransition = useEffectEvent(
+    (
+      previousElement: HTMLVideoElement | null,
+      previousSegment: BrowserRecordingSegment | undefined
+    ) => {
+      if (!controlled) return
+      const nextSegment = segmentAt(recording, offsetMs)
+      // The master clock may cross the boundary before the video's ended event. Retain only
+      // an adjacent decoded frame while loading, never a frame across a seek or missing interval.
+      if (
+        active &&
+        playing &&
+        previousSegment &&
+        nextSegment &&
+        nextSegment.segmentId !== previousSegment.segmentId &&
+        nextSegment.startMs >= previousSegment.endMs &&
+        nextSegment.startMs - previousSegment.endMs <= 250 &&
+        offsetMs - nextSegment.startMs <= 250 &&
+        !recording.coverage.gaps.some(
+          (item) => item.startMs < nextSegment.startMs && item.endMs > previousSegment.endMs
+        )
+      ) {
+        retainDecodedFrame(previousElement, previousSegment)
+      } else clearHeldFrame()
+    }
+  )
+  useLayoutEffect(() => {
+    const previousElement = video.current
+    const previousSegment = segment
+    return () => retainAtControlledTransition(previousElement, previousSegment)
+    // Capture the departing element before React removes it, using the latest research clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceIdentity])
+  useEffect(() => {
+    if (!controlled || !active || !segment || !source) return
+    const element = video.current
+    if (!element || element.readyState < 1) return
+    const targetSeconds = Math.max(0, (offsetMs - segment.startMs) / 1000)
+    // Let the media decoder advance between research-clock updates; continuously resetting
+    // currentTime causes seek storms. Pauses and explicit jumps still settle at the exact time.
+    if (Math.abs(element.currentTime - targetSeconds) > (playing ? 0.15 : 0.001)) {
+      setDecodedSource(undefined)
+      element.currentTime = targetSeconds
+    }
+  }, [controlled, active, sourceIdentity, offsetMs, playing, segment, source])
   useEffect(() => {
     const element = video.current
     if (!element) return
+    let cancelled = false
     element.playbackRate = speed
-    if (active && playing && source && decodedSource === source) {
+    if (active && playing && source && decodedSource === sourceIdentity) {
       void element.play().catch(() => {
-        if (mounted.current && element === video.current) {
+        if (!cancelled && mounted.current && element === video.current) {
           setPlaying(false)
+          setDecodedSource(undefined)
           setFailedSource(source ?? undefined)
         }
       })
     } else element.pause()
-  }, [playing, speed, active, source, decodedSource])
+    return () => {
+      cancelled = true
+    }
+  }, [playing, speed, active, source, sourceIdentity, decodedSource])
   const incomplete =
     recording.coverage.droppedFrames > 0 ||
     recording.coverage.gaps.length > 0 ||
@@ -179,7 +258,9 @@ const BrowserRecordingPlayerContent = ({
       data-testid="browser-recording-player"
     >
       <p className="text-xs text-muted-foreground">
-        {t('Recorded webpage footage. Playback does not run the project.')}
+        {controlled
+          ? t('Follows playback progress')
+          : t('Recorded webpage footage. Playback does not run the project.')}
       </p>
       {incomplete ? (
         <p role="status" className="text-xs text-status-warning-foreground">
@@ -187,29 +268,33 @@ const BrowserRecordingPlayerContent = ({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!active || !segment || !source || failed}
-          onClick={() => setPlaying(!playing)}
-        >
-          {playing ? t('Pause replay') : t('Play replay')}
-        </Button>
-        <span className="font-mono text-xs" aria-live="off">
-          {recordingTime(displayedOffset)} / {recordingTime(recording.durationMs)}
-        </span>
-        <select
-          aria-label={t('Playback speed')}
-          value={speed}
-          className="rounded border border-border-200 bg-bg-000 p-1 text-xs"
-          onChange={(event) => setSpeed(Number(event.target.value))}
-        >
-          {[0.5, 1, 1.5, 2].map((rate) => (
-            <option key={rate} value={rate}>
-              {t('{{speed}}×', { speed: rate })}
-            </option>
-          ))}
-        </select>
+        {!controlled ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!active || !segment || !source || failed}
+              onClick={() => setPlaying(!playing)}
+            >
+              {playing ? t('Pause replay') : t('Play replay')}
+            </Button>
+            <span className="font-mono text-xs" aria-live="off">
+              {recordingTime(displayedOffset)} / {recordingTime(recording.durationMs)}
+            </span>
+            <select
+              aria-label={t('Playback speed')}
+              value={speed}
+              className="rounded border border-border-200 bg-bg-000 p-1 text-xs"
+              onChange={(event) => setSpeed(Number(event.target.value))}
+            >
+              {[0.5, 1, 1.5, 2].map((rate) => (
+                <option key={rate} value={rate}>
+                  {t('{{speed}}×', { speed: rate })}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : null}
         {onAskMoment ? (
           <Button
             size="sm"
@@ -233,9 +318,12 @@ const BrowserRecordingPlayerContent = ({
                       )
                     )
                   : Math.round(offsetMs)
-              desiredOffset.current = atMs
-              setOffsetMs(atMs)
-              setPlaying(false)
+              if (transport) transport.onSeek(atMs)
+              else {
+                desiredOffset.current = atMs
+                setOffsetMs(atMs)
+                setPlaying(false)
+              }
               setAsking(true)
               setAskFailed(false)
               void Promise.resolve()
@@ -252,16 +340,18 @@ const BrowserRecordingPlayerContent = ({
           </Button>
         ) : null}
       </div>
-      <input
-        type="range"
-        min={0}
-        max={Math.max(0, recording.durationMs - 1)}
-        step={1}
-        value={displayedOffset}
-        aria-label={t('Web recording timeline')}
-        className="w-full"
-        onChange={(event) => seek(Number(event.target.value))}
-      />
+      {!controlled ? (
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, recording.durationMs - 1)}
+          step={1}
+          value={displayedOffset}
+          aria-label={t('Web recording timeline')}
+          className="w-full"
+          onChange={(event) => seek(Number(event.target.value))}
+        />
+      ) : null}
       {source && segment ? (
         <div
           className="relative max-h-[65vh] w-full bg-bg-100"
@@ -282,7 +372,7 @@ const BrowserRecordingPlayerContent = ({
               if (event.currentTarget !== video.current || !active) return
               event.currentTarget.currentTime = Math.max(
                 0,
-                (desiredOffset.current - segment.startMs) / 1000
+                ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
               )
               event.currentTarget.playbackRate = speed
             }}
@@ -291,7 +381,7 @@ const BrowserRecordingPlayerContent = ({
               if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
             }}
             onTimeUpdate={(event) => {
-              if (event.currentTarget !== video.current || !active || loading) return
+              if (controlled || event.currentTarget !== video.current || !active || loading) return
               const value = Math.min(
                 segment.endMs - 1,
                 segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
@@ -301,6 +391,10 @@ const BrowserRecordingPlayerContent = ({
             }}
             onEnded={(event) => {
               if (event.currentTarget !== video.current || !active) return
+              if (controlled) {
+                event.currentTarget.pause()
+                return
+              }
               const following = recording.segments.find((item) => item.startMs >= segment.endMs)
               if (
                 following &&
@@ -324,6 +418,7 @@ const BrowserRecordingPlayerContent = ({
               if (event.currentTarget !== video.current || !active) return
               setPlaying(false)
               clearHeldFrame()
+              setDecodedSource(undefined)
               setFailedSource(source ?? undefined)
             }}
           />
@@ -352,9 +447,11 @@ const BrowserRecordingPlayerContent = ({
           className="rounded border border-border-200 p-6 text-sm text-muted-foreground"
         >
           <span>
-            {gap?.reason === 'paused'
-              ? t('Recording was paused at this time.')
-              : t('No webpage footage was recorded at this time.')}
+            {!aligned
+              ? t('This recording cannot be aligned with the research replay timeline.')
+              : gap?.reason === 'paused'
+                ? t('Recording was paused at this time.')
+                : t('No webpage footage was recorded at this time.')}
           </span>
           {next ? (
             <Button className="ml-2" size="sm" variant="outline" onClick={() => seek(next.startMs)}>
@@ -371,6 +468,8 @@ const BrowserRecordingPlayerContent = ({
             label: t('Retry'),
             onClick: () => {
               setFailedSource(undefined)
+              setDecodedSource(undefined)
+              clearHeldFrame()
               video.current?.load()
             }
           }}
@@ -387,6 +486,7 @@ const BrowserRecordingPlayerContent = ({
               <li key={event.eventId}>
                 <button
                   className="text-left underline underline-offset-2"
+                  disabled={!aligned}
                   onClick={() => seek(event.offsetMs)}
                 >
                   {recordingTime(event.offsetMs)} · {event.label ?? event.kind} ·{' '}

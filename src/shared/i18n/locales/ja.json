@@ -7266,6 +7266,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "録画が途中で終了しました。保存済みの映像は引き続き表示できます。新しい録画を開始できます。",
     "Host-observed event": "ホストが観測したイベント",
-    "Recording saved. Playback will be available when this run finishes.": "録画を保存しました。この実行が終了すると再生できます。"
+    "Recording saved. Playback will be available when this run finishes.": "録画を保存しました。この実行が終了すると再生できます。",
+    "This recording cannot be aligned with the research replay timeline.": "この記録は研究リプレイのタイムラインに合わせられません。",
+    "No project image was recorded at this time.": "この時点のプロジェクト画面は記録されていません。",
+    "Open recording separately": "記録を個別に開く"
   }
 }

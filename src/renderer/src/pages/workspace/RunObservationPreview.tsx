@@ -11,6 +11,10 @@ import type { ObservationQuestionRecovery } from './replay/use-observation-quest
 import { useObservationRecordingStatus } from './replay/use-observation-recording-status'
 import { ObservationRecordingStatus } from './replay/ObservationRecordingStatus'
 import { showRecordedObservation } from './replay/open-run-observation'
+import {
+  useBrowserRecordingTransportHost,
+  type EmbeddedBrowserRecordingPlayback
+} from './replay/use-browser-recording-transport'
 import type {
   RunObservationSelection,
   RunObservationTarget
@@ -30,6 +34,7 @@ export type RunObservationPreviewProps = {
   title: string
   isActive: boolean
   questionRecovery?: ObservationQuestionRecovery
+  playback?: EmbeddedBrowserRecordingPlayback
 } & (
   | {
       mode?: 'live'
@@ -122,8 +127,8 @@ const matchesSelection = (
   )
 }
 
-/** Electron owns only this viewer's lifetime and selection delivery. The embedded browser bundle
- * owns the same scoped observation UI used by an external agent. No cross-origin message bridge. */
+/** Electron owns viewer lifetime and selection delivery. Recorded web embeds additionally receive
+ * a presentation-only clock over an exact-origin channel; no execution capabilities cross it. */
 const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.JSX.Element => {
   const { t } = useTranslation()
   const [admission] = useState(() =>
@@ -139,6 +144,15 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
         }
   )
   const [access, setAccess] = useState<ViewerAccess>()
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const recordingTransport = useBrowserRecordingTransportHost({
+    iframeRef,
+    origin: access ? new URL(access.url).origin : undefined,
+    enabled: props.mode === 'recorded' && props.format === 'web-recording' && !!props.playback,
+    playback: props.playback
+      ? { ...props.playback, playing: props.playback.playing && props.isActive }
+      : undefined
+  })
   const [openFailed, setOpenFailed] = useState(false)
   const [savedBrowserTarget, setSavedBrowserTarget] = useState<RecordedObservationTarget>()
   const [publishedBrowserTargetKey, setPublishedBrowserTargetKey] = useState<string>()
@@ -287,18 +301,14 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
       if (opened) revoke(opened.viewerId)
     }
   }, [admission, retry])
+  const canAsk = Boolean(
+    props.onAskSelection ||
+    props.onAskArchiveSelection ||
+    props.onAskArchiveFile ||
+    props.onAskBrowserMoment
+  )
   useEffect(() => {
-    if (
-      !access ||
-      !props.isActive ||
-      !(
-        props.onAskSelection ||
-        props.onAskArchiveSelection ||
-        props.onAskArchiveFile ||
-        props.onAskBrowserMoment
-      )
-    )
-      return
+    if (!access || !props.isActive || !canAsk) return
     let disposed = false,
       timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
@@ -399,15 +409,7 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
       disposed = true
       if (timer) clearTimeout(timer)
     }
-  }, [
-    access,
-    admission,
-    props.isActive,
-    props.onAskSelection,
-    props.onAskArchiveSelection,
-    props.onAskArchiveFile,
-    props.onAskBrowserMoment
-  ])
+  }, [access, admission, props.isActive, canAsk])
   return (
     // Keep the iframe inside fractional clipping/viewport edges and outside the workspace
     // divider's 20px hit area, which extends 9.5px into this panel. Preserve that drag corridor.
@@ -508,9 +510,15 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             />
           ) : null}
           <iframe
+            ref={iframeRef}
+            onLoad={recordingTransport.onLoad}
             key={access.viewerId}
             title={props.title}
-            src={access.url}
+            src={
+              props.mode === 'recorded' && props.format === 'web-recording' && props.playback
+                ? `${access.url}#research-replay-clock`
+                : access.url
+            }
             sandbox="allow-scripts allow-same-origin allow-forms"
             referrerPolicy="no-referrer"
             className="min-h-0 w-full flex-1 border-0"

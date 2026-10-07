@@ -344,16 +344,22 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
         }
       >
         <ReplayPanel
+          key={recordedMaterials.playbackKey ?? 'presentation'}
+          recordedTimeOrigins={recordedMaterials.recordedTimeOrigins}
           expanded={expanded}
           onToggleExpanded={() =>
             usePreviewWorkbenchStore.getState().setToolItemExpanded(expanded ? null : item.id)
           }
           materialViews={recordedMaterials.views}
           materialViewRequest={recordedMaterials.request}
-          document={loaded.document}
-          initialView={loaded.view}
+          document={recordedMaterials.playbackDocument ?? loaded.document}
+          initialView={recordedMaterials.playbackDocument ? undefined : loaded.view}
           active={isActive && !evidenceFile && !evidenceStep && materialsMode === 'replay'}
-          onViewChange={notebookUnavailable ? undefined : loaded.writer.enqueue}
+          onViewChange={
+            notebookUnavailable || recordedMaterials.playbackDocument
+              ? undefined
+              : loaded.writer.enqueue
+          }
           onAskStep={askStep}
           discussionPending={discussionPending}
           onChooseConversation={setDiscussionCapture}

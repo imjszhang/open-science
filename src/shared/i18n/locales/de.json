@@ -7426,6 +7426,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "Die Aufzeichnung wurde vorzeitig beendet. Gespeicherte Bilder bleiben verfügbar. Sie können eine neue Aufzeichnung starten.",
     "Host-observed event": "Vom Host beobachtetes Ereignis",
-    "Recording saved. Playback will be available when this run finishes.": "Die Aufnahme ist gespeichert. Sie kann wiedergegeben werden, sobald dieser Lauf beendet ist."
+    "Recording saved. Playback will be available when this run finishes.": "Die Aufnahme ist gespeichert. Sie kann wiedergegeben werden, sobald dieser Lauf beendet ist.",
+    "This recording cannot be aligned with the research replay timeline.": "Diese Aufnahme kann nicht an der Forschungswiedergabe ausgerichtet werden.",
+    "No project image was recorded at this time.": "Zu diesem Zeitpunkt wurde kein Projektbild aufgezeichnet.",
+    "Open recording separately": "Aufnahme separat öffnen"
   }
 }

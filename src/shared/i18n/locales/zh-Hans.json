@@ -7266,6 +7266,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "录制提前结束。已保存的画面仍可查看，您可以开始新的录制。",
     "Host-observed event": "主机观察到的事件",
-    "Recording saved. Playback will be available when this run finishes.": "录制已保存，运行结束后即可回放。"
+    "Recording saved. Playback will be available when this run finishes.": "录制已保存，运行结束后即可回放。",
+    "This recording cannot be aligned with the research replay timeline.": "这份录制无法与研究回放的时间轴对齐。",
+    "No project image was recorded at this time.": "此时没有录制项目画面。",
+    "Open recording separately": "单独打开录制"
   }
 }

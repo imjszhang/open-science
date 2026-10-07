@@ -9,19 +9,35 @@ export type ProjectReplayProps = {
   active?: boolean
   readImage: (mediaKey: string, signal: AbortSignal) => Promise<string | null>
   onAskFrame?: (frame: ProjectReplayTrack['frames'][number]) => void | Promise<void>
+  transport?: {
+    recordedAt?: number
+    onSeekRecordedAt: (recordedAt: number) => void
+  }
 }
 
-/** The project's own recorded times are independent of conversation and Notebook steps.
+/** Passive frames follow their recorded timestamps, optionally driven by the research clock.
  * No environment, URL, executable HTML or live control can enter this component. */
 const ProjectReplayContent = ({
   track,
   active = true,
   readImage,
-  onAskFrame
+  onAskFrame,
+  transport
 }: ProjectReplayProps): React.JSX.Element => {
   const { t } = useTranslation()
-  const [index, setIndex] = useState(0)
+  const [localIndex, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const controlled = transport !== undefined
+  const aligned = !controlled || Number.isFinite(transport.recordedAt)
+  const recordedAt = transport?.recordedAt ?? Number.NaN
+  const index = !controlled
+    ? localIndex
+    : recordedAt < track.startedAt || recordedAt > track.endedAt
+      ? -1
+      : track.frames.reduce(
+          (selected, frame, frameIndex) => (frame.recordedAt <= recordedAt ? frameIndex : selected),
+          -1
+        )
   const [loaded, setLoaded] = useState<{
     id: string
     track: ProjectReplayTrack
@@ -33,7 +49,7 @@ const ProjectReplayContent = ({
   const frame = track.frames[index]
   useEffect(() => {
     const next = track.frames[index + 1]
-    if (!playing || !active || !frame || !next) return
+    if (controlled || !playing || !active || !frame || !next) return
     const timer = setTimeout(
       () => {
         setIndex(index + 1)
@@ -42,9 +58,9 @@ const ProjectReplayContent = ({
       Math.min(2_147_483_647, Math.max(1, next.recordedAt - frame.recordedAt))
     )
     return () => clearTimeout(timer)
-  }, [active, playing, frame, index, track])
+  }, [active, controlled, playing, frame, index, track])
   useEffect(() => {
-    if (!frame) return
+    if (!active || !frame) return
     const abort = new AbortController()
     void readImage(frame.mediaKey, abort.signal).then(
       (src) => {
@@ -56,9 +72,13 @@ const ProjectReplayContent = ({
       }
     )
     return () => abort.abort()
-  }, [frame, readImage, track])
+  }, [active, frame, readImage, track])
   const ready =
-    frame && loaded?.id === frame.frameId && loaded.track === track && loaded.reader === readImage
+    active &&
+    frame &&
+    loaded?.id === frame.frameId &&
+    loaded.track === track &&
+    loaded.reader === readImage
   const gap =
     track.coverage.failures ||
     track.coverage.droppedSamples ||
@@ -82,44 +102,52 @@ const ProjectReplayContent = ({
       ) : null}
       {!frame ? (
         <p className="text-sm text-muted-foreground">
-          {t('No project images were recorded. Other research materials remain available.')}
+          {!aligned
+            ? t('This recording cannot be aligned with the research replay timeline.')
+            : controlled && track.frames.length
+              ? t('No project image was recorded at this time.')
+              : t('No project images were recorded. Other research materials remain available.')}
         </p>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={track.frames.length < 2}
-              onClick={() => {
-                if (index === track.frames.length - 1) setIndex(0)
-                setPlaying(!playing)
-              }}
-            >
-              {playing ? t('Pause replay') : t('Play replay')}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={index === 0}
-              onClick={() => {
-                setPlaying(false)
-                setIndex(index - 1)
-              }}
-            >
-              {t('Previous image')}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={index >= track.frames.length - 1}
-              onClick={() => {
-                setPlaying(false)
-                setIndex(index + 1)
-              }}
-            >
-              {t('Next image')}
-            </Button>
+            {!controlled ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={track.frames.length < 2}
+                  onClick={() => {
+                    if (index === track.frames.length - 1) setIndex(0)
+                    setPlaying(!playing)
+                  }}
+                >
+                  {playing ? t('Pause replay') : t('Play replay')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={index === 0}
+                  onClick={() => {
+                    setPlaying(false)
+                    setIndex(index - 1)
+                  }}
+                >
+                  {t('Previous image')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={index >= track.frames.length - 1}
+                  onClick={() => {
+                    setPlaying(false)
+                    setIndex(index + 1)
+                  }}
+                >
+                  {t('Next image')}
+                </Button>
+              </>
+            ) : null}
             <span className="text-xs">
               {t('Recorded project image {{current}} of {{total}}', {
                 current: index + 1,
@@ -127,19 +155,21 @@ const ProjectReplayContent = ({
               })}
             </span>
           </div>
-          <input
-            type="range"
-            className="w-full"
-            min={0}
-            max={Math.max(0, track.frames.length - 1)}
-            value={index}
-            step={1}
-            aria-label={t('Recorded project frame')}
-            onChange={(event) => {
-              setPlaying(false)
-              setIndex(Number(event.target.value))
-            }}
-          />
+          {!controlled ? (
+            <input
+              type="range"
+              className="w-full"
+              min={0}
+              max={Math.max(0, track.frames.length - 1)}
+              value={index}
+              step={1}
+              aria-label={t('Recorded project frame')}
+              onChange={(event) => {
+                setPlaying(false)
+                setIndex(Number(event.target.value))
+              }}
+            />
+          ) : null}
           <p className="text-xs text-muted-foreground">
             {new Date(frame.recordedAt).toISOString()}
           </p>
@@ -166,8 +196,10 @@ const ProjectReplayContent = ({
             <Button
               size="sm"
               variant="outline"
-              disabled={asking}
+              disabled={asking || !ready || !loaded?.src}
               onClick={() => {
+                transport?.onSeekRecordedAt(frame.recordedAt)
+                setPlaying(false)
                 setAsking(true)
                 setAskFailed(false)
                 void Promise.resolve(onAskFrame(frame))

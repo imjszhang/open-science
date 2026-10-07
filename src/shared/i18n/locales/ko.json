@@ -7264,6 +7264,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "녹화가 일찍 종료되었습니다. 저장된 영상은 계속 볼 수 있습니다. 새 녹화를 시작할 수 있습니다.",
     "Host-observed event": "호스트가 관측한 이벤트",
-    "Recording saved. Playback will be available when this run finishes.": "녹화가 저장되었습니다. 이 실행이 끝나면 재생할 수 있습니다."
+    "Recording saved. Playback will be available when this run finishes.": "녹화가 저장되었습니다. 이 실행이 끝나면 재생할 수 있습니다.",
+    "This recording cannot be aligned with the research replay timeline.": "이 녹화는 연구 재생 타임라인에 맞출 수 없습니다.",
+    "No project image was recorded at this time.": "이 시점에는 프로젝트 화면이 기록되지 않았습니다.",
+    "Open recording separately": "녹화 별도로 열기"
   }
 }

@@ -7594,6 +7594,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "La grabación terminó antes de tiempo. Las imágenes guardadas siguen disponibles. Puede iniciar una nueva grabación.",
     "Host-observed event": "Evento observado por el host",
-    "Recording saved. Playback will be available when this run finishes.": "La grabación se ha guardado. Podrá reproducirse cuando finalice esta ejecución."
+    "Recording saved. Playback will be available when this run finishes.": "La grabación se ha guardado. Podrá reproducirse cuando finalice esta ejecución.",
+    "This recording cannot be aligned with the research replay timeline.": "Esta grabación no se puede sincronizar con la línea de tiempo de la reproducción de la investigación.",
+    "No project image was recorded at this time.": "No se registró ninguna imagen del proyecto en este momento.",
+    "Open recording separately": "Abrir grabación por separado"
   }
 }

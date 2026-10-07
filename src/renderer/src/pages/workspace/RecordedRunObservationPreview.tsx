@@ -202,10 +202,11 @@ export const RecordedRunObservationPreview = (
             {
               id: 'project',
               label: t('Project replay'),
-              content: (active) =>
+              content: (active, playback) =>
                 track ? (
                   <ProjectReplay
                     active={active}
+                    transport={playback}
                     track={track}
                     readImage={readImage}
                     onAskFrame={

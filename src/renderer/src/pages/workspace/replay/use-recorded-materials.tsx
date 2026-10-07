@@ -10,6 +10,8 @@ import {
 } from '@/stores/run-observation-question-store'
 import { useObservationQuestionRecovery } from './use-observation-question-recovery'
 import type { ReplayDocument } from '../../../../../shared/replay'
+import type { RecordedBrowserPayload } from '../../../../../shared/browser-recording'
+import { createBrowserRecordingReplayTimeline } from '@/lib/replay/recorded-time'
 import type {
   RecordedObservationPayload,
   RecordedProjectPayload
@@ -31,6 +33,7 @@ import { ProjectReplay } from './ProjectReplay'
 import type { RecordingDiscovery } from './use-recording-discovery'
 import type { RecordingCandidate } from './recording-discovery'
 import type { ReplayMaterialView } from './ReplayStage'
+import { showRecordedObservation } from './open-run-observation'
 
 type Candidate = RecordingCandidate & { localHistory?: boolean }
 export function useRecordedMaterials(
@@ -41,6 +44,9 @@ export function useRecordedMaterials(
   views: ReplayMaterialView[]
   choose: (candidate: RecordingCandidate) => void
   request?: { id: string; revision: number }
+  playbackDocument?: ReplayDocument
+  recordedTimeOrigins?: Readonly<Record<string, number>>
+  playbackKey?: string
 } {
   const { t } = useTranslation()
   const sourceKey = JSON.stringify([
@@ -55,12 +61,14 @@ export function useRecordedMaterials(
   const [selected, setSelected] = useState<Candidate>()
   const [request, setRequest] = useState<{ id: string; revision: number }>()
   const [payload, setPayload] = useState<RecordedObservationPayload | RecordedProjectPayload>()
+  const [browserPayload, setBrowserPayload] = useState<RecordedBrowserPayload>()
   const [loadFailed, setLoadFailed] = useState(false)
   const [loadedSourceKey, setLoadedSourceKey] = useState(sourceKey)
   if (loadedSourceKey !== sourceKey) {
     setLoadedSourceKey(sourceKey)
     setSelected(undefined)
     setPayload(undefined)
+    setBrowserPayload(undefined)
     setHistory(undefined)
     setHistoryFailed(false)
     setLoadFailed(false)
@@ -115,10 +123,57 @@ export function useRecordedMaterials(
     askRequest.current?.abort()
     setSelected(candidate)
     setPayload(undefined)
+    setBrowserPayload(undefined)
     setLoadFailed(false)
     if (reveal)
       setRequest((previous) => ({ id: 'project', revision: (previous?.revision ?? 0) + 1 }))
   }, [])
+  useEffect(() => {
+    if (selected?.format !== 'web-recording') return
+    let disposed = false
+    void Promise.resolve()
+      .then(() => window.api.projectRecordings.read({ target: selected.target }))
+      .then(
+        (value) => {
+          if (!disposed) setBrowserPayload(value)
+        },
+        () => {
+          if (!disposed) setLoadFailed(true)
+        }
+      )
+    return () => {
+      disposed = true
+    }
+  }, [selected])
+  const timed = useMemo(() => {
+    if (
+      !document ||
+      !browserPayload ||
+      selected?.format !== 'web-recording' ||
+      selected.localHistory
+    )
+      return undefined
+    const timelines = document.branches.flatMap((branch) => {
+      const timeline = createBrowserRecordingReplayTimeline(document, branch.id, browserPayload)
+      return timeline ? [timeline] : []
+    })
+    if (!timelines.length) return undefined
+    return {
+      document: {
+        ...document,
+        branches: document.branches.map(
+          (branch) =>
+            timelines
+              .find((timeline) => timeline.branchId === branch.id)
+              ?.document.branches.find((candidate) => candidate.id === branch.id) ?? branch
+        )
+      },
+      origins: Object.fromEntries(
+        timelines.map((timeline) => [timeline.branchId, timeline.startedAt])
+      ),
+      key: JSON.stringify(browserPayload.receiving)
+    }
+  }, [document, browserPayload, selected])
   useEffect(() => {
     if (!selected || selected.format === 'web-recording') return
     let disposed = false
@@ -225,6 +280,7 @@ export function useRecordedMaterials(
             askRequest.current?.abort()
             setSelected(undefined)
             setPayload(undefined)
+            setBrowserPayload(undefined)
           }
         }}
       >
@@ -288,15 +344,44 @@ export function useRecordedMaterials(
       )
     ) : null
   return {
+    playbackDocument: timed?.document,
+    recordedTimeOrigins: timed?.origins,
+    playbackKey: timed?.key,
     choose,
     request,
     views: [
       {
         id: 'project',
         label: t('Project replay'),
-        content: (active) => (
+        content: (active, playback) => (
           <>
             {catalog}
+            {selected &&
+            (selected.localHistory ||
+              (selected.format === 'web-recording' && browserPayload && !playback?.continuous)) ? (
+              <div className="shrink-0 px-3 py-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    showRecordedObservation(
+                      selected.target,
+                      selected.resource.name,
+                      selected.format
+                    )
+                  }
+                >
+                  {t('Open recording separately')}
+                </Button>
+              </div>
+            ) : null}
+            {selected?.format === 'web-recording' && loadFailed ? (
+              <ErrorNotice
+                inline
+                title={t('Could not read the recorded material.')}
+                primaryButton={{ label: t('Retry'), onClick: () => choose({ ...selected }) }}
+              />
+            ) : null}
             {selected?.format === 'web-recording' ? (
               <RunObservationPreview
                 mode="recorded"
@@ -305,6 +390,14 @@ export function useRecordedMaterials(
                 title={selected.resource.name}
                 isActive={active}
                 questionRecovery={recovery}
+                playback={
+                  playback
+                    ? {
+                        ...playback,
+                        recordedAt: playback.continuous ? playback.recordedAt : undefined
+                      }
+                    : undefined
+                }
                 onAskBrowserMoment={(selection) => {
                   if (!useRunObservationQuestionStore.getState().askRecorded(selection))
                     throw new Error('Discussion unavailable')
@@ -315,6 +408,19 @@ export function useRecordedMaterials(
               (track ? (
                 <ProjectReplay
                   active={active}
+                  transport={
+                    playback
+                      ? {
+                          ...playback,
+                          recordedAt:
+                            !selected?.localHistory &&
+                            payload?.receiving.projectId === document?.source.projectId &&
+                            payload?.receiving.sessionId === document?.source.sessionId
+                              ? playback.recordedAt
+                              : undefined
+                        }
+                      : undefined
+                  }
                   track={track}
                   readImage={readImage}
                   onAskFrame={(frame) => askFile(frame.mediaKey)}

@@ -7733,6 +7733,9 @@
     "{{speed}}×": "{{speed}}×",
     "Recording ended early. Saved footage remains available. You can start a new recording.": "Запись завершилась досрочно. Сохранённые кадры остаются доступны. Можно начать новую запись.",
     "Host-observed event": "Событие, наблюдаемое хостом",
-    "Recording saved. Playback will be available when this run finishes.": "Запись сохранена. Воспроизведение станет доступно после завершения этого запуска."
+    "Recording saved. Playback will be available when this run finishes.": "Запись сохранена. Воспроизведение станет доступно после завершения этого запуска.",
+    "This recording cannot be aligned with the research replay timeline.": "Эту запись нельзя синхронизировать с временной шкалой воспроизведения исследования.",
+    "No project image was recorded at this time.": "Для этого момента изображение проекта не записано.",
+    "Open recording separately": "Открыть запись отдельно"
   }
 }

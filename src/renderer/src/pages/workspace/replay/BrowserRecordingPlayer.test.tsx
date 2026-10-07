@@ -238,3 +238,332 @@ it('waits for the remounted video to decode even if two segments resolve to the 
   expect(play).toHaveBeenCalledTimes(1)
   expect(play.mock.contexts[0]).toBe(second)
 })
+
+it('uses the research transport without a second clock or transport controls', async () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={mediaUrl}
+      transport={{ offsetMs: 1200, playing: true, speed: 1.5, onSeek }}
+    />
+  )
+  expect(screen.queryByRole('slider')).toBeNull()
+  expect(screen.queryByRole('combobox')).toBeNull()
+  expect(screen.queryByRole('button', { name: /(?:Play|Pause) replay/ })).toBeNull()
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  await act(async () => {})
+  expect(video.currentTime).toBe(1.2)
+  expect(video.playbackRate).toBe(1.5)
+  expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
+  video.currentTime = 1.9
+  fireEvent.timeUpdate(video)
+  fireEvent.ended(video)
+  expect(screen.getByLabelText('Recorded webpage')).toBe(video)
+  expect(onSeek).not.toHaveBeenCalled()
+  rerender(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={mediaUrl}
+      transport={{ offsetMs: 500, playing: false, speed: 2, onSeek }}
+    />
+  )
+  expect(video.currentTime).toBe(0.5)
+  expect(video.playbackRate).toBe(2)
+  expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
+})
+
+it('settles controlled seeks and pauses exactly without seeking on every playback tick', () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1000, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  video.currentTime = 1.03
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1100, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(video.currentTime).toBe(1.03)
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1700, playing: false, speed: 1, onSeek }}
+    />
+  )
+  expect(video.currentTime).toBe(1.7)
+  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  fireEvent.seeked(video)
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(false)
+})
+
+it('follows exact master segment boundaries and never carries footage into gaps or out of range', () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1000, playing: true, speed: 1, onSeek }}
+    />
+  )
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 3200, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(video)
+  expect(video.getAttribute('src')).toContain('media-1')
+  expect(video.currentTime).toBe(1.2)
+  for (const offsetMs of [-200, 4500, 7000]) {
+    rerender(
+      <BrowserRecordingPlayer
+        {...props}
+        transport={{ offsetMs, playing: true, speed: 1, onSeek }}
+      />
+    )
+    expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+    ).toBe(true)
+    expect(
+      screen.getByText(
+        offsetMs === 4500
+          ? 'Recording was paused at this time.'
+          : 'No webpage footage was recorded at this time.'
+      )
+    ).toBeTruthy()
+  }
+  expect(onSeek).not.toHaveBeenCalled()
+})
+
+it('requests master seeks for recorded events, gaps, and the actual decoded moment', async () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const ask = vi.fn()
+  const props = { recording, mediaUrl, onAskMoment: ask }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 4500, playing: true, speed: 1, onSeek }}
+    />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Go to next recorded moment' }))
+  expect(onSeek).toHaveBeenLastCalledWith(5000)
+  expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: /Start · Host-observed event/ }))
+  expect(onSeek).toHaveBeenLastCalledWith(1500)
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1500, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  video.currentTime = 1.612
+  onSeek.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this moment' }))
+  await act(async () => {})
+  expect(onSeek).toHaveBeenCalledWith(1612)
+  expect(ask).toHaveBeenCalledWith(1612)
+  expect(onSeek.mock.invocationCallOrder[0]).toBeLessThan(ask.mock.invocationCallOrder[0])
+})
+
+it('does not invent alignment or offer autonomous playback when no time anchor exists', () => {
+  const onSeek = vi.fn()
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      transport={{ offsetMs: undefined, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(
+    screen.getByText('This recording cannot be aligned with the research replay timeline.')
+  ).toBeTruthy()
+  expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+  expect(screen.queryByRole('slider')).toBeNull()
+  const event = screen.getByRole('button', { name: /Start · Host-observed event/ })
+  expect(event.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(event)
+  expect(onSeek).not.toHaveBeenCalled()
+})
+
+it('holds a decoded poster at a controlled segment transition but disables citing until the new frame decodes', () => {
+  const drawImage = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage
+  } as unknown as CanvasRenderingContext2D)
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1900, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperties(first, {
+    readyState: { configurable: true, value: 2 },
+    videoWidth: { configurable: true, value: 1280 },
+    videoHeight: { configurable: true, value: 720 }
+  })
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  first.currentTime = 1.999
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 2030, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(drawImage).toHaveBeenCalledWith(first, 0, 0, 1280, 720)
+  expect(canvas.hidden).toBe(false)
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  const second = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(second)
+  expect(second.currentTime).toBe(0.03)
+  fireEvent.loadedData(second)
+  expect(canvas.hidden).toBe(true)
+  expect(canvas.width).toBe(0)
+})
+
+it('ignores an interrupted play promise after a controlled pause or seek', async () => {
+  let rejectPlay!: (reason: unknown) => void
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectPlay = reject
+      })
+  )
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={mediaUrl}
+      transport={{ offsetMs: 1000, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  rerender(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={mediaUrl}
+      transport={{ offsetMs: 1500, playing: false, speed: 1, onSeek }}
+    />
+  )
+  await act(async () => {
+    rejectPlay(new DOMException('Playback was interrupted', 'AbortError'))
+  })
+  expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
+  fireEvent.seeked(video)
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+})
+
+it('releases a departing controlled segment even when its successor uses the same media URL', () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const sharedUrl = (): string => '/recorded/shared.webm'
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={sharedUrl}
+      transport={{ offsetMs: 1900, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  const pause = vi.mocked(HTMLMediaElement.prototype.pause)
+  const load = vi.mocked(HTMLMediaElement.prototype.load)
+  pause.mockClear()
+  load.mockClear()
+  rerender(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={sharedUrl}
+      transport={{ offsetMs: 2050, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(screen.getByLabelText('Recorded webpage')).not.toBe(first)
+  expect(first.hasAttribute('src')).toBe(false)
+  expect(pause.mock.contexts).toContain(first)
+  expect(load.mock.contexts).toContain(first)
+  const second = screen.getByLabelText('Recorded webpage')
+  pause.mockClear()
+  load.mockClear()
+  rerender(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={sharedUrl}
+      transport={{ offsetMs: 2100, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(screen.getByLabelText('Recorded webpage')).toBe(second)
+  expect(load).not.toHaveBeenCalled()
+  expect(second.getAttribute('src')).toBe('/recorded/shared.webm')
+})
+
+it('keeps a failed or retried recording moment unavailable until a fresh frame decodes', () => {
+  const onAskMoment = vi.fn()
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={onAskMoment}
+      transport={{ offsetMs: 1200, playing: false, speed: 1, onSeek: vi.fn() }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  const ask = screen.getByRole('button', { name: 'Ask about this moment' })
+  expect(ask.hasAttribute('disabled')).toBe(false)
+  fireEvent.error(video)
+  expect(ask.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
+  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(ask.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(ask)
+  expect(onAskMoment).not.toHaveBeenCalled()
+  fireEvent.loadedMetadata(video)
+  expect(ask.hasAttribute('disabled')).toBe(true)
+  fireEvent.loadedData(video)
+  expect(ask.hasAttribute('disabled')).toBe(false)
+})

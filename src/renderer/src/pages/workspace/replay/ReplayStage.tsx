@@ -73,10 +73,22 @@ export type ReplayStageReadiness = ReplayFrameReadiness & {
 export type ReplayMaterialView = {
   id: string
   label: string
-  content: React.ReactNode | ((active: boolean) => React.ReactNode)
+  content:
+    React.ReactNode | ((active: boolean, playback?: ReplayMaterialPlayback) => React.ReactNode)
+}
+
+/** Read-only material adapters share the owning Replay's clock, never each other's state. */
+export type ReplayMaterialPlayback = {
+  recordedAt?: number
+  /** A compressed conversation step is an anchor, not an elapsed video clock. */
+  continuous?: boolean
+  playing: boolean
+  speed: number
+  onSeekRecordedAt: (recordedAt: number) => void
 }
 
 export type ReplayStageProps = {
+  materialPlayback?: ReplayMaterialPlayback
   materialViews?: readonly ReplayMaterialView[]
   materialsActive?: boolean
   materialViewId?: string
@@ -619,6 +631,7 @@ const ReplayStageContent = ({
   materialsOpen = false,
   materialsId,
   materialViews,
+  materialPlayback,
   materialsActive = true,
   materialViewId = 'notebook',
   onMaterialViewChange,
@@ -1142,7 +1155,12 @@ const ReplayStageContent = ({
                   step={step}
                   active={step.id === active?.id}
                   messageCharacters={step.id === active?.id ? scene.messageCharacters : 0}
-                  showResults={step.id !== active?.id || scene.showResults}
+                  showResults={
+                    materialPlayback?.continuous && materialPlayback.recordedAt !== undefined
+                      ? step.recordedEndAt === undefined ||
+                        step.recordedEndAt <= materialPlayback.recordedAt
+                      : step.id !== active?.id || scene.showResults
+                  }
                 />
               ))}
               {fitContainer && browsingConversation ? (
@@ -1312,10 +1330,13 @@ const ReplayStageContent = ({
                         run={detail.run}
                         index={notebookIndices.get(index.runId) ?? runOffset}
                         showOutput={
-                          fitContainer
-                            ? !active?.runs.some((run) => run.runId === index.runId) ||
-                              scene.showResults
-                            : showOutput
+                          materialPlayback?.continuous && materialPlayback.recordedAt !== undefined
+                            ? index.endedAt !== undefined &&
+                              index.endedAt <= materialPlayback.recordedAt
+                            : fitContainer
+                              ? !active?.runs.some((run) => run.runId === index.runId) ||
+                                scene.showResults
+                              : showOutput
                         }
                         unavailableImages={unavailableImages}
                       />
@@ -1367,7 +1388,8 @@ const ReplayStageContent = ({
                 >
                   {typeof view.content === 'function'
                     ? view.content(
-                        materialsActive && showMaterialPane && materialViewId === view.id
+                        materialsActive && showMaterialPane && materialViewId === view.id,
+                        materialPlayback
                       )
                     : view.content}
                 </div>

@@ -22,6 +22,7 @@ import type { ProjectRecording } from '../../../../../shared/project-recording'
 import type { RecordingCandidate } from './recording-discovery'
 import { useRecordingDiscovery, type RecordingDiscovery } from './use-recording-discovery'
 import { useRecordedMaterials } from './use-recorded-materials'
+import { browserPayloadFixture } from './BrowserRecording.test-support'
 
 const recovery = vi.hoisted(() => ({ onClick: vi.fn() }))
 vi.mock('./use-observation-question-recovery', () => ({
@@ -205,7 +206,7 @@ const api = {
     readProjectRecording: vi.fn(),
     selectRecordedFile: vi.fn()
   },
-  projectRecordings: { selection: vi.fn() },
+  projectRecordings: { selection: vi.fn(), read: vi.fn() },
   artifacts: { readPreview: vi.fn() },
   notebook: { ...runtime }
 }
@@ -279,6 +280,67 @@ afterEach(() => {
 })
 
 describe('useRecordedMaterials read-only ownership', () => {
+  it('derives an elapsed document only for the selected receiving recording and releases it on source change', async () => {
+    const payload = browserPayloadFixture()
+    payload.receiving = receiving
+    payload.recording.source = { projectId: receiving.projectId, sessionId: receiving.sessionId }
+    api.projectRecordings.read.mockResolvedValue(payload)
+    const document = documentFixture()
+    document.branches = [
+      {
+        id: 'main',
+        kind: 'conversation',
+        durationMs: 5000,
+        steps: [
+          {
+            id: 'last',
+            branchId: 'main',
+            kind: 'artifact',
+            startMs: 0,
+            endMs: 2500,
+            durationMs: 2500,
+            recordedAt: 9000,
+            activities: [],
+            runs: [],
+            resourceIds: [],
+            evidence: [],
+            issues: []
+          },
+          {
+            id: 'first',
+            branchId: 'main',
+            kind: 'message',
+            startMs: 2500,
+            endMs: 5000,
+            durationMs: 2500,
+            recordedAt: 500,
+            activities: [],
+            runs: [],
+            resourceIds: [],
+            evidence: [],
+            issues: []
+          }
+        ]
+      }
+    ]
+    const recording = { ...candidate(), format: 'web-recording' as const }
+    const { result, rerender } = renderHook(
+      ({ doc }) => useRecordedMaterials(doc, discovery([recording])),
+      { initialProps: { doc: document } }
+    )
+    act(() => result.current.choose(recording))
+    await waitFor(() => expect(result.current.recordedTimeOrigins).toEqual({ main: 500 }))
+    expect(result.current.playbackDocument?.branches[0].steps.map((step) => step.id)).toEqual([
+      'first',
+      'last'
+    ])
+    expect(result.current.playbackDocument?.branches[0].durationMs).toBe(8500)
+    expect(document.branches[0].steps[0].id).toBe('last')
+    rerender({ doc: documentFixture('other-session') })
+    expect(result.current.playbackDocument).toBeUndefined()
+    expectNoExecution()
+  })
+
   it('reads legacy local history without resuming runs or acquiring live viewers', async () => {
     const receipt = {
       source,

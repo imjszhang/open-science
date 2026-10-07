@@ -1,5 +1,6 @@
 import type { RecordedBrowserPayload, BrowserRecordingMoment } from '../../shared/browser-recording'
 import { BrowserRecordingPlayer } from '../src/pages/workspace/replay/BrowserRecordingPlayer'
+import { useBrowserRecordingTransportReceiver } from '../src/pages/workspace/replay/use-browser-recording-transport'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReplayResource } from '../../shared/replay'
@@ -217,6 +218,12 @@ const RecordedBrowserViewerApp = ({
   payload: RecordedBrowserPayload
 }): React.JSX.Element => {
   const { t } = useTranslation()
+  // Opt-in affects presentation only. A standalone desktop preview still owns its controls.
+  const embedded =
+    context.presentation === 'desktop' &&
+    window.parent !== window &&
+    window.location.hash === '#research-replay-clock'
+  const transport = useBrowserRecordingTransportReceiver({ enabled: embedded })
   const [selection, setSelection] = useState<BrowserRecordingMoment>()
   useEffect(() => {
     const controller = new AbortController()
@@ -249,6 +256,20 @@ const RecordedBrowserViewerApp = ({
         />
       ) : null}
       <BrowserRecordingPlayer
+        transport={
+          embedded
+            ? {
+                offsetMs:
+                  transport.playback?.recordedAt === undefined
+                    ? undefined
+                    : transport.playback.recordedAt - payload.recording.startedAt,
+                playing: transport.playback?.playing ?? false,
+                speed: transport.playback?.speed ?? 1,
+                onSeek: (offsetMs) =>
+                  transport.onSeekRecordedAt(payload.recording.startedAt + offsetMs)
+              }
+            : undefined
+        }
         recording={payload.recording}
         mediaUrl={mediaUrl}
         onAskMoment={async (offsetMs) => {

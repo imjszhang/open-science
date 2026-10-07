@@ -83,6 +83,30 @@ for SDK reading or copy its reference; it cannot automatically send a message to
 
 ## Verification and follow-up
 
+### One clock inside research Replay
+
+An embedded project recording follows the containing research Replay's play, pause, speed and
+seek controls. It has no second transport. Notebook, project footage and results remain separate
+material adapters; they do not call each other's APIs. A standalone recording viewer keeps its
+own transport. Snapshot-only recordings follow the selected recorded step.
+
+The normal conversation timeline uses compressed reading durations, so those offsets are not
+wall-clock evidence. Selecting a source-matched web recording builds a temporary elapsed timeline
+from actual step timestamps and the recording's `startedAt`. Only that derived view is sorted
+chronologically (stable for ties); original messages, source files, and `.science` are unchanged.
+The selected recording keeps this clock across material tabs. Compressed-timeline view checkpoints
+are not overwritten by the temporary elapsed view. Earlier overlapping Notebook runs do not show
+their final outputs until their recorded end time. Missing timestamps, unrelated local history,
+or ambiguous branch identity leave synchronization unavailable with an explicit standalone-view
+fallback; footage is never stretched to fit a reading timeline. Outside recording coverage or
+inside a gap, the master timeline can continue while the material reports missing footage.
+
+Only opted-in desktop embeds (`#research-replay-clock`) receive clock updates. A fresh transferred
+MessagePort is offered to the exact admitted viewer origin, accepted only from its direct parent,
+and retired on reload/disposal. The validated presentation messages contain time, rate, play state
+and seeks; they cannot read artifacts, reveal grants, start a runtime, or execute project actions.
+Event navigation and asking about decoded footage seek/pause the owning research Replay first.
+
 The implementation includes contract, lifecycle, authorization, SDK, renderer, Range, exact-import
 and real Electron/Chromium tests. `recorded-reader.test.ts` checks published reads and rejects an
 unpublished archive or media without producer privileges. `browser-recordings/owner.test.ts` uses
