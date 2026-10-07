@@ -9,7 +9,6 @@ import { useSessionReplayStore } from '@/stores/session-replay-store'
 import { usePreviewWorkbenchStore, type PreviewToolItem } from '@/stores/preview-workbench-store'
 import type { ReplayDocument, ReplayResource, ReplayStep } from '../../../../shared/replay'
 import type { ReplayViewState, SessionReplaySnapshot } from '../../../../shared/session-replay'
-import { recordedObservationTargetSchema } from '../../../../shared/run-observation-recorded'
 import { SessionReplayPreview } from './SessionReplayPreview'
 import type { ReplayPanelProps } from './replay/ReplayPanel'
 
@@ -18,9 +17,19 @@ const mocks = vi.hoisted(() => ({
   panel: vi.fn(),
   get: vi.fn(),
   save: vi.fn(),
-  discuss: vi.fn()
+  discuss: vi.fn(),
+  file: vi.fn()
 }))
-vi.mock('./workspace-discussion-navigation', () => ({ openResearchDiscussion: mocks.discuss }))
+vi.mock('./workspace-discussion-navigation', () => ({
+  openResearchDiscussion: mocks.discuss,
+  researchSourceFromSession: () => undefined
+}))
+vi.mock('./replay/ReplayFilePreview', () => ({
+  default: (props: { resource: ReplayResource }) => {
+    mocks.file(props.resource)
+    return <div data-testid="static-file" />
+  }
+}))
 vi.mock('react-i18next', () => createI18nTestStub())
 vi.mock('@/lib/replay', () => ({ loadReplayDocument: mocks.load }))
 vi.mock('@/lib/session-fork', () => ({ sessionForkAvailable: () => false, forkSession: vi.fn() }))
@@ -125,21 +134,17 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('SessionReplayPreview lifecycle', () => {
-  it('offers offline demo only inside an imported source Replay and preserves the conversation', async () => {
+  it('keeps imported Replay read-only and leaves discussion and execution separate', async () => {
     useSessionStore.setState({
       sessions: [{ ...session('source'), importedResearch: { importId: 'exact-import' } }],
       selectedSessionId: 'discussion'
     })
     render(<SessionReplayPreview item={item()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Offline demo' }))
-    expect(screen.getByTestId('offline-demo-panel').getAttribute('data-source-import')).toBe(
-      'exact-import'
-    )
+    await screen.findByTestId('replay-panel')
+    expect(screen.queryByRole('button', { name: 'Offline demo' })).toBeNull()
+    expect(props().materialViews?.map((view) => view.id)).toEqual(['project', 'results'])
     expect(useSessionStore.getState().selectedSessionId).toBe('discussion')
     expect(mocks.discuss).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Session process' }))
-    expect(screen.queryByTestId('offline-demo-panel')).toBeNull()
-    expect(props().active).toBe(true)
   })
   it('discovers each saved recording version and opens its receiving identity without changing the conversation', async () => {
     mocks.load.mockResolvedValue({
@@ -169,6 +174,9 @@ describe('SessionReplayPreview lifecycle', () => {
     })
     const selected = useSessionStore.getState().selectedSessionId
     render(<SessionReplayPreview item={item()} />)
+    await screen.findByTestId('replay-panel')
+    expect(props().active).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Run recordings' }))
     const open = await screen.findAllByRole('button', { name: 'View saved run recording' })
     expect(open).toHaveLength(2)
     expect(
@@ -176,19 +184,9 @@ describe('SessionReplayPreview lifecycle', () => {
     ).toBe('true')
     expect(props().active).toBe(false)
     fireEvent.click(open[0])
-    const preview = usePreviewWorkbenchStore
-      .getState()
-      .items.find(
-        (entry) => entry.id === 'tool:source:replay-recording:archive:v1'
-      ) as PreviewToolItem
-    // Exercise the actual strict IPC target contract; a partial matcher misses accidental
-    // Replay source fields (title/fingerprint) that make a displayed archive impossible to open.
-    expect(recordedObservationTargetSchema.parse(preview.replayRecordingTarget)).toEqual({
-      projectId: 'project',
-      sessionId: 'source',
-      artifactId: 'archive',
-      versionId: 'v1'
-    })
+    expect(props().materialViewRequest?.id).toBe('project')
+    expect(props().active).toBe(true)
+    expect(usePreviewWorkbenchStore.getState().items).toHaveLength(0)
     expect(window.api.observations.openRecorded).not.toHaveBeenCalled()
     expect(useSessionStore.getState().selectedSessionId).toBe(selected)
   })
@@ -604,8 +602,7 @@ describe('SessionReplayPreview lifecycle', () => {
     expect(props().active).toBe(true)
   })
 
-  it('pins exact artifact versions and reports unavailable evidence without a head fallback', async () => {
-    const open = vi.spyOn(usePreviewWorkbenchStore.getState(), 'upsertAndActivateItem')
+  it('pins exact artifact versions in the inert reader and reports unavailable evidence without a head fallback', async () => {
     const resource: ReplayResource = {
       id: 'artifact-version:v1',
       name: 'figure.png',
@@ -620,26 +617,20 @@ describe('SessionReplayPreview lifecycle', () => {
     render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')
     act(() => props().onOpenEvidence(resource, step))
-    expect(open).toHaveBeenCalledWith(
-      expect.objectContaining({
-        selectedVersionId: 'v1',
-        artifactId: 'figure',
-        managedFileId: 'figure',
-        source: 'artifact',
-        path: expect.stringContaining('v1')
-      })
-    )
-    expect(open.mock.calls[0][0]).not.toHaveProperty('path', resource.locator)
+    expect(mocks.file.mock.lastCall![0]).toMatchObject({
+      versionId: 'v1',
+      artifactId: 'figure',
+      locator: expect.stringContaining('v1')
+    })
+    expect(mocks.file.mock.lastCall![0].locator).not.toBe(resource.locator)
+    expect(props().active).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to recording' }))
     act(() => props().onOpenEvidence({ ...resource, versionId: undefined }, step))
-    expect(open).toHaveBeenCalledTimes(1)
     expect(screen.getByText('The recorded evidence is unavailable.')).toBeTruthy()
-    open.mockRestore()
   })
-
   it.each(['archive.zip', 'notes.txt'])(
-    'opens archived upload %s at its exact Version and original storage owner',
+    'opens archived upload %s at its exact Version and original owner in the static reader',
     async (name) => {
-      const open = vi.spyOn(usePreviewWorkbenchStore.getState(), 'upsertAndActivateItem')
       const resource: ReplayResource = {
         id: 'upload-version:old-version',
         source: 'upload',
@@ -649,42 +640,17 @@ describe('SessionReplayPreview lifecycle', () => {
         fileId: 'uploaded-file',
         versionId: 'old-version',
         versionNumber: 2,
-        locator: '/mutable/latest-file',
         availability: 'recorded'
       }
-      const resourceStep = { ...step, resourceIds: [resource.id] }
-      mocks.load.mockResolvedValue({
-        ...doc(),
-        resources: [resource],
-        branches: [{ ...doc().branches[0], steps: [resourceStep] }]
-      })
+      mocks.load.mockResolvedValue({ ...doc(), resources: [resource] })
       render(<SessionReplayPreview item={item()} />)
       await screen.findByTestId('replay-panel')
-      act(() => props().onOpenEvidence(resource, resourceStep))
-      expect(open).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          projectId: 'project',
-          sessionId: 'original-upload-owner',
-          source: 'upload',
-          name,
-          managedFileId: 'uploaded-file',
-          selectedVersionId: 'old-version',
-          versionNumber: 2,
-          path: 'upload-version:project/original-upload-owner/uploaded-file/old-version'
-        })
-      )
-      expect(open.mock.lastCall![0]).not.toHaveProperty('artifactId')
-      expect(open.mock.lastCall![0]).toHaveProperty(
-        'format',
-        name.endsWith('.zip') ? 'unknown' : 'text'
-      )
-      // The static evidence view uses the same archive-scoped upload action as the material drawer.
-      act(() => props().onOpenEvidence(undefined, resourceStep))
-      fireEvent.click(screen.getByRole('button', { name: `${name} Version 2` }))
-      expect(open).toHaveBeenCalledTimes(2)
-      expect(open.mock.calls[1][0]).toEqual(open.mock.calls[0][0])
-      expect(screen.queryByText('The recorded evidence is unavailable.')).toBeNull()
-      open.mockRestore()
+      act(() => props().onOpenEvidence(resource, step))
+      expect(mocks.file.mock.lastCall![0]).toMatchObject({
+        ...resource,
+        locator: 'upload-version:project/original-upload-owner/uploaded-file/old-version'
+      })
+      expect(usePreviewWorkbenchStore.getState().items).toHaveLength(0)
     }
   )
 

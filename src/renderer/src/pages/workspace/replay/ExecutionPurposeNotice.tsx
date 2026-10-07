@@ -17,7 +17,7 @@ export const ExecutionPurposeNotice = ({
     >
       <p className="font-medium">
         {purpose === 'offline-demo'
-          ? t('Offline demo')
+          ? t('Offline run')
           : purpose === 'research'
             ? t('Research execution')
             : t('Execution purpose not recorded')}
@@ -25,7 +25,9 @@ export const ExecutionPurposeNotice = ({
       {known ? (
         <p className="text-text-300">
           {purpose === 'offline-demo'
-            ? t('Offline project demonstration. This does not reproduce the original experiment.')
+            ? t(
+                'This run uses packaged offline inputs. It does not reproduce the original external environment.'
+              )
             : t('A research execution is not, by itself, evidence of successful reproduction.')}
         </p>
       ) : null}

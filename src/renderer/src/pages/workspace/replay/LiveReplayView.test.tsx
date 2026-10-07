@@ -191,10 +191,10 @@ describe('shared live Replay viewer', () => {
         })}
       />
     )
-    expect(screen.getByText('Offline demo')).toBeTruthy()
+    expect(screen.getByText('Offline run')).toBeTruthy()
     expect(
       screen.getByText(
-        'Offline project demonstration. This does not reproduce the original experiment.'
+        'This run uses packaged offline inputs. It does not reproduce the original external environment.'
       )
     ).toBeTruthy()
     fireEvent.click(screen.getByText('Execution conditions'))

@@ -7,11 +7,10 @@ import { sessionReplayKey, useSessionReplayStore } from '@/stores/session-replay
 import { loadReplayDocument } from '@/lib/replay'
 import type { ReplayDocument, ReplayResource, ReplayStep } from '../../../../shared/replay'
 import type { ReplayViewState } from '../../../../shared/session-replay'
-import { createArtifactVersionLocator } from '../../../../shared/artifact-provenance'
-import { createUploadVersionReference } from '../../../../shared/uploads'
 import { ReplayPanel } from './replay/ReplayPanel'
 import type { SessionDiscussionCapture } from './replay/replay-context'
-import { createPreviewFileItem } from './preview-file-item'
+import ReplayFilePreview from './replay/ReplayFilePreview'
+import { fixedReplayResource } from './replay/results/recorded-resource-reader'
 import { SessionReplayProgressWriter } from './session-replay-progress-writer'
 import { SessionReplayEvidence } from './SessionReplayEvidence'
 import { SessionDiscussionDialog } from './SessionDiscussionDialog'
@@ -20,7 +19,7 @@ import { ResearchMaterialsPanel } from './ResearchMaterialsPanel'
 import { Button } from '@/components/ui/button'
 import { RunRecordingsPanel } from './replay/RunRecordingsPanel'
 import { useRecordingDiscovery } from './replay/use-recording-discovery'
-import { ResearchDemoPanel } from './replay/ResearchDemoPanel'
+import { useRecordedMaterials } from './replay/use-recorded-materials'
 
 type Props = { item: PreviewToolItem; isActive?: boolean }
 type LoadedReplay = {
@@ -48,10 +47,11 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const [checkpointFailed, setCheckpointFailed] = useState(false)
   const [saveError, setSaveError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
+  const [evidenceFile, setEvidenceFile] = useState<ReplayResource>()
   const [evidenceStep, setEvidenceStep] = useState<ReplayStep>()
-  const [materialsMode, setMaterialsMode] = useState<
-    'replay' | 'runs' | 'records' | 'files' | 'demo'
-  >(item.replayRevealMode ?? 'replay')
+  const [materialsMode, setMaterialsMode] = useState<'replay' | 'runs' | 'records' | 'files'>(
+    item.replayRevealMode ?? 'replay'
+  )
   const materialsChosen = useRef(item.replayRevealRequest !== undefined)
   // Discovery may finish after the viewer starts playing, seeking, reading or opening evidence.
   // Any deliberate interaction owns the current view; timer checkpoints and programmatic
@@ -73,6 +73,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       // focus into the evidence pane or resetting the playhead, speed, or discussion draft.
       returningFromEvidence.current = false
       setEvidenceStep(undefined)
+      setEvidenceFile(undefined)
       materialsChosen.current = true
       setMaterialsMode(item.replayRevealMode ?? 'replay')
       return
@@ -118,9 +119,11 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     sourceStatus === 'missing' ||
     sourceStatus === 'unreadable'
   const discovery = useRecordingDiscovery(sourceUnavailable ? undefined : loaded?.document)
-  useEffect(() => {
-    if (!materialsChosen.current && discovery.recordings.length) setMaterialsMode('runs')
-  }, [discovery.recordings.length])
+  const recordedMaterials = useRecordedMaterials(
+    sourceUnavailable ? undefined : loaded?.document,
+    discovery,
+    demoSource
+  )
 
   useEffect(() => {
     if (!activated) return
@@ -216,6 +219,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
   const openEvidence = (resource: ReplayResource | undefined, step?: ReplayStep): void => {
     if (sourceUnavailable) return
     if (!resource) {
+      setEvidenceFile(undefined)
       setEvidenceStep(step)
       return
     }
@@ -246,34 +250,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
       setSaveError(t('The recorded evidence is unavailable.'))
       return
     }
-    usePreviewWorkbenchStore.getState().upsertAndActivateItem(
-      createPreviewFileItem({
-        id: `replay-evidence:${projectId}:${sourceSessionId}:${source}:${fileId}:${recorded.versionId}`,
-        projectId,
-        sessionId: recorded.sessionId,
-        path:
-          source === 'upload'
-            ? createUploadVersionReference(recorded.versionId, {
-                projectId,
-                sessionId: recorded.sessionId,
-                fileId
-              })
-            : createArtifactVersionLocator({
-                projectId,
-                appSessionId: recorded.sessionId,
-                artifactId: fileId,
-                versionId: recorded.versionId
-              }),
-        name: recorded.name,
-        mimeType: recorded.mimeType,
-        artifactId: source === 'artifact' ? fileId : undefined,
-        managedFileId: fileId,
-        selectedVersionId: recorded.versionId,
-        versionNumber: recorded.versionNumber,
-        size: recorded.size,
-        source
-      })
-    )
+    setEvidenceFile(fixedReplayResource({ ...recorded, locator: undefined }))
   }
 
   if (error || sourceUnavailable)
@@ -322,6 +299,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
               onClick={() => {
                 materialsChosen.current = true
                 setEvidenceStep(undefined)
+                setEvidenceFile(undefined)
                 setMaterialsMode(mode)
               }}
             >
@@ -334,21 +312,6 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
                     : t('Source files')}
             </Button>
           ))}
-          {demoSource ? (
-            <Button
-              variant={materialsMode === 'demo' ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-7 px-2 text-xs"
-              aria-pressed={materialsMode === 'demo'}
-              onClick={() => {
-                materialsChosen.current = true
-                setEvidenceStep(undefined)
-                setMaterialsMode('demo')
-              }}
-            >
-              {t('Offline demo')}
-            </Button>
-          ) : null}
         </div>
       </div>
       {notebookUnavailable ? (
@@ -375,15 +338,21 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           }
         />
       ) : null}
-      <div className={evidenceStep || materialsMode !== 'replay' ? 'hidden' : 'min-h-0 flex-1'}>
+      <div
+        className={
+          evidenceFile || evidenceStep || materialsMode !== 'replay' ? 'hidden' : 'min-h-0 flex-1'
+        }
+      >
         <ReplayPanel
           expanded={expanded}
           onToggleExpanded={() =>
             usePreviewWorkbenchStore.getState().setToolItemExpanded(expanded ? null : item.id)
           }
+          materialViews={recordedMaterials.views}
+          materialViewRequest={recordedMaterials.request}
           document={loaded.document}
           initialView={loaded.view}
-          active={isActive && !evidenceStep && materialsMode === 'replay'}
+          active={isActive && !evidenceFile && !evidenceStep && materialsMode === 'replay'}
           onViewChange={notebookUnavailable ? undefined : loaded.writer.enqueue}
           onAskStep={askStep}
           discussionPending={discussionPending}
@@ -391,12 +360,17 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           onOpenEvidence={openEvidence}
         />
       </div>
-      {materialsMode === 'runs' ? <RunRecordingsPanel discovery={discovery} /> : null}
-      {materialsMode === 'demo' && demoSource ? (
-        <ResearchDemoPanel source={demoSource} isActive={isActive} />
+      {materialsMode === 'runs' ? (
+        <RunRecordingsPanel
+          discovery={discovery}
+          onChoose={(candidate) => {
+            recordedMaterials.choose(candidate)
+            setMaterialsMode('replay')
+          }}
+        />
       ) : null}
       {materialsMode === 'records' || materialsMode === 'files' ? (
-        <div className={evidenceStep ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
+        <div className={evidenceStep || evidenceFile ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
           <ResearchMaterialsPanel
             key={materialsMode}
             document={loaded.document}
@@ -409,7 +383,20 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
           />
         </div>
       ) : null}
-      {evidenceStep ? (
+      {evidenceFile ? (
+        <section className="flex min-h-0 flex-1 flex-col" aria-label={t('Recorded file version')}>
+          <div className="flex items-center gap-2 border-b border-border-200 p-2">
+            <Button size="sm" variant="outline" onClick={() => setEvidenceFile(undefined)}>
+              {t('Back to recording')}
+            </Button>
+            <span className="truncate text-sm">{evidenceFile.name}</span>
+          </div>
+          <div className="min-h-0 flex-1">
+            <ReplayFilePreview resource={evidenceFile} onClose={() => setEvidenceFile(undefined)} />
+          </div>
+        </section>
+      ) : null}
+      {evidenceStep && !evidenceFile ? (
         <SessionReplayEvidence
           source={loaded.document.source}
           step={evidenceStep}

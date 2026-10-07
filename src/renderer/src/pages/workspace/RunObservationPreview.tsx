@@ -19,7 +19,8 @@ import type {
 } from '../../../../shared/run-observation-viewer'
 import type {
   RecordedObservationTarget,
-  RecordedRunObservationSelection
+  RecordedRunObservationSelection,
+  RecordedObservationFileSelection
 } from '../../../../shared/run-observation-recorded'
 type ViewerAccess = RunObservationViewerAccess | RecordedObservationViewerAccess
 
@@ -30,6 +31,7 @@ export type RunObservationPreviewProps = {
 } & (
   | {
       mode?: 'live'
+      format?: never
       target: RunObservationTarget
       allowInteraction?: boolean
       allowCancel?: boolean
@@ -39,9 +41,15 @@ export type RunObservationPreviewProps = {
         viewerId: string
       ) => void | Promise<void>
       onAskArchiveSelection?: never
+      onAskArchiveFile?: never
     }
   | {
+      onAskArchiveFile?: (
+        selection: RecordedObservationFileSelection,
+        viewerId: string
+      ) => void | Promise<void>
       mode: 'recorded'
+      format?: 'run-observation' | 'project-recording'
       target: RecordedObservationTarget
       allowInteraction?: never
       allowCancel?: never
@@ -113,7 +121,7 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
   const { t } = useTranslation()
   const [admission] = useState(() =>
     props.mode === 'recorded'
-      ? { mode: 'recorded' as const, target: props.target }
+      ? { mode: 'recorded' as const, target: props.target, format: props.format }
       : {
           mode: 'live' as const,
           target: props.target,
@@ -176,7 +184,10 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     }
     const opening =
       admission.mode === 'recorded'
-        ? api.openRecorded({ target: admission.target })
+        ? api.openRecorded({
+            target: admission.target,
+            ...(admission.format ? { format: admission.format } : {})
+          })
         : api.open({
             target: admission.target,
             allowInteraction: admission.allowInteraction,
@@ -211,7 +222,12 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
     }
   }, [admission, retry])
   useEffect(() => {
-    if (!access || !props.isActive || !(props.onAskSelection || props.onAskArchiveSelection)) return
+    if (
+      !access ||
+      !props.isActive ||
+      !(props.onAskSelection || props.onAskArchiveSelection || props.onAskArchiveFile)
+    )
+      return
     let disposed = false,
       timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
@@ -220,9 +236,17 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
           selectedEvidence: ObservationQuestionSelection | undefined,
           deliver: (() => void | Promise<void>) | undefined
         if (admission.mode === 'recorded') {
-          const selected = await window.api.observations.recordingSelection({
-            viewerId: access.viewerId
-          })
+          const [stepSelection, fileSelection] = await Promise.all([
+            admission.format === 'project-recording'
+              ? null
+              : window.api.observations.recordingSelection({ viewerId: access.viewerId }),
+            window.api.observations.recordingFileSelection?.({ viewerId: access.viewerId }) ?? null
+          ])
+          const selected =
+            fileSelection &&
+            (!stepSelection || (fileSelection.selectedAt ?? 0) >= (stepSelection.selectedAt ?? 0))
+              ? fileSelection
+              : stepSelection
           const destination = current.current
           if (disposed || !destination.isActive || destination.mode !== 'recorded') return
           if (selected) {
@@ -233,9 +257,14 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
               throw new Error('Recorded selection scope changed.')
             selectionId = selected.selectionId
             selectedEvidence = selected
-            deliver = destination.onAskArchiveSelection
-              ? () => destination.onAskArchiveSelection!(selected, access.viewerId)
-              : undefined
+            deliver =
+              selected.kind === 'recorded-observation-file'
+                ? destination.onAskArchiveFile
+                  ? () => destination.onAskArchiveFile!(selected, access.viewerId)
+                  : undefined
+                : destination.onAskArchiveSelection
+                  ? () => destination.onAskArchiveSelection!(selected, access.viewerId)
+                  : undefined
           }
         } else {
           const selected = await window.api.observations.selection({ viewerId: access.viewerId })
@@ -281,7 +310,14 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
       disposed = true
       if (timer) clearTimeout(timer)
     }
-  }, [access, admission, props.isActive, props.onAskSelection, props.onAskArchiveSelection])
+  }, [
+    access,
+    admission,
+    props.isActive,
+    props.onAskSelection,
+    props.onAskArchiveSelection,
+    props.onAskArchiveFile
+  ])
   return (
     // Keep the iframe inside fractional clipping/viewport edges and outside the workspace
     // divider's 20px hit area, which extends 9.5px into this panel. Preserve that drag corridor.
@@ -379,7 +415,7 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
 }
 export const RunObservationPreview = (props: RunObservationPreviewProps): React.JSX.Element => (
   <RunObservationPreviewContent
-    key={`${targetKey(props.target)}:${Boolean(props.allowInteraction)}:${Boolean(props.allowCancel)}:${Boolean(props.allowCapture)}`}
+    key={`${targetKey(props.target)}:${props.format ?? 'run-observation'}:${Boolean(props.allowInteraction)}:${Boolean(props.allowCancel)}:${Boolean(props.allowCapture)}`}
     {...props}
   />
 )

@@ -30,6 +30,7 @@ export const ReplayLiveRecord = ({
   projectActivation,
   recordedSurface,
   historyTruncated,
+  historicalOnly = false,
   onProjectActiveChange
 }: {
   snapshot: RunObservationSnapshot
@@ -40,6 +41,7 @@ export const ReplayLiveRecord = ({
   projectActivation?: ReplayProjectActivation
   recordedSurface?: ReactNode
   historyTruncated?: boolean
+  historicalOnly?: boolean
   onProjectActiveChange?: (active: boolean) => void
 }): React.JSX.Element => {
   const { t } = useTranslation()
@@ -153,38 +155,40 @@ export const ReplayLiveRecord = ({
       data-testid="replay-live-record"
       data-observation-record={`${snapshot.cursor.epoch}:${snapshot.cursor.sequence}`}
     >
-      <div
-        className="sticky top-0 z-10 flex shrink-0 flex-wrap gap-1 bg-bg-000"
-        role="group"
-        aria-label={t('Run view')}
-        data-replay-live-interaction
-      >
-        <Button
-          variant={tab === 'record' ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={() => setTab('record')}
-          aria-pressed={tab === 'record'}
+      {!historicalOnly ? (
+        <div
+          className="sticky top-0 z-10 flex shrink-0 flex-wrap gap-1 bg-bg-000"
+          role="group"
+          aria-label={t('Run view')}
+          data-replay-live-interaction
         >
-          {t('Execution record')}
-        </Button>
-        <Button
-          variant={tab === 'project' ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={() => {
-            setTab('project')
-            if (!livePage && mode === 'follow' && !projectActivation?.opening)
-              projectActivation?.onOpen()
-          }}
-          aria-pressed={tab === 'project'}
-          title={
-            mode === 'follow' && projectActivation && !livePage
-              ? t('Open project interface')
-              : undefined
-          }
-        >
-          {t('Project interface')}
-        </Button>
-      </div>
+          <Button
+            variant={tab === 'record' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setTab('record')}
+            aria-pressed={tab === 'record'}
+          >
+            {t('Execution record')}
+          </Button>
+          <Button
+            variant={tab === 'project' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => {
+              setTab('project')
+              if (!livePage && mode === 'follow' && !projectActivation?.opening)
+                projectActivation?.onOpen()
+            }}
+            aria-pressed={tab === 'project'}
+            title={
+              mode === 'follow' && projectActivation && !livePage
+                ? t('Open project interface')
+                : undefined
+            }
+          >
+            {t('Project interface')}
+          </Button>
+        </div>
+      ) : null}
       <div
         inert={tab !== 'project'}
         hidden={tab !== 'project'}

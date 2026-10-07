@@ -16,16 +16,23 @@ export const selectionReference = (viewerId: string, selection: RunObservationSe
 
 export const recordedSelectionReference = (
   viewerId: string,
-  selection: import('../../shared/run-observation-recorded').RecordedRunObservationSelection
+  selection:
+    | import('../../shared/run-observation-recorded').RecordedRunObservationSelection
+    | import('../../shared/run-observation-recorded').RecordedObservationFileSelection
 ): string =>
   JSON.stringify(
     {
-      kind: 'open-science-recorded-observation',
+      kind:
+        selection.kind === 'recorded-observation-file'
+          ? 'open-science-recorded-file'
+          : 'open-science-recorded-observation',
       selectionId: selection.selectionId,
       viewerId,
       receiving: selection.receiving,
       recordingId: selection.recordingId,
-      stepKey: selection.stepKey
+      ...(selection.kind === 'recorded-observation-file'
+        ? { mediaKey: selection.mediaKey, resource: selection.resource }
+        : { stepKey: selection.stepKey })
     },
     null,
     2

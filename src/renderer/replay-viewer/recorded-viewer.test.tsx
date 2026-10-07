@@ -179,7 +179,7 @@ describe('recorded browser viewer', () => {
     expect(selected.stepKeys).toEqual([])
     vi.spyOn(client, 'context').mockResolvedValue({
       ...context(legacy),
-      format: 'project-recording'
+      format: 'project-recording' as const
     })
     const read = vi.spyOn(client, 'recording').mockResolvedValue(recording)
     const history = vi.spyOn(client, 'history')
@@ -194,7 +194,7 @@ describe('recorded browser viewer', () => {
       client = new ReplayViewerClient()
     vi.spyOn(client, 'context').mockResolvedValue({
       ...context(recording),
-      format: 'project-recording'
+      format: 'project-recording' as const
     })
     vi.spyOn(client, 'recording').mockResolvedValue(recording)
     const { result } = renderHook(() => useViewerObservation(client, 0))
@@ -259,7 +259,7 @@ describe('recorded browser viewer', () => {
     vi.spyOn(client, 'recording').mockResolvedValue(recording)
     vi.spyOn(client, 'recordedSelection').mockResolvedValue(null)
     render(<ViewerApp client={client} />)
-    expect(await screen.findByText('Offline demo')).toBeTruthy()
+    expect(await screen.findByText('Offline run')).toBeTruthy()
     fireEvent.click(screen.getByText('Execution conditions'))
     expect(screen.getByText('Offline recorded responses')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Stop run' })).toBeNull()
@@ -343,7 +343,7 @@ describe('recorded browser viewer', () => {
     expect(project).toHaveBeenCalledTimes(1)
     const projected = project.mock.results[0].value
     expect(projected.snapshots).toHaveLength(count)
-    const node = screen.getByTestId('live-replay-view')
+    const node = screen.getByTestId('recorded-replay-view')
     for (const index of [0, 2047, count - 1]) {
       fireEvent.click(screen.getByRole('button', { name: 'Browse steps' }))
       const input = await screen.findByRole('spinbutton', { name: 'Step number' })
@@ -369,7 +369,7 @@ describe('recorded browser viewer', () => {
       expect(captures.at(-1)!.record.sourceEvidence.cursor.sequence).toBe(index * 2)
       expect(captures.at(-1)!.record.run!.logs.stdout.text).toBe(`recorded output ${index}`)
       // Reference updates and navigation reuse the same player and immutable projection.
-      expect(screen.getByTestId('live-replay-view')).toBe(node)
+      expect(screen.getByTestId('recorded-replay-view')).toBe(node)
       expect(project).toHaveBeenCalledTimes(1)
     }
     expect(captures).toHaveLength(3)

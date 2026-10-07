@@ -44,7 +44,7 @@ import {
   type ReplayNotebookRunReader
 } from '@/lib/replay'
 import { createReplayPresentation } from './replay-presentation'
-import { ReplayStage } from './ReplayStage'
+import { ReplayStage, type ReplayMaterialView } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
 import type {
   RunObservationExecutionContext,
@@ -94,8 +94,22 @@ export type ReplayLiveSource = {
   historyTruncated?: boolean
 }
 
+/** Archived evidence has no execution or service capabilities. */
+export type ReplayRecordedSource = Pick<
+  ReplayLiveSource,
+  | 'sourceIdentity'
+  | 'snapshot'
+  | 'history'
+  | 'executionContext'
+  | 'onAskSelection'
+  | 'historyTruncated'
+>
+
 export type ReplayPanelProps = {
+  materialViews?: readonly ReplayMaterialView[]
+  materialViewRequest?: { id: string; revision: number }
   live?: ReplayLiveSource
+  recorded?: ReplayRecordedSource
   document: ReplayDocument
   initialView?: ReplayViewState
   active?: boolean
@@ -155,7 +169,10 @@ const defaultNotebookReader: ReplayNotebookRunReader = (source, index, options) 
 
 const ReplayPanelContent = ({
   document: incomingDocument,
-  live,
+  materialViews,
+  materialViewRequest,
+  live: liveSource,
+  recorded,
   initialView,
   active = true,
   expanded = false,
@@ -170,7 +187,25 @@ const ReplayPanelContent = ({
   readNotebookRun = defaultNotebookReader
 }: ReplayPanelProps): React.JSX.Element => {
   const { t, i18n } = useTranslation()
+  // Pick the narrow historical fields explicitly, even if an untyped caller supplies extras.
+  const live = useMemo<ReplayLiveSource | undefined>(
+    () =>
+      recorded
+        ? {
+            sourceIdentity: recorded.sourceIdentity,
+            snapshot: recorded.snapshot,
+            history: recorded.history,
+            executionContext: recorded.executionContext,
+            onAskSelection: recorded.onAskSelection,
+            historyTruncated: recorded.historyTruncated,
+            connection: 'disconnected',
+            recorded: true
+          }
+        : liveSource,
+    [recorded, liveSource]
+  )
   const phaseLabel = useObservationPhaseLabel()
+  const [materialViewId, setMaterialViewId] = useState('notebook')
   // Inspecting freezes both record navigation and bounded evidence. New logs never replace
   // the evidence a user is reading or about to reference in a question.
   const [inspection, setInspection] = useState<{
@@ -222,7 +257,14 @@ const ReplayPanelContent = ({
   const [wide, setWide] = useState(false)
   const [liveProjectTabActive, setLiveProjectTabActive] = useState(false)
   const [materialsOverride, setMaterialsOverride] = useState<boolean>()
-  const materialsOpen = materialsOverride ?? (!live && (expanded || wide))
+  const materialsOpen = materialsOverride ?? ((!live || !!recorded) && (expanded || wide))
+  const [handledMaterialRequest, setHandledMaterialRequest] = useState(materialViewRequest)
+  if (materialViewRequest && materialViewRequest !== handledMaterialRequest) {
+    setHandledMaterialRequest(materialViewRequest)
+    setMaterialViewId(materialViewRequest.id)
+    setMaterialsOverride(true)
+  }
+
   const [filesOverride, setFilesOverride] = useState<boolean>()
   const filesOpen = filesOverride ?? (expanded || wide)
   const [previousExpanded, setPreviousExpanded] = useState(expanded)
@@ -760,7 +802,7 @@ const ReplayPanelContent = ({
             </PopoverContent>
           </Popover>
         </div>
-        {!live ? (
+        {!live || recorded ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -913,7 +955,7 @@ const ReplayPanelContent = ({
             </SelectContent>
           </Select>
         ) : null}
-        {!live ? (
+        {!live || recorded ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -926,7 +968,7 @@ const ReplayPanelContent = ({
                   ref={materialsTrigger}
                   variant={materialsOpen ? 'secondary' : 'ghost'}
                   size="icon"
-                  aria-label={t('Notebook')}
+                  aria-label={materialViews?.length ? t('Research materials') : t('Notebook')}
                   aria-expanded={materialsOpen}
                   aria-controls={materialsId}
                   onClick={() => {
@@ -947,7 +989,7 @@ const ReplayPanelContent = ({
                 collisionBoundary={tooltipBoundary}
                 collisionPadding={8}
               >
-                {t('Notebook')}
+                {materialViews?.length ? t('Research materials') : t('Notebook')}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -1116,6 +1158,7 @@ const ReplayPanelContent = ({
           primaryContent={
             live && currentObservation ? (
               <ReplayLiveRecord
+                historicalOnly={!!recorded}
                 snapshot={currentObservation}
                 latestSnapshot={live.snapshot}
                 executionContext={live.executionContext ?? live.snapshot.executionContext}
@@ -1149,6 +1192,13 @@ const ReplayPanelContent = ({
           wide={wide}
           materialsOpen={materialsOpen}
           materialsId={materialsId}
+          materialViews={materialViews}
+          materialsActive={active}
+          materialViewId={materialViewId}
+          onMaterialViewChange={(id) => {
+            pause()
+            setMaterialViewId(id)
+          }}
           filesOpen={filesOpen}
           filesId={filesId}
           onOpenFiles={() => setFilesOverride(true)}
@@ -1263,7 +1313,9 @@ export const ReplayPanel = (props: ReplayPanelProps): React.JSX.Element => (
     key={JSON.stringify([
       props.document.source.projectId,
       props.document.source.sessionId,
-      props.live?.sourceIdentity ?? props.document.source.fingerprint
+      props.recorded?.sourceIdentity ??
+        props.live?.sourceIdentity ??
+        props.document.source.fingerprint
     ])}
     {...props}
   />

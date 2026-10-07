@@ -1,0 +1,465 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useNavigationStore } from '@/stores/navigation-store'
+import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
+import type { ReplayDocument } from '../../../../../shared/replay'
+import type { ResearchDemoHistory, ResearchDemoSource } from '../../../../../shared/research-demo'
+import {
+  recordedFileSelectionForPayload,
+  type RecordedObservationPayload,
+  type RecordedProjectPayload
+} from '../../../../../shared/run-observation-recorded'
+import type { ProjectRecording } from '../../../../../shared/project-recording'
+import type { RecordingCandidate } from './recording-discovery'
+import type { RecordingDiscovery } from './use-recording-discovery'
+import { useRecordedMaterials } from './use-recorded-materials'
+
+const recovery = vi.hoisted(() => ({ onClick: vi.fn() }))
+vi.mock('./use-observation-question-recovery', () => ({
+  useObservationQuestionRecovery: () => ({ label: 'Discuss', onClick: recovery.onClick })
+}))
+
+const receiving = {
+  projectId: 'receiver-project',
+  sessionId: 'receiver-session',
+  artifactId: 'index-artifact',
+  versionId: 'index-version'
+}
+const source: ResearchDemoSource = {
+  projectId: receiving.projectId,
+  sourceSessionId: receiving.sessionId,
+  sourceImportId: 'receiving-import'
+}
+const documentFixture = (sessionId = receiving.sessionId): ReplayDocument => ({
+  generatorVersion: 3,
+  presentationVersion: 2,
+  source: {
+    projectId: receiving.projectId,
+    sessionId,
+    title: 'Imported research',
+    fingerprint: sessionId
+  },
+  defaultBranchId: 'main',
+  branches: [],
+  resources: [],
+  issues: []
+})
+const recordingFixture = (): ProjectRecording => ({
+  format: 'open-science-project-recording',
+  version: 1,
+  recordingId: 'project-only',
+  startedAt: 10,
+  endedAt: 80,
+  media: [
+    {
+      mediaKey: 'frame-image',
+      name: 'frame.png',
+      mimeType: 'image/png',
+      checksum: 'a'.repeat(64),
+      sizeBytes: 20,
+      sourceVersionId: 'author-image-version'
+    }
+  ],
+  frames: [
+    {
+      frameId: 'frame-0',
+      sequence: 0,
+      recordedAt: 20,
+      mediaKey: 'frame-image',
+      provenance: {
+        kind: 'capture',
+        source: 'project-export',
+        startedAt: 10,
+        finishedAt: 20,
+        width: 1,
+        height: 1
+      }
+    }
+  ],
+  states: [],
+  events: [],
+  coverage: {
+    kind: 'sampled-project-recording',
+    stopReason: 'finished',
+    failures: 0,
+    unchangedSamples: 0,
+    droppedSamples: 0,
+    missingMediaKeys: []
+  }
+})
+const projectPayload = (): RecordedProjectPayload => ({
+  receiving,
+  recording: recordingFixture(),
+  media: [
+    {
+      mediaKey: 'frame-image',
+      artifactId: 'receiver-image-artifact',
+      versionId: 'receiver-image-version',
+      checksum: 'a'.repeat(64),
+      sizeBytes: 20
+    }
+  ]
+})
+const legacyPayload = (): RecordedObservationPayload => ({
+  receiving,
+  archive: {
+    format: 'open-science-run-observation',
+    version: 1,
+    recordingId: 'legacy',
+    capturedAt: 80,
+    coverage: {
+      kind: 'sampled-observations',
+      includesPreObservationHistory: false,
+      firstObservedAt: 20,
+      lastObservedAt: 20,
+      droppedEarlierObservations: false,
+      terminalRunObserved: false,
+      stopReason: 'manual',
+      logTruncation: false,
+      redactedContent: false,
+      missingMediaKeys: []
+    },
+    records: [
+      {
+        stepKey: 'legacy-step',
+        observedAt: 20,
+        phase: 'running',
+        sourceEvidence: {
+          identity: {
+            projectId: 'sender-project',
+            sessionId: 'sender-session',
+            runId: 'sender-run'
+          },
+          cursor: { epoch: 'sender-epoch', sequence: 0 },
+          stepId: 'run:sender-run'
+        },
+        run: {
+          kernelKind: 'bash',
+          status: 'running',
+          startedAt: 10,
+          logs: {
+            stdout: { text: 'Saved output', truncated: false, redacted: false },
+            stderr: { text: '', truncated: false, redacted: false },
+            traceback: { text: '', truncated: false, redacted: false }
+          }
+        },
+        artifactEvidence: [],
+        artifactsTruncated: false
+      }
+    ],
+    media: []
+  },
+  media: []
+})
+const candidate = (target = receiving): RecordingCandidate => ({
+  target,
+  format: 'project-recording',
+  resource: {
+    id: target.versionId,
+    name: 'Independent project recording',
+    ...target,
+    availability: 'recorded'
+  }
+})
+const discovery = (recordings: RecordingCandidate[] = []): RecordingDiscovery => ({
+  recordings,
+  nextOffset: recordings.length,
+  unchecked: 0,
+  unavailable: 0,
+  loading: false,
+  supported: true,
+  loadMore: vi.fn(),
+  retry: vi.fn()
+})
+const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((finish) => {
+    resolve = finish
+  })
+  return { promise, resolve }
+}
+const preview = (
+  content = 'aW1hZ2U='
+): { content: string; encoding: 'base64'; truncated: boolean } => ({
+  content,
+  encoding: 'base64' as const,
+  truncated: false
+})
+const runtime = { start: vi.fn(), stop: vi.fn(), list: vi.fn(), get: vi.fn() }
+const api = {
+  researchDemos: { ...runtime, readHistory: vi.fn() },
+  observations: {
+    ...runtime,
+    readRecorded: vi.fn(),
+    readProjectRecording: vi.fn(),
+    selectRecordedFile: vi.fn()
+  },
+  artifacts: { readPreview: vi.fn() },
+  notebook: { ...runtime }
+}
+type HarnessProps = {
+  document?: ReplayDocument
+  discovery: RecordingDiscovery
+  legacySource?: ResearchDemoSource
+  externalCandidate?: RecordingCandidate
+}
+function Harness(props: HarnessProps): React.JSX.Element {
+  const materials = useRecordedMaterials(props.document, props.discovery, props.legacySource)
+  const view = materials.views.find((item) => item.id === 'project')!
+  return (
+    <>
+      <output data-testid="material-request">
+        {materials.request ? JSON.stringify(materials.request) : 'none'}
+      </output>
+      {props.externalCandidate ? (
+        <button onClick={() => materials.choose(props.externalCandidate!)}>
+          Choose discovered recording
+        </button>
+      ) : null}
+      {typeof view.content === 'function' ? view.content(true) : view.content}
+    </>
+  )
+}
+const select = (target = receiving): void => {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Project recording' }), {
+    target: { value: JSON.stringify(target) }
+  })
+}
+const expectNoExecution = (): void => {
+  for (const operation of Object.values(runtime)) expect(operation).not.toHaveBeenCalled()
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  api.researchDemos.readHistory.mockResolvedValue({ receipts: [] })
+  api.observations.readRecorded.mockResolvedValue(legacyPayload())
+  api.observations.readProjectRecording.mockImplementation(async () => projectPayload())
+  api.observations.selectRecordedFile.mockImplementation(async () =>
+    recordedFileSelectionForPayload(projectPayload(), 'frame-image')
+  )
+  api.artifacts.readPreview.mockResolvedValue(preview())
+  recovery.onClick.mockResolvedValue(undefined)
+  Object.defineProperty(window, 'api', { configurable: true, value: api })
+  useNavigationStore.setState({ explicitNavigationRevision: 0 })
+  useRunObservationQuestionStore.setState({
+    destination: undefined,
+    pending: undefined,
+    lastAdded: undefined
+  })
+})
+afterEach(() => {
+  cleanup()
+  useRunObservationQuestionStore.setState({
+    destination: undefined,
+    pending: undefined,
+    lastAdded: undefined
+  })
+})
+
+describe('useRecordedMaterials read-only ownership', () => {
+  it('reads legacy local history without resuming runs or acquiring live viewers', async () => {
+    const receipt = {
+      source,
+      requestId: 'old-run',
+      demoVersionId: 'demo-version',
+      title: 'Saved local evidence',
+      substitutions: [],
+      purpose: 'offline-demo' as const,
+      state: 'completed' as const,
+      createdAt: 10,
+      updatedAt: 80
+    }
+    const history: ResearchDemoHistory = {
+      receipts: [
+        { ...receipt, recordingTarget: receiving },
+        { ...receipt, requestId: 'interrupted-run', title: 'Interrupted run', state: 'interrupted' }
+      ]
+    }
+    api.researchDemos.readHistory.mockResolvedValue(history)
+    render(<Harness document={documentFixture()} discovery={discovery()} legacySource={source} />)
+    await screen.findByRole('option', { name: 'Local historical run · Saved local evidence' })
+    expect(api.researchDemos.readHistory).toHaveBeenCalledWith(source)
+    expect(
+      screen.getByText(
+        'Some local runs have no saved recording. Viewing history does not resume them.'
+      )
+    ).toBeTruthy()
+    expect(api.observations.readRecorded).not.toHaveBeenCalled()
+    expect(screen.getByTestId('material-request').textContent).toBe('none')
+    select()
+    await waitFor(() =>
+      expect(api.observations.readRecorded).toHaveBeenCalledWith({ target: receiving })
+    )
+    await screen.findByText(
+      'No project images were recorded. Other research materials remain available.'
+    )
+    expect(
+      screen.getByText(
+        'Recorded on this device. This is separate from the imported author’s evidence.'
+      )
+    ).toBeTruthy()
+    expectNoExecution()
+  })
+
+  it('selects an independent ProjectRecording without Notebook and references its exact receiving media', async () => {
+    const destination = {
+      projectId: receiving.projectId,
+      sessionId: 'discussion-session',
+      draftKey: 'discussion-draft'
+    }
+    useRunObservationQuestionStore.setState({ destination })
+    render(<Harness document={documentFixture()} discovery={discovery([candidate()])} />)
+    select()
+    await screen.findByRole('img')
+    expect(api.observations.readProjectRecording).toHaveBeenCalledWith({ target: receiving })
+    expect(api.observations.readRecorded).not.toHaveBeenCalled()
+    expect(api.artifacts.readPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: receiving.projectId,
+        sessionId: receiving.sessionId,
+        fileId: 'receiver-image-artifact',
+        versionId: 'receiver-image-version',
+        encoding: 'base64'
+      })
+    )
+    expect(screen.queryByText('Notebook')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this frame' }))
+    await waitFor(() =>
+      expect(useRunObservationQuestionStore.getState().pending?.destination).toEqual(destination)
+    )
+    expect(api.observations.selectRecordedFile).toHaveBeenCalledWith({
+      target: receiving,
+      mediaKey: 'frame-image',
+      format: 'project-recording'
+    })
+    expect(useRunObservationQuestionStore.getState().pending?.selection).toEqual(
+      recordedFileSelectionForPayload(projectPayload(), 'frame-image')
+    )
+    expect(recovery.onClick).not.toHaveBeenCalled()
+    expectNoExecution()
+  })
+
+  it('discovery finishing only adds a choice; revealing a material requires an explicit request', async () => {
+    const doc = documentFixture()
+    const { rerender } = render(
+      <Harness document={doc} discovery={{ ...discovery(), loading: true }} />
+    )
+    rerender(
+      <Harness
+        document={doc}
+        discovery={discovery([candidate()])}
+        externalCandidate={candidate()}
+      />
+    )
+    expect(screen.getByRole('option', { name: 'Independent project recording' })).toBeTruthy()
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByTestId('material-request').textContent).toBe('none')
+    expect(api.observations.readProjectRecording).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Choose discovered recording' }))
+    await screen.findByRole('img')
+    expect(JSON.parse(screen.getByTestId('material-request').textContent!)).toEqual({
+      id: 'project',
+      revision: 1
+    })
+    expectNoExecution()
+  })
+
+  it.each(['unmount', 'navigation', 'destination', 'source'] as const)(
+    'discards a pending file question after %s changes',
+    async (change) => {
+      const pending = deferred<ReturnType<typeof recordedFileSelectionForPayload>>()
+      api.observations.selectRecordedFile.mockReturnValue(pending.promise)
+      const props = { document: documentFixture(), discovery: discovery([candidate()]) }
+      const { rerender, unmount } = render(<Harness {...props} />)
+      select()
+      await screen.findByRole('img')
+      fireEvent.click(screen.getByRole('button', { name: 'Ask about this frame' }))
+      expect(api.observations.selectRecordedFile).toHaveBeenCalledTimes(1)
+      if (change === 'unmount') unmount()
+      if (change === 'navigation')
+        act(() => useNavigationStore.setState({ explicitNavigationRevision: 1 }))
+      if (change === 'destination')
+        act(() =>
+          useRunObservationQuestionStore.setState({
+            destination: {
+              projectId: receiving.projectId,
+              sessionId: 'new-session',
+              draftKey: 'new-draft'
+            }
+          })
+        )
+      if (change === 'source')
+        rerender(<Harness document={documentFixture('new-source')} discovery={discovery()} />)
+      await act(async () =>
+        pending.resolve(recordedFileSelectionForPayload(projectPayload(), 'frame-image'))
+      )
+      expect(useRunObservationQuestionStore.getState().pending).toBeUndefined()
+      expect(recovery.onClick).not.toHaveBeenCalled()
+    }
+  )
+
+  it('shows author-declared state without fabricating an image when media were never recorded', async () => {
+    const payload = projectPayload()
+    payload.recording.media = []
+    payload.recording.frames = []
+    payload.recording.states = [
+      {
+        stateId: 'state-0',
+        sequence: 0,
+        recordedAt: 20,
+        source: 'author-declared',
+        value: { actions: 4 }
+      }
+    ]
+    api.observations.readProjectRecording.mockResolvedValue({ ...payload, media: [] })
+    render(<Harness document={documentFixture()} discovery={discovery([candidate()])} />)
+    select()
+    await screen.findByText('Recorded states and events')
+    expect(
+      screen.getByText(
+        'No project images were recorded. Other research materials remain available.'
+      )
+    ).toBeTruthy()
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(api.artifacts.readPreview).not.toHaveBeenCalled()
+    expectNoExecution()
+  })
+
+  it('degrades a missing receiving media mapping without falling back to a live project', async () => {
+    api.observations.readProjectRecording.mockResolvedValue({ ...projectPayload(), media: [] })
+    render(<Harness document={documentFixture()} discovery={discovery([candidate()])} />)
+    select()
+    await screen.findByText('Could not read the recorded material.')
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(api.artifacts.readPreview).not.toHaveBeenCalled()
+    expectNoExecution()
+  })
+
+  it('ignores a late old image after another recording has been chosen and its media read failed', async () => {
+    const pending = deferred<ReturnType<typeof preview>>()
+    const nextTarget = { ...receiving, artifactId: 'second-index', versionId: 'second-version' }
+    const next = projectPayload()
+    next.recording.recordingId = 'second-recording'
+    api.observations.readProjectRecording
+      .mockResolvedValueOnce(projectPayload())
+      .mockResolvedValueOnce({ ...next, receiving: nextTarget })
+    api.artifacts.readPreview
+      .mockReturnValueOnce(pending.promise)
+      .mockRejectedValueOnce(new Error('missing historical image'))
+    render(
+      <Harness
+        document={documentFixture()}
+        discovery={discovery([candidate(), candidate(nextTarget)])}
+      />
+    )
+    select()
+    await waitFor(() => expect(api.artifacts.readPreview).toHaveBeenCalledTimes(1))
+    select(nextTarget)
+    await screen.findByText('Could not read the recorded material.')
+    await act(async () => pending.resolve(preview('b2xkLWltYWdl')))
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.getByText('Could not read the recorded material.')).toBeTruthy()
+    expectNoExecution()
+  })
+})

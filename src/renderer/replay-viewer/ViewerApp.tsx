@@ -314,7 +314,7 @@ export const ViewerApp = ({
       ) : null}
       <div className="min-h-0 flex-1">
         <LiveReplayView
-          title={t('Research replay')}
+          title={t('Observe run')}
           sourceIdentity={`${context.viewerId}:${observationSourceIdentity(context.target)}`}
           snapshot={snapshot}
           history={history.snapshots}

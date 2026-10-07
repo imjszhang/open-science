@@ -18,6 +18,19 @@ export const isRecordedObservationContent = (content: string, complete: boolean)
     content.slice(0, 4096)
   )
 }
+export const isProjectRecordingContent = (content: string, complete: boolean): boolean => {
+  if (complete) {
+    try {
+      const value = JSON.parse(content)
+      return value?.format === 'open-science-project-recording' && value.version === 1
+    } catch {
+      return false
+    }
+  }
+  return /^\s*\{\s*"format"\s*:\s*"open-science-project-recording"\s*,\s*"version"\s*:\s*1\s*[,}]/.test(
+    content.slice(0, 4096)
+  )
+}
 export const recordedObservationTargetForFile = (
   item: PreviewFileItem
 ): RecordedObservationTarget | undefined => {

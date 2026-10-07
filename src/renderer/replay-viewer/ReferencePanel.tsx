@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../src/components/ui/button'
 export const ReferencePanel = ({
   reference,
+  kind = 'step',
   observedAt,
   presentation
 }: {
   reference: string
+  kind?: 'step' | 'file'
   observedAt?: number
   presentation?: 'desktop' | 'browser'
 }): React.JSX.Element => {
@@ -23,7 +25,7 @@ export const ReferencePanel = ({
   return (
     <section
       className="shrink-0 border-b border-border-200 px-3 py-2"
-      aria-label={t('Recorded step reference')}
+      aria-label={kind === 'file' ? t('Recorded file version') : t('Recorded step reference')}
     >
       <div className="flex items-center justify-between gap-2">
         {presentation !== 'desktop' ? (
@@ -40,7 +42,11 @@ export const ReferencePanel = ({
             void copy()
           }}
         >
-          {copyState === 'copied' ? t('Copied') : t('Copy step reference')}
+          {copyState === 'copied'
+            ? t('Copied')
+            : kind === 'file'
+              ? t('Copy file reference')
+              : t('Copy step reference')}
         </Button>
       </div>
       {observedAt !== undefined ? (
@@ -52,7 +58,7 @@ export const ReferencePanel = ({
       ) : null}
       <textarea
         readOnly
-        aria-label={t('Recorded step reference')}
+        aria-label={kind === 'file' ? t('Recorded file version') : t('Recorded step reference')}
         value={reference}
         rows={3}
         className="mt-2 w-full resize-none rounded border border-border-200 bg-bg-100 p-2 font-mono text-xs"

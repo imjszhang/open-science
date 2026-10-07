@@ -2,11 +2,14 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
 import type { RecordingDiscovery } from './use-recording-discovery'
+import type { RecordingCandidate } from './recording-discovery'
 import { showRecordedObservation } from './open-run-observation'
 
 export const RunRecordingsPanel = ({
-  discovery
+  discovery,
+  onChoose
 }: {
+  onChoose?: (candidate: RecordingCandidate) => void
   discovery: RecordingDiscovery
 }): React.JSX.Element => {
   const { t, i18n } = useTranslation()
@@ -23,31 +26,38 @@ export const RunRecordingsPanel = ({
           {t('Run recordings can be opened in the desktop app.')}
         </p>
       ) : null}
-      {discovery.recordings.map(({ resource, target }) => (
-        <div
-          key={`${target.artifactId}:${target.versionId}`}
-          className="rounded-md border border-border-200 p-3"
-        >
-          <p className="text-sm font-medium text-text-100">{t('Saved run recording')}</p>
-          <p className="mt-1 break-all text-xs text-text-300">{resource.name}</p>
-          <p className="mt-1 text-xs text-text-300">
-            {resource.versionNumber !== undefined
-              ? t('Version {{number}}', { number: resource.versionNumber })
-              : t('Version {{version}}', { version: target.versionId.slice(0, 8) })}
-            {resource.createdAt !== undefined
-              ? ` · ${new Date(resource.createdAt).toLocaleString(i18n.language)}`
-              : ''}
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onClick={() => showRecordedObservation(target, resource.name)}
+      {discovery.recordings.map((candidate) => {
+        const { resource, target } = candidate
+        return (
+          <div
+            key={`${target.artifactId}:${target.versionId}`}
+            className="rounded-md border border-border-200 p-3"
           >
-            {t('View saved run recording')}
-          </Button>
-        </div>
-      ))}
+            <p className="text-sm font-medium text-text-100">{t('Saved run recording')}</p>
+            <p className="mt-1 break-all text-xs text-text-300">{resource.name}</p>
+            <p className="mt-1 text-xs text-text-300">
+              {resource.versionNumber !== undefined
+                ? t('Version {{number}}', { number: resource.versionNumber })
+                : t('Version {{version}}', { version: target.versionId.slice(0, 8) })}
+              {resource.createdAt !== undefined
+                ? ` · ${new Date(resource.createdAt).toLocaleString(i18n.language)}`
+                : ''}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onClick={() =>
+                onChoose
+                  ? onChoose(candidate)
+                  : showRecordedObservation(target, resource.name, candidate.format)
+              }
+            >
+              {t('View saved run recording')}
+            </Button>
+          </div>
+        )
+      })}
       {discovery.supported &&
       !discovery.loading &&
       !discovery.recordings.length &&

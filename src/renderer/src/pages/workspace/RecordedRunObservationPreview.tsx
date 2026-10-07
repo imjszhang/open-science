@@ -1,8 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
-import { Button } from '@/components/ui/button'
-import { LiveReplayView } from './replay/LiveReplayView'
+import { RecordedReplayView } from './replay/RecordedReplayView'
+import { ProjectReplay } from './replay/ProjectReplay'
+import { ResultsPanel } from './replay/results/ResultsPanel'
+import {
+  readRecordedResource,
+  type RecordedResourceReader
+} from './replay/results/recorded-resource-reader'
+import { recordedResults, authorizedRecordedResultsReader } from '@/lib/replay/recorded-results'
+import {
+  recordedFileSelectionForPayload,
+  type RecordedObservationFileSelection
+} from '../../../../shared/run-observation-recorded'
+import { projectLegacyObservationToTrack } from '../../../../shared/project-recording'
 import {
   authorizedRecordedResourceReader,
   projectRecordedObservation,
@@ -13,9 +24,7 @@ import {
 } from '@/lib/replay/recorded-observation'
 import type { RunObservationArchive } from '../../../../shared/run-observation-archive'
 import type { RunObservationExecutionContext } from '../../../../shared/run-observation'
-import type { ReplayResource } from '../../../../shared/replay'
 import type { ReplayResourceReader } from './replay/replay-resources'
-import { RecordedProjectImages, type RecordedProjectImage } from './replay/RecordedProjectImages'
 
 export type RecordedRunObservationPreviewProps = {
   archive: RunObservationArchive
@@ -26,6 +35,8 @@ export type RecordedRunObservationPreviewProps = {
   isActive?: boolean
   readResource: ReplayResourceReader
   renderResource?: RecordedObservationResourceRenderer
+  readRawResource?: RecordedResourceReader
+  onAskArchiveFile?: (selection: RecordedObservationFileSelection) => void | Promise<void>
   onAskArchiveSelection: (selection: RecordedRunObservationSelection) => void | Promise<void>
 }
 
@@ -34,12 +45,6 @@ export const RecordedRunObservationPreview = (
 ): React.JSX.Element => {
   const { t } = useTranslation()
   const { renderResource: renderAuthorizedResource } = props
-  const [attachmentSelection, setAttachmentSelection] = useState<{
-    sourceIdentity: string
-    resourceId: string
-  }>()
-  const attachmentTrigger = useRef<HTMLButtonElement | null>(null)
-  const backToRecording = useRef<HTMLButtonElement | null>(null)
   // Hosts may recreate a target object while updating a reference or title. Only an actual
   // receiving Artifact Version change should rebuild all immutable archive snapshots.
   const { projectId, sessionId, artifactId, versionId } = props.receiving
@@ -61,30 +66,20 @@ export const RecordedRunObservationPreview = (
         : async () => ({ status: 'unavailable' as const, reason: 'not-recorded' as const }),
     [projection, props.readResource]
   )
-  const attachments = useMemo(() => {
-    const result = new Map<string, ReplayResource>()
-    const resolved = new Map(props.media.map((item) => [item.mediaKey, item]))
-    for (const media of props.archive.media) {
-      // These are recording-level outputs, not evidence for an invented observation step.
-      if (media.stepKeys.length || media.capture) continue
-      const mapping = resolved.get(media.mediaKey)
-      const resource = mapping && projection?.resources.get(mapping.versionId)
-      if (resource) result.set(resource.id, resource)
-    }
-    return result
-  }, [props.archive, props.media, projection])
-  const selectedAttachment =
-    attachmentSelection?.sourceIdentity === projection?.sourceIdentity && attachmentSelection
-      ? attachments.get(attachmentSelection.resourceId)
-      : undefined
-  const closeAttachment = useCallback(() => {
-    setAttachmentSelection(undefined)
-  }, [])
-  useEffect(() => {
-    if (!selectedAttachment) return
-    backToRecording.current?.focus({ preventScroll: true })
-    return () => attachmentTrigger.current?.focus({ preventScroll: true })
-  }, [selectedAttachment])
+  const payload = useMemo(
+    () => ({
+      archive: props.archive,
+      receiving,
+      media: props.media,
+      executionContext: props.executionContext
+    }),
+    [props.archive, receiving, props.media, props.executionContext]
+  )
+  const results = useMemo(() => recordedResults(payload), [payload])
+  const readResults = useMemo(
+    () => authorizedRecordedResultsReader(payload, props.readRawResource ?? readRecordedResource),
+    [payload, props.readRawResource]
+  )
   const renderResource = useCallback<RecordedObservationResourceRenderer>(
     (resource, onClose) => {
       const authorized = projection?.resolveResource(resource)
@@ -98,36 +93,22 @@ export const RecordedRunObservationPreview = (
     },
     [projection, renderAuthorizedResource, t]
   )
-  const imagesByStep = useMemo(() => {
-    const result = new Map<string, RecordedProjectImage[]>()
-    const resolved = new Map(props.media.map((item) => [item.mediaKey, item]))
-    for (const media of props.archive.media) {
-      const mapping = resolved.get(media.mediaKey)
-      if (!media.capture) continue
-      for (const key of new Set(media.stepKeys)) {
-        const image = {
-          id:
-            mapping && projection?.resources.has(mapping.versionId)
-              ? mapping.versionId
-              : `missing:${media.mediaKey}`,
-          capture: media.capture,
-          publication: 'published' as const
-        }
-        const entries = result.get(key)
-        if (entries) entries.push(image)
-        else result.set(key, [image])
-      }
+  const track = useMemo(() => {
+    try {
+      return projectLegacyObservationToTrack(props.archive)
+    } catch {
+      return undefined
     }
-    return result
-  }, [props.archive, props.media, projection])
+  }, [props.archive])
   const readImage = useCallback(
-    async (id: string) => {
-      const resource = projection?.resources.get(id)
+    async (mediaKey: string) => {
+      const mapping = props.media.find((item) => item.mediaKey === mediaKey)
+      const resource = mapping && projection?.resources.get(mapping.versionId)
       if (!resource) return null
       const value = await readResource(resource)
       return value.status === 'ready' && value.kind === 'image' ? value.content : null
     },
-    [projection, readResource]
+    [props.media, projection, readResource]
   )
   if (!projection) return <ErrorNotice inline title={t('The recorded evidence is unavailable.')} />
   const archive = props.archive,
@@ -208,76 +189,55 @@ export const RecordedRunObservationPreview = (
           ) : null}
         </div>
       ) : null}
-      {attachments.size ? (
-        <details className="shrink-0 border-b border-border-200 px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-medium">{t('Recording attachments')}</summary>
-          <p className="mt-2 text-muted-foreground">
-            {t('These files belong to this recording and are not linked to an individual step.')}
-          </p>
-          <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
-            {[...attachments.values()].map((resource) => (
-              <Button
-                key={resource.id}
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={(event) => {
-                  attachmentTrigger.current = event.currentTarget
-                  setAttachmentSelection({
-                    sourceIdentity: projection.sourceIdentity,
-                    resourceId: resource.id
-                  })
-                }}
-              >
-                <span className="truncate">{resource.name}</span>
-              </Button>
-            ))}
-          </div>
-        </details>
-      ) : null}
-      {selectedAttachment ? (
-        <section
-          aria-label={t('Recording attachments')}
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
-        >
-          <div className="flex shrink-0 items-center gap-2 border-b border-border-200 p-2">
-            <Button ref={backToRecording} variant="outline" size="sm" onClick={closeAttachment}>
-              {t('Back to recording')}
-            </Button>
-            <span className="truncate text-sm">{selectedAttachment.name}</span>
-          </div>
-          <div key={selectedAttachment.locator} className="min-h-0 flex-1 overflow-auto">
-            {renderResource(selectedAttachment, closeAttachment)}
-          </div>
-        </section>
-      ) : null}
-      {/* Keep the selected history step mounted while a recording-level attachment is open. */}
-      <div
-        className={selectedAttachment ? 'hidden' : 'min-h-0 flex-1'}
-        hidden={!!selectedAttachment}
-      >
-        <LiveReplayView
+      <div className="min-h-0 flex-1">
+        <RecordedReplayView
           title={props.title}
           executionContext={props.executionContext}
           sourceIdentity={projection.sourceIdentity}
-          snapshot={projection.snapshots.at(-1)!}
-          history={projection.snapshots}
-          connection="disconnected"
-          recorded
-          active={props.isActive !== false && !selectedAttachment}
+          snapshots={projection.snapshots}
+          active={props.isActive !== false}
           historyTruncated={archive.coverage.droppedEarlierObservations}
           readResource={readResource}
-          renderRecordedSurface={(snapshot) => {
-            const images = imagesByStep.get(snapshot.stepId)
-            return images?.length ? (
-              <RecordedProjectImages
-                key={snapshot.stepId}
-                images={images}
-                readImage={readImage}
-                sourceStep={snapshot.stepId}
-              />
-            ) : undefined
-          }}
+          materialViews={[
+            {
+              id: 'project',
+              label: t('Project replay'),
+              content: (active) =>
+                track ? (
+                  <ProjectReplay
+                    active={active}
+                    track={track}
+                    readImage={readImage}
+                    onAskFrame={
+                      props.onAskArchiveFile
+                        ? (frame) =>
+                            props.onAskArchiveFile!(
+                              recordedFileSelectionForPayload(payload, frame.mediaKey)
+                            )
+                        : undefined
+                    }
+                  />
+                ) : null
+            },
+            {
+              id: 'results',
+              label: t('Results'),
+              content: (
+                <ResultsPanel
+                  entries={results}
+                  read={readResults}
+                  onAskFile={
+                    props.onAskArchiveFile
+                      ? (entry) =>
+                          props.onAskArchiveFile!(
+                            recordedFileSelectionForPayload(payload, entry.mediaKey!)
+                          )
+                      : undefined
+                  }
+                />
+              )
+            }
+          ]}
           renderResource={renderResource}
           onAskSelection={(snapshot) => props.onAskArchiveSelection(projection.select(snapshot))}
         />

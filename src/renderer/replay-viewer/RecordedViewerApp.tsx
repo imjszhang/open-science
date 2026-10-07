@@ -4,9 +4,17 @@ import type { ReplayResource } from '../../shared/replay'
 import type {
   RecordedObservationPayload,
   ResolvedObservationMedia,
-  RecordedRunObservationSelection
+  RecordedRunObservationSelection,
+  RecordedObservationFileSelection,
+  RecordedProjectPayload
 } from '../../shared/run-observation-recorded'
 import { RecordedRunObservationPreview } from '../src/pages/workspace/RecordedRunObservationPreview'
+import { useMemo } from 'react'
+import { ProjectReplay } from '../src/pages/workspace/replay/ProjectReplay'
+import { ResultsPanel } from '../src/pages/workspace/replay/results/ResultsPanel'
+import { Button } from '../src/components/ui/button'
+import { projectRecordingToTrack } from '../../shared/project-recording'
+import { recordedResults, recordedMediaResource } from '../src/lib/replay/recorded-results'
 import { BrowserArtifactPreview } from './BrowserArtifactPreview'
 import { ReferencePanel } from './ReferencePanel'
 import { recordedSelectionReference } from './selection-reference'
@@ -14,7 +22,7 @@ import { ReplayViewerClient, type RecordedReplayViewerContext } from './client'
 
 const NO_MEDIA: readonly ResolvedObservationMedia[] = []
 
-export const RecordedViewerApp = ({
+const RecordedObservationViewerApp = ({
   client,
   context,
   payload
@@ -24,15 +32,21 @@ export const RecordedViewerApp = ({
   payload: RecordedObservationPayload
 }): React.JSX.Element => {
   const { t } = useTranslation()
-  const [selection, setSelection] = useState<RecordedRunObservationSelection>()
+  const [selection, setSelection] = useState<
+    RecordedRunObservationSelection | RecordedObservationFileSelection
+  >()
   useEffect(() => {
     const controller = new AbortController()
-    void client.recordedSelection(payload, controller.signal).then(
-      (saved) => {
-        if (!controller.signal.aborted && saved) setSelection((current) => current ?? saved)
-      },
-      () => undefined
-    )
+    void Promise.allSettled([
+      client.recordedSelection(payload, controller.signal),
+      client.recordedFileSelection(payload, controller.signal)
+    ]).then((results) => {
+      if (controller.signal.aborted) return
+      const saved = results
+        .flatMap((result) => (result.status === 'fulfilled' && result.value ? [result.value] : []))
+        .sort((a, b) => (b.selectedAt ?? 0) - (a.selectedAt ?? 0))[0]
+      if (saved) setSelection((current) => current ?? saved)
+    })
     return () => controller.abort()
   }, [client, payload])
   const read = useCallback(
@@ -57,9 +71,14 @@ export const RecordedViewerApp = ({
       {reference ? (
         <ReferencePanel
           presentation={context.presentation}
+          kind={selection?.kind === 'recorded-observation-file' ? 'file' : 'step'}
           key={reference}
           reference={reference}
-          observedAt={selection?.record.observedAt}
+          observedAt={
+            selection?.kind === 'recorded-run-observation'
+              ? selection.record.observedAt
+              : selection?.selectedAt
+          }
         />
       ) : null}
       <div className="min-h-0 flex-1">
@@ -70,6 +89,10 @@ export const RecordedViewerApp = ({
           media={context.canReadArtifacts ? payload.media : NO_MEDIA}
           title={t('Archived observation')}
           readResource={readResource}
+          readRawResource={read}
+          onAskArchiveFile={async (requested) => {
+            setSelection(await client.selectRecordingFile(payload, requested.mediaKey))
+          }}
           renderResource={(resource) => (
             <BrowserArtifactPreview key={resource.versionId} resource={resource} read={read} />
           )}
@@ -77,5 +100,120 @@ export const RecordedViewerApp = ({
         />
       </div>
     </main>
+  )
+}
+
+const RecordedProjectViewerApp = ({
+  client,
+  context,
+  payload
+}: {
+  client: ReplayViewerClient
+  context: RecordedReplayViewerContext
+  payload: RecordedProjectPayload
+}): React.JSX.Element => {
+  const { t } = useTranslation()
+  const [view, setView] = useState<'project' | 'results'>('project')
+  const [selection, setSelection] = useState<RecordedObservationFileSelection>()
+  const track = useMemo(() => projectRecordingToTrack(payload.recording), [payload.recording])
+  const results = useMemo(() => recordedResults(payload), [payload])
+  const read = useCallback(
+    (resource: ReplayResource, signal?: AbortSignal) =>
+      client.recordedMedia(payload, resource, signal),
+    [client, payload]
+  )
+  const readImage = useCallback(
+    async (mediaKey: string, signal: AbortSignal) => {
+      const resource = recordedMediaResource(payload, mediaKey)
+      if (!resource || !context.canReadArtifacts) return null
+      signal.throwIfAborted()
+      const prepared = await client.readRecordedResource(payload, resource)
+      signal.throwIfAborted()
+      return prepared.status === 'ready' && prepared.kind === 'image' ? prepared.content : null
+    },
+    [client, payload, context.canReadArtifacts]
+  )
+  const askFile = async (mediaKey: string): Promise<void> => {
+    setSelection(await client.selectRecordingFile(payload, mediaKey))
+  }
+  useEffect(() => {
+    const controller = new AbortController()
+    void client.recordedFileSelection(payload, controller.signal).then(
+      (saved) => {
+        if (!controller.signal.aborted && saved) setSelection((current) => current ?? saved)
+      },
+      () => undefined
+    )
+    return () => controller.abort()
+  }, [client, payload])
+  const reference = selection ? recordedSelectionReference(context.viewerId, selection) : undefined
+  return (
+    <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
+      <header className="shrink-0 border-b border-border-200 p-3">
+        <h1 className="text-sm font-medium">{payload.recording.title ?? t('Project recording')}</h1>
+        <p className="mt-1 text-xs text-text-300">{t('Read-only research history')}</p>
+      </header>
+      {reference ? (
+        <ReferencePanel
+          key={reference}
+          reference={reference}
+          presentation={context.presentation}
+          kind="file"
+          observedAt={selection?.selectedAt}
+        />
+      ) : null}
+      <div
+        role="group"
+        aria-label={t('Research materials')}
+        className="flex shrink-0 gap-2 border-b border-border-200 p-2"
+      >
+        <Button
+          size="sm"
+          variant={view === 'project' ? 'secondary' : 'ghost'}
+          aria-pressed={view === 'project'}
+          onClick={() => setView('project')}
+        >
+          {t('Project replay')}
+        </Button>
+        <Button
+          size="sm"
+          variant={view === 'results' ? 'secondary' : 'ghost'}
+          aria-pressed={view === 'results'}
+          onClick={() => setView('results')}
+        >
+          {t('Results')}
+        </Button>
+      </div>
+      <div
+        className={view === 'project' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+        hidden={view !== 'project'}
+      >
+        <ProjectReplay
+          track={track}
+          active={view === 'project'}
+          readImage={readImage}
+          onAskFrame={(frame) => askFile(frame.mediaKey)}
+        />
+      </div>
+      <div className={view === 'results' ? 'min-h-0 flex-1' : 'hidden'} hidden={view !== 'results'}>
+        <ResultsPanel
+          entries={context.canReadArtifacts ? results : []}
+          read={read}
+          onAskFile={(entry) => askFile(entry.mediaKey!)}
+        />
+      </div>
+    </main>
+  )
+}
+export const RecordedViewerApp = (props: {
+  client: ReplayViewerClient
+  context: RecordedReplayViewerContext
+  payload: RecordedObservationPayload | RecordedProjectPayload
+}): React.JSX.Element => {
+  const key = JSON.stringify(props.payload.receiving)
+  return 'archive' in props.payload ? (
+    <RecordedObservationViewerApp key={key} {...props} payload={props.payload} />
+  ) : (
+    <RecordedProjectViewerApp key={key} {...props} payload={props.payload} />
   )
 }

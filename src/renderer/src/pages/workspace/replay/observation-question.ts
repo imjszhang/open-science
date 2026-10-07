@@ -1,12 +1,19 @@
-import type { RecordedRunObservationSelection } from '../../../../../shared/run-observation-recorded'
+import { recordedFileQuestionText } from '@/lib/replay/recorded-results'
+import type {
+  RecordedRunObservationSelection,
+  RecordedObservationFileSelection
+} from '../../../../../shared/run-observation-recorded'
 import type { RunObservationSelection } from '../../../../../shared/run-observation'
 import type { ResearchDemoQuestion } from '../../../../../shared/research-demo'
 
 /** Ordinary message data survives export without a new native package field or live credential. */
 export const observationQuestionText = (
-  selection: RunObservationSelection | RecordedRunObservationSelection,
+  selection:
+    RunObservationSelection | RecordedRunObservationSelection | RecordedObservationFileSelection,
   demo?: Pick<ResearchDemoQuestion, 'source' | 'requestId' | 'purpose'>
 ): string => {
+  if ('kind' in selection && selection.kind === 'recorded-observation-file')
+    return recordedFileQuestionText(selection)
   const recorded = !('snapshot' in selection)
   const run = 'snapshot' in selection ? selection.snapshot.run : selection.record.run
   const logs =

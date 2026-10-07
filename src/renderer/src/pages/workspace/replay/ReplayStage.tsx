@@ -70,7 +70,17 @@ export type ReplayStageReadiness = ReplayFrameReadiness & {
   resourcesReady: boolean
   retryable: boolean
 }
+export type ReplayMaterialView = {
+  id: string
+  label: string
+  content: React.ReactNode | ((active: boolean) => React.ReactNode)
+}
+
 export type ReplayStageProps = {
+  materialViews?: readonly ReplayMaterialView[]
+  materialsActive?: boolean
+  materialViewId?: string
+  onMaterialViewChange?: (id: string) => void
   document: ReplayDocument
   sourceIdentity?: string
   // The interactive pane uses readable responsive layout; standalone capture stays canonical.
@@ -608,6 +618,10 @@ const ReplayStageContent = ({
   conversationFocusRequest = 0,
   materialsOpen = false,
   materialsId,
+  materialViews,
+  materialsActive = true,
+  materialViewId = 'notebook',
+  onMaterialViewChange,
   filesOpen = false,
   filesId,
   onOpenFiles,
@@ -1162,23 +1176,45 @@ const ReplayStageContent = ({
         >
           {fitContainer && !inspecting ? (
             <div className="flex h-9 min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border-200 px-3">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <h2
-                      tabIndex={0}
-                      data-replay-notebook-heading
-                      className="flex items-center gap-2 text-sm font-medium"
+              {materialViews?.length ? (
+                <div
+                  role="group"
+                  aria-label={t('Research materials')}
+                  className="flex min-w-0 gap-1 overflow-x-auto"
+                >
+                  {[{ id: 'notebook', label: t('Notebook') }, ...materialViews].map((view) => (
+                    <Button
+                      key={view.id}
+                      data-replay-notebook-heading={view.id === 'notebook' ? true : undefined}
+                      size="sm"
+                      variant={materialViewId === view.id ? 'secondary' : 'ghost'}
+                      className="h-7 shrink-0 px-2 text-xs"
+                      aria-pressed={materialViewId === view.id}
+                      onClick={() => onMaterialViewChange?.(view.id)}
                     >
-                      <BookOpen size={16} aria-hidden="true" />
-                      {t('Notebook')}
-                    </h2>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" align="start">
-                    {t('Follows playback progress')}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                      {view.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <h2
+                        tabIndex={0}
+                        data-replay-notebook-heading
+                        className="flex items-center gap-2 text-sm font-medium"
+                      >
+                        <BookOpen size={16} aria-hidden="true" />
+                        {t('Notebook')}
+                      </h2>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="start">
+                      {t('Follows playback progress')}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -1189,114 +1225,143 @@ const ReplayStageContent = ({
               </Button>
             </div>
           ) : null}
-          {!fitContainer &&
-          !inspecting &&
-          materialStep?.id === active?.id &&
-          scene.phase === 'activity' ? (
+          <div
+            className={
+              fitContainer
+                ? materialViewId === 'notebook' || inspecting
+                  ? 'flex min-h-0 flex-1 flex-col'
+                  : 'hidden'
+                : 'contents'
+            }
+          >
+            {!fitContainer &&
+            !inspecting &&
+            materialStep?.id === active?.id &&
+            scene.phase === 'activity' ? (
+              <div
+                className="space-y-2 text-xs text-text-300"
+                data-replay-reconstructed-activity="true"
+              >
+                <span>{t('Reconstructed activity')}</span>
+                <div className="h-1 overflow-hidden rounded bg-bg-200">
+                  <div
+                    className="h-full bg-text-300"
+                    style={{ width: `${Math.max(0, Math.min(100, scene.stepProgress * 100))}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {noMaterials && !inspecting ? (
+              <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4 text-sm text-text-300">
+                <p>
+                  {branchMaterials.first
+                    ? t('No materials at this point.')
+                    : t('No materials recorded in this branch.')}
+                </p>
+                {branchMaterials.first && onSeek ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const first = branchMaterials.first!
+                      onSeek(first.endMs)
+                      requestAnimationFrame(() => {
+                        const heading = stage.current?.querySelector<HTMLElement>(
+                          first.runs.length
+                            ? '[data-replay-notebook-heading]'
+                            : '[data-replay-files-heading]'
+                        )
+                        if (!first.runs.length) onOpenFiles?.()
+                        heading?.focus()
+                      })
+                    }}
+                  >
+                    {t('Jump to first material')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             <div
-              className="space-y-2 text-xs text-text-300"
-              data-replay-reconstructed-activity="true"
+              ref={notebookViewport}
+              data-replay-notebook-scroll
+              hidden={fitContainer && (inspecting || noMaterials)}
+              className={fitContainer ? 'min-h-0 flex-1 overflow-auto' : 'contents'}
             >
-              <span>{t('Reconstructed activity')}</span>
-              <div className="h-1 overflow-hidden rounded bg-bg-200">
-                <div
-                  className="h-full bg-text-300"
-                  style={{ width: `${Math.max(0, Math.min(100, scene.stepProgress * 100))}%` }}
-                />
+              <div className={fitContainer ? undefined : 'space-y-5'}>
+                {fitContainer ? (
+                  <div onClickCapture={rememberNotebookAnchor}>{notebookHistoryControl}</div>
+                ) : null}
+                {materialRuns.map((index, runOffset) => {
+                  const detail = runDetails[index.runId]
+                  const content =
+                    detail?.status === 'ready' ? (
+                      <ReplayNotebook
+                        interactive={fitContainer}
+                        key={index.runId}
+                        run={detail.run}
+                        index={notebookIndices.get(index.runId) ?? runOffset}
+                        showOutput={
+                          fitContainer
+                            ? !active?.runs.some((run) => run.runId === index.runId) ||
+                              scene.showResults
+                            : showOutput
+                        }
+                        unavailableImages={unavailableImages}
+                      />
+                    ) : (
+                      <p
+                        key={index.runId}
+                        aria-label={
+                          detail ? t('Recorded Notebook details are unavailable.') : undefined
+                        }
+                        className="rounded-lg bg-bg-200 p-5 text-sm text-text-300"
+                      >
+                        {detail
+                          ? detail.reason === 'not-recorded'
+                            ? t('This material was not saved in the source records.')
+                            : t('Could not read the recorded material.')
+                          : t('Preparing recorded material…')}
+                      </p>
+                    )
+                  return fitContainer ? (
+                    <div key={index.runId} data-replay-run-item={index.runId}>
+                      {content}
+                    </div>
+                  ) : (
+                    content
+                  )
+                })}
+                {fitContainer && !materialRuns.length ? (
+                  <p className="p-4 text-sm text-text-300">
+                    {replayDocument.issues.some((issue) => issue.code === 'notebook-unavailable')
+                      ? t('Recorded Notebook details are unavailable.')
+                      : branchMaterials.notebook
+                        ? t('No Notebook runs at this point.')
+                        : t('No Notebook runs recorded in this branch.')}
+                  </p>
+                ) : null}
               </div>
             </div>
-          ) : null}
-          {noMaterials && !inspecting ? (
-            <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4 text-sm text-text-300">
-              <p>
-                {branchMaterials.first
-                  ? t('No materials at this point.')
-                  : t('No materials recorded in this branch.')}
-              </p>
-              {branchMaterials.first && onSeek ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const first = branchMaterials.first!
-                    onSeek(first.endMs)
-                    requestAnimationFrame(() => {
-                      const heading = stage.current?.querySelector<HTMLElement>(
-                        first.runs.length
-                          ? '[data-replay-notebook-heading]'
-                          : '[data-replay-files-heading]'
-                      )
-                      if (!first.runs.length) onOpenFiles?.()
-                      heading?.focus()
-                    })
-                  }}
-                >
-                  {t('Jump to first material')}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <div
-            ref={notebookViewport}
-            data-replay-notebook-scroll
-            hidden={fitContainer && (inspecting || noMaterials)}
-            className={fitContainer ? 'min-h-0 flex-1 overflow-auto' : 'contents'}
-          >
-            <div className={fitContainer ? undefined : 'space-y-5'}>
-              {fitContainer ? (
-                <div onClickCapture={rememberNotebookAnchor}>{notebookHistoryControl}</div>
-              ) : null}
-              {materialRuns.map((index, runOffset) => {
-                const detail = runDetails[index.runId]
-                const content =
-                  detail?.status === 'ready' ? (
-                    <ReplayNotebook
-                      interactive={fitContainer}
-                      key={index.runId}
-                      run={detail.run}
-                      index={notebookIndices.get(index.runId) ?? runOffset}
-                      showOutput={
-                        fitContainer
-                          ? !active?.runs.some((run) => run.runId === index.runId) ||
-                            scene.showResults
-                          : showOutput
-                      }
-                      unavailableImages={unavailableImages}
-                    />
-                  ) : (
-                    <p
-                      key={index.runId}
-                      aria-label={
-                        detail ? t('Recorded Notebook details are unavailable.') : undefined
-                      }
-                      className="rounded-lg bg-bg-200 p-5 text-sm text-text-300"
-                    >
-                      {detail
-                        ? detail.reason === 'not-recorded'
-                          ? t('This material was not saved in the source records.')
-                          : t('Could not read the recorded material.')
-                        : t('Preparing recorded material…')}
-                    </p>
-                  )
-                return fitContainer ? (
-                  <div key={index.runId} data-replay-run-item={index.runId}>
-                    {content}
-                  </div>
-                ) : (
-                  content
-                )
-              })}
-              {fitContainer && !materialRuns.length ? (
-                <p className="p-4 text-sm text-text-300">
-                  {replayDocument.issues.some((issue) => issue.code === 'notebook-unavailable')
-                    ? t('Recorded Notebook details are unavailable.')
-                    : branchMaterials.notebook
-                      ? t('No Notebook runs at this point.')
-                      : t('No Notebook runs recorded in this branch.')}
-                </p>
-              ) : null}
-            </div>
           </div>
+          {fitContainer && !inspecting
+            ? materialViews?.map((view) => (
+                <div
+                  key={view.id}
+                  className={
+                    materialViewId === view.id
+                      ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                      : 'hidden'
+                  }
+                  hidden={materialViewId !== view.id}
+                >
+                  {typeof view.content === 'function'
+                    ? view.content(
+                        materialsActive && showMaterialPane && materialViewId === view.id
+                      )
+                    : view.content}
+                </div>
+              ))
+            : null}
           {selectedResources.map((resource) => {
             const prepared = resources[resource.id]
             return (

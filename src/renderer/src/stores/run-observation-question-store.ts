@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import type { RunObservationSelection } from '../../../shared/run-observation'
-import type { RecordedRunObservationSelection } from '../../../shared/run-observation-recorded'
+import type {
+  RecordedRunObservationSelection,
+  RecordedObservationFileSelection
+} from '../../../shared/run-observation-recorded'
 import type { ResearchDemoQuestion } from '../../../shared/research-demo'
 
 export type ObservationQuestionDestination = {
@@ -8,7 +11,8 @@ export type ObservationQuestionDestination = {
   sessionId?: string
   draftKey: string
 }
-export type ObservationQuestionSelection = RunObservationSelection | RecordedRunObservationSelection
+export type ObservationQuestionSelection =
+  RunObservationSelection | RecordedRunObservationSelection | RecordedObservationFileSelection
 type PendingQuestion = {
   destination: ObservationQuestionDestination
   selection: ObservationQuestionSelection
@@ -53,7 +57,10 @@ export const useRunObservationQuestionStore = create<{
     question: ResearchDemoQuestion,
     expectedDestination: ObservationQuestionDestination
   ): boolean
-  askRecorded(selection: RecordedRunObservationSelection, demo?: PendingQuestion['demo']): boolean
+  askRecorded(
+    selection: RecordedRunObservationSelection | RecordedObservationFileSelection,
+    demo?: PendingQuestion['demo']
+  ): boolean
   recover(
     selection: ObservationQuestionSelection,
     destination: ObservationQuestionDestination,

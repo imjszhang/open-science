@@ -354,10 +354,15 @@ export const PreviewToolContent = ({
               <RunObservationPreview
                 key={item.id}
                 mode="recorded"
+                format={item.replayRecordingFormat}
                 target={item.replayRecordingTarget}
                 questionRecovery={questionRecovery}
                 title={item.title}
                 isActive={isActive}
+                onAskArchiveFile={(selection) => {
+                  if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                    throw new Error('Discussion unavailable')
+                }}
                 onAskArchiveSelection={(selection) => {
                   if (!useRunObservationQuestionStore.getState().askRecorded(selection))
                     throw new Error(
