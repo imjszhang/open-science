@@ -7204,6 +7204,9 @@
     "Evidence from the selected step": "所选步骤的证据",
     "This is a recorded image, not a live project page.": "这是已保存的图像，并非实时项目页面。",
     "Source step: {{step}}": "来源步骤：{{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最长执行时间：{{minutes}} 分钟。程序可能提前结束。"
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "演示最长执行时间：{{minutes}} 分钟。程序可能提前结束。",
+    "Recording attachments": "录制附件",
+    "These files belong to this recording and are not linked to an individual step.": "这些文件属于整份录制，未关联到具体步骤。",
+    "Back to recording": "返回录制"
   }
 }

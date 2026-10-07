@@ -516,3 +516,29 @@ ten-minute process execution limit. Its ordinary HTML result is derived from exp
 labelled as a result visualization, not a screen recording. Original source bytes, old packages and earlier
 research records remain intact. Installation and real client/browser acceptance are recorded after
 verification below.
+
+Real-client follow-up exposed two related file-access cases. A pointer press on a file must not
+insert the inspection banner before the click completes, because that moves the target row. File
+selection therefore freezes the observation and opens the exact Version in the same click.
+Outputs published after the last observed step remain recording-level attachments. The archive
+offers them separately; it does not invent a step association or add them to Ask-this-step evidence.
+
+### Native Tuanzi lifecycle acceptance
+
+The independent material/evidence root is `tuanzi-v056-replay-hold-20261007` beside the earlier
+Tuanzi research fixtures. The material package SHA-256 is
+`587f304a09bcc6da00f567d610902f23579f21c381caeddc3b149586f68b4d7f`.
+The full native fixture passed in 527 seconds: four actual offline actions, zero provider calls,
+an observed 479,996 ms viewing window, normal exit, environment release, and native export/import.
+All 15 outputs and the result package manifest passed hash verification. The archived context
+reports `until-stop-or-timeout`, a 600,000 ms execution bound, and `process-exited`.
+
+Test build `f2ad0d032209` also completed a separate real-client run. Native pointer activation and
+Codex keyboard activation opened the project details after the four actions had finished. A native
+capture was saved at `observation-1`. Stopping from Codex produced `cancelled`, an actual released
+environment, and archive context `endReason: stopped`. The engineering result remains completed;
+the enclosing run is not relabelled successful. The terminal Codex project tab displayed its logs
+and outputs, and the saved HTML and exact-step image remained readable. This cancelled run verified
+zero provider calls when its engineering evidence was saved; its final provider reread is explicitly
+unverified. The natural-completion fixture verified both checks. See `installed-ui/verification.json`
+and `evidence/native-final-audit.json` in the independent evidence root.

@@ -7532,6 +7532,9 @@
     "Evidence from the selected step": "Evidencia del paso seleccionado",
     "This is a recorded image, not a live project page.": "Esta es una imagen guardada, no una página del proyecto en tiempo real.",
     "Source step: {{step}}": "Paso de origen: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Tiempo máximo de ejecución de la demostración: {{minutes}} min. El programa puede finalizar antes."
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Tiempo máximo de ejecución de la demostración: {{minutes}} min. El programa puede finalizar antes.",
+    "Recording attachments": "Archivos adjuntos de la grabación",
+    "These files belong to this recording and are not linked to an individual step.": "Estos archivos pertenecen a esta grabación y no están vinculados a un paso individual.",
+    "Back to recording": "Volver a la grabación"
   }
 }

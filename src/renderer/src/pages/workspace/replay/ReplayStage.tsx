@@ -1011,7 +1011,13 @@ const ReplayStageContent = ({
         if (isLiveInteraction(event.target)) return
         releaseConversationAnchor()
         releaseNotebookAnchor()
-        if (!isLiveProjectViewportInteraction(event.target)) onInspect?.()
+        // A file's click already freezes and selects its exact Version atomically. Freezing
+        // on pointerdown adds the inspection banner and moves this row before pointerup,
+        // so an ordinary first click can miss the button entirely.
+        const selectingFile =
+          event.target instanceof Element &&
+          Boolean(event.target.closest('button[data-replay-material-item]'))
+        if (!selectingFile && !isLiveProjectViewportInteraction(event.target)) onInspect?.()
         if (filesOpen && !wide && !filesPane.current?.contains(event.target as Node))
           onCloseFiles?.()
       }}

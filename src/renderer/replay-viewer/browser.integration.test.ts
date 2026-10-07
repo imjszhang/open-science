@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdtemp, chmod, realpath, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,101 @@ import { ObservationViewers } from '../../main/run-observation/viewers'
 import { ReplayViewerHttpHost } from '../../main/replay-viewer/http-host'
 import { createReplayViewerAssetReader } from '../../main/replay-viewer/assets'
 import { createCallerContext } from '../../main/caller-context'
+import { validateRunObservationArchive } from '../../shared/run-observation-archive'
+
+it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1').each(['completed', 'cancelled'] as const)(
+  'opens a terminal result HTML on the first real pointer click: %s',
+  async (status) => {
+    const target = { projectId: 'files-project', sessionId: 'files-session', runId: 'files-run' }
+    const source: RunObservationSource = {
+      identity: target,
+      phase: status,
+      artifacts: Array.from({ length: 17 }, (_, index) => ({
+        artifactId: `artifact-${index}`,
+        versionId: `version-${index}`,
+        name: index === 8 ? 'project-result.html' : `result-${index}.json`,
+        mimeType: index === 8 ? 'text/html' : 'application/json',
+        producerRunId: target.runId
+      })),
+      run: {
+        runId: target.runId,
+        cellId: 'cell',
+        source: 'agent',
+        kernelKind: 'bash',
+        script: '',
+        status,
+        startedAt: Date.now() - 2000,
+        endedAt: Date.now() - 1000,
+        text: { stdout: 'Actual terminal output', stderr: '', traceback: '', plain: [] },
+        outputs: [],
+        workingFiles: []
+      }
+    }
+    const observer: RunObservationOwner = new RunObservationOwner({
+      authorize: (requested, viewer) => viewers.assertViewer(requested, viewer),
+      read: async () => source
+    })
+    const viewers: ObservationViewers = new ObservationViewers({
+      observer,
+      authorizeScope: async () => undefined,
+      onRevoked: (viewerId) => host.closeViewer(viewerId)
+    })
+    const host: ReplayViewerHttpHost = new ReplayViewerHttpHost({
+      viewers,
+      projectViews: {
+        open: async () => {
+          throw new Error('A terminal file does not reopen its project')
+        },
+        closeViewer: () => undefined
+      },
+      recordingStatus: async () => ({ target, state: 'not-recorded' }),
+      readAsset: createReplayViewerAssetReader(resolve('out/replay-viewer')),
+      readArtifact: async ({ artifact }) => ({
+        body: Buffer.from(
+          artifact.name === 'project-result.html'
+            ? '<!doctype html><h1>Exact terminal project result</h1>'
+            : '{}'
+        ),
+        mimeType: artifact.mimeType!
+      })
+    })
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const caller = createCallerContext({
+        clientId: 'terminal-files',
+        lifecycleClientId: 'terminal-files',
+        leaseId: 'terminal-files',
+        surface: 'task',
+        location: 'local',
+        principalKind: 'automation',
+        actionOrigin: 'automation'
+      })
+      const access = await host.open(target, caller)
+      const page = await browser.newPage({ viewport: { width: 1000, height: 900 } })
+      await page.goto(access.url)
+      await expect(page.getByText('Actual terminal output', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Project interface', exact: true }).click()
+      await expect(page.getByText('Run history', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'View files', exact: true }).click()
+      // Real pointerdown/up with a normal human click interval, without pre-entering inspection.
+      await page
+        .getByRole('button', { name: 'project-result.html', exact: true })
+        .click({ delay: 80 })
+      await expect(
+        page
+          .frameLocator('iframe[title="project-result.html"]')
+          .getByRole('heading', { name: 'Exact terminal project result' })
+      ).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Back to files', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Close files', exact: true })).not.toBeVisible()
+    } finally {
+      await browser.close()
+      await host.close()
+      await viewers.close()
+    }
+  },
+  30000
+)
 
 // Build with npm run build:replay-viewer, then run this opt-in real-browser acceptance:
 // RUN_REPLAY_VIEWER_BROWSER=1 npx vitest run src/renderer/replay-viewer/browser.integration.test.ts
@@ -411,8 +506,64 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
     const { recordedFixture } =
       await import('../../main/run-observation/recorded-viewer.test-support')
     const { payload: recordedPayload, bytes } = recordedFixture()
+    const resultBytes = Buffer.from(
+      '<h1>Recording-level project result</h1><script>throw Error("untrusted")</script>'
+    )
+    const resultChecksum = createHash('sha256').update(resultBytes).digest('hex')
+    const latest = recordedPayload.archive.records[0]
     const payload = {
       ...recordedPayload,
+      archive: validateRunObservationArchive({
+        ...recordedPayload.archive,
+        coverage: { ...recordedPayload.archive.coverage, firstObservedAt: 150 },
+        records: [
+          {
+            ...latest,
+            stepKey: 'earlier-observation',
+            observedAt: 150,
+            phase: 'running',
+            run: {
+              ...latest.run!,
+              status: 'running',
+              endedAt: undefined,
+              exitCode: undefined,
+              logs: {
+                ...latest.run!.logs,
+                stdout: { text: 'Earlier author output', truncated: false, redacted: false }
+              }
+            }
+          },
+          {
+            ...latest,
+            sourceEvidence: {
+              ...latest.sourceEvidence,
+              cursor: { ...latest.sourceEvidence.cursor, sequence: 1 }
+            }
+          }
+        ],
+        media: [
+          ...recordedPayload.archive.media,
+          {
+            mediaKey: 'unlinked-result',
+            name: 'project-result.html',
+            mimeType: 'text/html',
+            checksum: resultChecksum,
+            sizeBytes: resultBytes.length,
+            sourceVersionId: 'author-result-version',
+            stepKeys: []
+          }
+        ]
+      }),
+      media: [
+        ...recordedPayload.media,
+        {
+          mediaKey: 'unlinked-result',
+          artifactId: 'receiver-result',
+          versionId: 'receiver-result-version',
+          checksum: resultChecksum,
+          sizeBytes: resultBytes.length
+        }
+      ],
       executionContext: { purpose: 'offline-demo' as const, conditionChanges: [] }
     }
     const caller = createCallerContext({
@@ -454,8 +605,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       readAsset: createReplayViewerAssetReader(resolve('out/replay-viewer')),
       readRecordingMedia: async (target, key) => {
         expect(target).toEqual(payload.receiving)
-        expect(key).toBe('export-a')
-        return { body: bytes, mimeType: 'text/html' }
+        expect(['export-a', 'unlinked-result']).toContain(key)
+        return { body: key === 'export-a' ? bytes : resultBytes, mimeType: 'text/html' }
       }
     })
     const browser = await chromium.launch({ headless: true })
@@ -496,6 +647,48 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
           .getByRole('heading', { name: 'Recorded project export' })
       ).toBeVisible()
       expect(await page.locator('iframe[title="project.html"]').getAttribute('sandbox')).toBe('')
+      await page.getByRole('button', { name: 'Back to files', exact: true }).click()
+      await page.getByRole('button', { name: 'Close files', exact: true }).click()
+      await page.getByRole('button', { name: 'Previous step', exact: true }).click()
+      await expect(page.getByText('Earlier author output', { exact: true })).toBeVisible()
+      const earlierCursor = await page
+        .getByTestId('replay-live-record')
+        .getAttribute('data-observation-record')
+      // A recording-level result must not be inserted into an earlier step's evidence.
+      await page.getByRole('button', { name: 'View files', exact: true }).click()
+      await expect(
+        page.getByRole('button', { name: 'project-result.html', exact: true })
+      ).not.toBeVisible()
+      await page.getByRole('button', { name: 'Close files', exact: true }).click()
+      await page.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+      await expect
+        .poll(async () => JSON.parse(await reference.inputValue()).stepKey)
+        .toBe('earlier-observation')
+      await page.getByText('Recording attachments', { exact: true }).click()
+      await page
+        .getByRole('button', { name: 'project-result.html', exact: true })
+        .click({ delay: 80 })
+      await expect(
+        page
+          .frameLocator('iframe[title="project-result.html"]')
+          .getByRole('heading', { name: 'Recording-level project result' })
+      ).toBeVisible()
+      expect(
+        await page.locator('iframe[title="project-result.html"]').getAttribute('sandbox')
+      ).toBe('')
+      await page.getByRole('button', { name: 'Back to recording', exact: true }).click()
+      await expect(page.getByText('Earlier author output', { exact: true })).toBeVisible()
+      await expect(page.getByTestId('replay-live-record')).toHaveAttribute(
+        'data-observation-record',
+        earlierCursor!
+      )
+      await page.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+      await expect
+        .poll(async () => JSON.parse(await reference.inputValue()).stepKey)
+        .toBe('earlier-observation')
+      expect((await viewers.recordingSelection(access.viewerId, { caller }))?.stepKey).toBe(
+        'earlier-observation'
+      )
       const evidence = '/tmp/replay-viewer-production-browser-acceptance'
       await mkdir(evidence, { recursive: true })
       await page.screenshot({ path: join(evidence, 'recorded-viewer.png') })

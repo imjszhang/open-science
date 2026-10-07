@@ -7202,6 +7202,9 @@
     "Evidence from the selected step": "선택한 단계의 증거",
     "This is a recorded image, not a live project page.": "실시간 프로젝트 페이지가 아닌 저장된 이미지입니다.",
     "Source step: {{step}}": "출처 단계: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "데모 최대 실행 시간: {{minutes}}분. 프로그램이 더 일찍 종료될 수 있습니다."
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "데모 최대 실행 시간: {{minutes}}분. 프로그램이 더 일찍 종료될 수 있습니다.",
+    "Recording attachments": "기록 첨부 파일",
+    "These files belong to this recording and are not linked to an individual step.": "이 파일은 전체 기록에 속하며 개별 단계에 연결되어 있지 않습니다.",
+    "Back to recording": "기록으로 돌아가기"
   }
 }

@@ -7671,6 +7671,9 @@
     "Evidence from the selected step": "Свидетельства выбранного шага",
     "This is a recorded image, not a live project page.": "Это сохранённое изображение, а не страница проекта в реальном времени.",
     "Source step: {{step}}": "Исходный шаг: {{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Максимальное время выполнения демонстрации: {{minutes}} мин. Программа может завершиться раньше."
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "Максимальное время выполнения демонстрации: {{minutes}} мин. Программа может завершиться раньше.",
+    "Recording attachments": "Вложения записи",
+    "These files belong to this recording and are not linked to an individual step.": "Эти файлы относятся ко всей записи и не связаны с отдельным шагом.",
+    "Back to recording": "Вернуться к записи"
   }
 }

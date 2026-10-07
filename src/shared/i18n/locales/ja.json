@@ -7204,6 +7204,9 @@
     "Evidence from the selected step": "選択したステップの証拠",
     "This is a recorded image, not a live project page.": "これは保存された画像であり、ライブのプロジェクトページではありません。",
     "Source step: {{step}}": "記録元のステップ：{{step}}",
-    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "デモの最長実行時間：{{minutes}} 分。プログラムはそれより前に終了する場合があります。"
+    "Maximum demo execution time: {{minutes}} min. The program may finish earlier.": "デモの最長実行時間：{{minutes}} 分。プログラムはそれより前に終了する場合があります。",
+    "Recording attachments": "記録の添付ファイル",
+    "These files belong to this recording and are not linked to an individual step.": "これらのファイルは記録全体に属し、個別のステップには関連付けられていません。",
+    "Back to recording": "記録に戻る"
   }
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   validateRunObservationArchive,
@@ -59,6 +59,57 @@ const fixture = (): RunObservationArchive =>
     })),
     media: []
   })
+const attachmentFixture = (): {
+  archive: RunObservationArchive
+  media: recordedProjection.ResolvedObservationMedia[]
+} => {
+  const archive = fixture()
+  archive.media = [
+    {
+      mediaKey: 'result',
+      name: 'result.json',
+      mimeType: 'application/json',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 16,
+      stepKeys: []
+    },
+    {
+      mediaKey: 'step-result',
+      name: 'step-result.json',
+      mimeType: 'application/json',
+      checksum: 'c'.repeat(64),
+      sizeBytes: 16,
+      stepKeys: ['step-1']
+    },
+    {
+      mediaKey: 'unlinked-capture',
+      name: 'capture.png',
+      mimeType: 'image/png',
+      checksum: 'd'.repeat(64),
+      sizeBytes: 16,
+      stepKeys: [],
+      capture: {
+        source: 'host-view',
+        association: 'current-observation',
+        startedAt: 210,
+        finishedAt: 220,
+        observedAt: 200,
+        width: 1,
+        height: 1
+      }
+    }
+  ]
+  return {
+    archive: validateRunObservationArchive(archive),
+    media: archive.media.map((entry) => ({
+      mediaKey: entry.mediaKey,
+      artifactId: `receiver-${entry.mediaKey}`,
+      versionId: `receiver-${entry.mediaKey}-v1`,
+      checksum: entry.checksum,
+      sizeBytes: entry.sizeBytes
+    }))
+  }
+}
 beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
@@ -88,6 +139,110 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('recorded Run observation preview', () => {
+  it('opens recording attachments through the authorized renderer and preserves the selected step and Ask evidence', () => {
+    const { archive, media } = attachmentFixture()
+    const original = JSON.stringify(archive)
+    const ask = vi.fn(),
+      read = vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' }),
+      renderResource = vi.fn(() => <div data-testid="attachment-preview">Preview bytes</div>)
+    render(
+      <RecordedRunObservationPreview
+        archive={archive}
+        receiving={receiving}
+        media={media}
+        title="Recorded experiment"
+        readResource={read}
+        renderResource={renderResource}
+        onAskArchiveSelection={ask}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Previous step' }))
+    const replay = screen.getByTestId('live-replay-view')
+    const attachments = screen.getByText('Recording attachments').closest('details')!
+    fireEvent.click(within(attachments).getByText('Recording attachments'))
+    expect(within(attachments).queryByRole('button', { name: 'step-result.json' })).toBeNull()
+    expect(within(attachments).queryByRole('button', { name: 'capture.png' })).toBeNull()
+    expect(renderResource).not.toHaveBeenCalled()
+    const open = within(attachments).getByRole('button', { name: 'result.json' })
+    fireEvent.click(open)
+    expect(screen.getByRole('region', { name: 'Recording attachments' })).toBeTruthy()
+    expect(screen.getByTestId('attachment-preview')).toBeTruthy()
+    expect(screen.getByTestId('live-replay-view')).toBe(replay)
+    expect(screen.queryByRole('button', { name: 'Ask about this step' })).toBeNull()
+    expect(renderResource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: receiving.projectId,
+        sessionId: receiving.sessionId,
+        artifactId: 'receiver-result',
+        versionId: 'receiver-result-v1',
+        checksum: 'b'.repeat(64),
+        availability: 'recorded'
+      }),
+      expect.any(Function)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Back to recording' }))
+    expect(screen.queryByTestId('attachment-preview')).toBeNull()
+    expect(screen.getByTestId('live-replay-view')).toBe(replay)
+    expect(screen.getByText('first archived output')).toBeTruthy()
+    expect(document.activeElement).toBe(open)
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this step' }))
+    expect(ask.mock.calls[0][0]).toMatchObject({
+      stepKey: 'step-0',
+      mediaKeys: [],
+      record: { artifactEvidence: [] }
+    })
+    expect(JSON.stringify(ask.mock.calls[0][0])).not.toContain('result.json')
+    expect(JSON.stringify(archive)).toBe(original)
+    expect(read).not.toHaveBeenCalledWith(
+      expect.objectContaining({ versionId: 'receiver-result-v1' })
+    )
+  })
+  it('does not offer or read attachments without a receiving media authorization', () => {
+    const { archive } = attachmentFixture()
+    const read = vi.fn(),
+      renderResource = vi.fn()
+    render(
+      <RecordedRunObservationPreview
+        archive={archive}
+        receiving={receiving}
+        media={[]}
+        title="Recorded experiment"
+        readResource={read}
+        renderResource={renderResource}
+        onAskArchiveSelection={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('Recording attachments')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'result.json' })).toBeNull()
+    expect(renderResource).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+  it('closes an attachment if its receiving authorization disappears', () => {
+    const { archive, media } = attachmentFixture()
+    const renderResource = vi.fn(() => <div data-testid="attachment-preview">Preview bytes</div>)
+    const props = {
+      archive,
+      receiving,
+      media,
+      title: 'Recorded experiment',
+      readResource: vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' }),
+      renderResource,
+      onAskArchiveSelection: vi.fn()
+    }
+    const view = render(<RecordedRunObservationPreview {...props} />)
+    fireEvent.click(screen.getByText('Recording attachments'))
+    fireEvent.click(screen.getByRole('button', { name: 'result.json' }))
+    expect(screen.getByTestId('attachment-preview')).toBeTruthy()
+    renderResource.mockClear()
+    view.rerender(<RecordedRunObservationPreview {...props} media={[]} />)
+    expect(screen.queryByTestId('attachment-preview')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Recording attachments' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Ask about this step' })).toBeTruthy()
+    expect(renderResource).not.toHaveBeenCalled()
+    expect(props.readResource).not.toHaveBeenCalledWith(
+      expect.objectContaining({ versionId: 'receiver-result-v1' })
+    )
+  })
   it('shows the saved Run outcome without presenting archive publication as ongoing work', () => {
     const archive = fixture()
     archive.records[1].phase = 'collecting'
