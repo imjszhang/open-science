@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
@@ -12,7 +20,7 @@ import {
 } from '../../../../../shared/run-observation-recorded'
 import type { ProjectRecording } from '../../../../../shared/project-recording'
 import type { RecordingCandidate } from './recording-discovery'
-import type { RecordingDiscovery } from './use-recording-discovery'
+import { useRecordingDiscovery, type RecordingDiscovery } from './use-recording-discovery'
 import { useRecordedMaterials } from './use-recorded-materials'
 
 const recovery = vi.hoisted(() => ({ onClick: vi.fn() }))
@@ -191,10 +199,13 @@ const api = {
   researchDemos: { ...runtime, readHistory: vi.fn() },
   observations: {
     ...runtime,
+    openRecorded: vi.fn(),
+    revoke: vi.fn(),
     readRecorded: vi.fn(),
     readProjectRecording: vi.fn(),
     selectRecordedFile: vi.fn()
   },
+  projectRecordings: { selection: vi.fn() },
   artifacts: { readPreview: vi.fn() },
   notebook: { ...runtime }
 }
@@ -233,6 +244,16 @@ const expectNoExecution = (): void => {
 beforeEach(() => {
   vi.clearAllMocks()
   api.researchDemos.readHistory.mockResolvedValue({ receipts: [] })
+  api.observations.revoke.mockResolvedValue(undefined)
+  api.observations.openRecorded.mockImplementation(async ({ target, format }) => ({
+    mode: 'recorded',
+    format,
+    viewerId: 'recorded',
+    target,
+    expiresAt: 999999,
+    url: `http://viewer-recorded.localhost:56789/__open_science_viewer?grant=${'a'.repeat(64)}`
+  }))
+  api.projectRecordings.selection.mockResolvedValue(null)
   api.observations.readRecorded.mockResolvedValue(legacyPayload())
   api.observations.readProjectRecording.mockImplementation(async () => projectPayload())
   api.observations.selectRecordedFile.mockImplementation(async () =>
@@ -462,4 +483,78 @@ describe('useRecordedMaterials read-only ownership', () => {
     expect(screen.getByText('Could not read the recorded material.')).toBeTruthy()
     expectNoExecution()
   })
+})
+
+it('replaces discovered web checkpoints across pages without retaining duplicate catalog entries', async () => {
+  const recordingId = 'fc7a7883-8c41-4c55-8b32-3a15ef8a7021'
+  const document = documentFixture()
+  document.resources = Array.from({ length: 34 }, (_, n) => ({
+    id: `v-${n}`,
+    ...receiving,
+    artifactId: `a-${n}`,
+    versionId: `v-${n}`,
+    name:
+      n === 0
+        ? `web-recording-${recordingId}-checkpoint-1.json`
+        : n === 33
+          ? `web-recording-${recordingId}.json`
+          : `ordinary-${n}.json`,
+    availability: 'recorded',
+    mimeType: 'application/json'
+  }))
+  api.artifacts.readPreview.mockImplementation(async ({ versionId }) => ({
+    encoding: 'utf8',
+    truncated: false,
+    content: JSON.stringify(
+      versionId === 'v-0' || versionId === 'v-33'
+        ? { format: 'open-science-web-recording', version: 1, recordingId }
+        : { ordinary: true }
+    )
+  }))
+  const { result } = renderHook(() => useRecordingDiscovery(document))
+  await waitFor(() =>
+    expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-0'])
+  )
+  expect(result.current.unchecked).toBe(2)
+  act(() => result.current.loadMore())
+  await waitFor(() =>
+    expect(result.current.recordings.map((item) => item.target.versionId)).toEqual(['v-33'])
+  )
+  expect(result.current.unchecked).toBe(0)
+  expect(api.observations.openRecorded).not.toHaveBeenCalled()
+})
+
+it('keeps an explicitly opened checkpoint on its exact receiving version when discovery finds the final index', async () => {
+  const document = documentFixture()
+  const checkpoint: RecordingCandidate = { ...candidate(), format: 'web-recording' }
+  checkpoint.resource.name = 'web-recording-checkpoint.json'
+  const final: RecordingCandidate = {
+    ...candidate({ ...receiving, artifactId: 'final-artifact', versionId: 'final-version' }),
+    format: 'web-recording'
+  }
+  final.resource.name = 'web-recording-final.json'
+  const view = render(<Harness document={document} discovery={discovery([checkpoint])} />)
+  select(checkpoint.target)
+  await waitFor(() => expect(api.observations.openRecorded).toHaveBeenCalledTimes(1))
+  expect(api.observations.openRecorded.mock.calls[0][0]).toMatchObject({
+    target: checkpoint.target,
+    format: 'web-recording'
+  })
+  view.rerender(<Harness document={document} discovery={discovery([final])} />)
+  expect(
+    (screen.getByRole('combobox', { name: 'Project recording' }) as HTMLSelectElement).value
+  ).toBe(JSON.stringify(checkpoint.target))
+  expect(
+    (screen.getByRole('option', { name: checkpoint.resource.name }) as HTMLOptionElement).disabled
+  ).toBe(true)
+  expect(screen.getByTitle(checkpoint.resource.name)).toBeTruthy()
+  expect(api.observations.openRecorded).toHaveBeenCalledTimes(1)
+  select(final.target)
+  await waitFor(() => expect(api.observations.openRecorded).toHaveBeenCalledTimes(2))
+  expect(api.observations.openRecorded.mock.calls[1][0]).toMatchObject({
+    target: final.target,
+    format: 'web-recording'
+  })
+  expect(screen.queryByRole('option', { name: checkpoint.resource.name })).toBeNull()
+  expectNoExecution()
 })

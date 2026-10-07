@@ -21,6 +21,8 @@ export type RecordingCandidate = {
   resource: ReplayResource
   target: RecordedObservationTarget
   format?: 'project-recording' | 'web-recording'
+  /** Presentation grouping only; opening still uses the exact receiving Artifact Version. */
+  browserIndex?: { recordingId: string; checkpoint: number | null }
 }
 export type RecordingDiscoveryPage = {
   recordings: RecordingCandidate[]
@@ -82,6 +84,79 @@ export const recordingCandidates = (
   return [...candidates.values()].filter(({ target }) => !conflicting.has(target.versionId))
 }
 
+const publisherBrowserIndex = (
+  candidate: RecordingCandidate,
+  content: string,
+  complete: boolean
+): RecordingCandidate['browserIndex'] => {
+  // Only our owner's UUID-based names participate. Arbitrary renamed/imported material remains
+  // independently discoverable. This bounded header inspection confers no reader authority.
+  const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+  let recordingId: unknown
+  if (complete) {
+    try {
+      const value = JSON.parse(content)
+      if (value?.format !== 'open-science-web-recording' || value.version !== 1) return undefined
+      recordingId = value.recordingId
+    } catch {
+      return undefined
+    }
+  } else {
+    recordingId = new RegExp(
+      `^\\s*\\{\\s*"format"\\s*:\\s*"open-science-web-recording"\\s*,\\s*"version"\\s*:\\s*1\\s*,\\s*"recordingId"\\s*:\\s*"(${uuid})"\\s*[,}]`
+    ).exec(content.slice(0, RECORDING_DISCOVERY_PREVIEW_BYTES))?.[1]
+  }
+  if (typeof recordingId !== 'string' || !new RegExp(`^${uuid}$`).test(recordingId))
+    return undefined
+  if (candidate.resource.name === `web-recording-${recordingId}.json`)
+    return { recordingId, checkpoint: null }
+  const match = new RegExp(`^web-recording-${recordingId}-checkpoint-([1-9][0-9]*)\\.json$`).exec(
+    candidate.resource.name
+  )
+  const checkpoint = match && Number(match[1])
+  return checkpoint && Number.isSafeInteger(checkpoint) ? { recordingId, checkpoint } : undefined
+}
+
+/** Stable presentation catalog merge, including when a final index arrives on a later page. */
+export const mergeRecordingCandidates = (
+  ...pages: readonly (readonly RecordingCandidate[])[]
+): RecordingCandidate[] => {
+  const result: RecordingCandidate[] = []
+  const groups = new Map<string, number>()
+  const versions = new Set<string>()
+  for (const candidate of pages.flat()) {
+    const exact = JSON.stringify(candidate.target)
+    if (versions.has(exact)) continue
+    versions.add(exact)
+    const index = candidate.format === 'web-recording' ? candidate.browserIndex : undefined
+    if (!index) {
+      result.push(candidate)
+      continue
+    }
+    const key = JSON.stringify([
+      candidate.target.projectId,
+      candidate.target.sessionId,
+      index.recordingId
+    ])
+    const position = groups.get(key)
+    if (position === undefined) {
+      groups.set(key, result.length)
+      result.push(candidate)
+      continue
+    }
+    const previous = result[position]
+    const score = index.checkpoint ?? Infinity
+    const priorScore = previous.browserIndex!.checkpoint ?? Infinity
+    if (
+      score > priorScore ||
+      (score === priorScore &&
+        (candidate.resource.versionNumber ?? 0) > (previous.resource.versionNumber ?? 0))
+    )
+      result[position] = candidate
+  }
+  return result
+}
+
 const checkAbort = (signal?: AbortSignal): void => {
   if (signal?.aborted) throw new DOMException('Recording discovery cancelled', 'AbortError')
 }
@@ -134,7 +209,11 @@ export const discoverRecordingPage = async (
           preview.encoding === 'utf8' &&
           isBrowserRecordingContent(preview.content, !preview.truncated)
         )
-          found.set(index, { ...candidate, format: 'web-recording' })
+          found.set(index, {
+            ...candidate,
+            format: 'web-recording',
+            browserIndex: publisherBrowserIndex(candidate, preview.content, !preview.truncated)
+          })
       } catch {
         checkAbort(signal)
         unavailable += 1
@@ -144,9 +223,9 @@ export const discoverRecordingPage = async (
   await Promise.all(Array.from({ length: Math.min(2, page.length) }, worker))
   const nextOffset = start + page.length
   return {
-    recordings: [...found.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([, value]) => value),
+    recordings: mergeRecordingCandidates(
+      [...found.entries()].sort(([left], [right]) => left - right).map(([, value]) => value)
+    ),
     nextOffset,
     unchecked: candidates.length - nextOffset,
     unavailable

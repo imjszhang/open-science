@@ -58,6 +58,13 @@ afterward. `onEnded` informs the owner of source loss. Repeated capture/encoder 
 the recording; optional capture failure does not cancel the experiment. Stop is idempotent and
 drains admitted work before destroying the encoder. The source page itself remains untouched.
 
+Same-document SPA transitions such as `history.pushState`, `replaceState` and hash navigation
+can continue when the bound frame, origin and geometry remain unchanged. Electron navigation
+events distinguish these from a real document navigation; even a same-URL reload ends recording.
+Both navigation start and commit are fenced, including navigation already in progress at startup.
+A project transition adds a bounded `host-observed` navigation marker without persisting its URL,
+query parameters or history state. URL strings are not part of the crop geometry comparison.
+
 ## Events and privacy limits
 
 Fixed passive listeners run only inside the exact bound project frame. They collect trusted

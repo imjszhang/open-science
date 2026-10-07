@@ -3,6 +3,7 @@ import type { ReplayDocument } from '../../../../../shared/replay'
 import {
   discoverRecordingPage,
   recordingCandidates,
+  mergeRecordingCandidates,
   type RecordingCandidate
 } from './recording-discovery'
 
@@ -50,7 +51,7 @@ export const useRecordingDiscovery = (document: ReplayDocument | undefined): Rec
         if (controller.signal.aborted || generation !== scope.current) return
         setState((previous) => ({
           ...page,
-          recordings: [...(reset ? [] : previous.recordings), ...page.recordings],
+          recordings: mergeRecordingCandidates(reset ? [] : previous.recordings, page.recordings),
           unavailable: (reset ? 0 : previous.unavailable) + page.unavailable,
           loading: false,
           supported: true

@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import type { BrowserWindow, NativeImage, WebContents, WebFrameMain } from 'electron'
+import type {
+  BrowserWindow,
+  NativeImage,
+  WebContents,
+  WebContentsDidStartNavigationEventParams,
+  WebFrameMain
+} from 'electron'
 import type { CallerContext } from '../caller-context'
 import {
   projectSurfaceMeasurementSchema,
@@ -11,8 +17,8 @@ import { recordingDeadline } from './driver-deadline'
 
 export type BrowserSurfaceEvent = Readonly<{
   offsetMs: number
-  kind: 'click' | 'scroll'
-  source: 'browser-observed'
+  kind: 'click' | 'scroll' | 'navigation'
+  source: 'browser-observed' | 'host-observed'
   x?: number
   y?: number
 }>
@@ -45,7 +51,20 @@ export type ElectronSurfaceRecordingHandle = Readonly<{
 // One subscription per existing compositor. Never displace another recording subscription.
 const subscriptions = new Set<number>()
 const identity = (frame: WebFrameMain): string =>
-  JSON.stringify([frame.processId, frame.frameToken, frame.url, frame.origin])
+  JSON.stringify([frame.processId, frame.frameToken, frame.origin])
+type SurfaceMeasurement = ReturnType<typeof projectSurfaceMeasurementSchema.parse>
+const geometryKey = (measurements: {
+  outer: SurfaceMeasurement
+  inner: SurfaceMeasurement
+}): string =>
+  JSON.stringify(
+    [measurements.outer, measurements.inner].map((measurement) => ({
+      devicePixelRatio: measurement.devicePixelRatio,
+      viewportWidth: measurement.viewportWidth,
+      viewportHeight: measurement.viewportHeight,
+      rect: measurement.rect
+    }))
+  )
 const origin = (value: string): string => {
   const parsed = new URL(value)
   if (
@@ -118,6 +137,34 @@ export async function startElectronSurfaceRecording(
   const project = child(viewer, origin(options.projectOrigin))
   const frames = [root, viewer, project]
   const identities = frames.map(identity)
+  const navigationIds = frames.map((frame) => [frame.processId, frame.routingId])
+  // A same-origin RenderFrame can survive a real document navigation. Browser navigation
+  // events, not just frame tokens or a renderer-controlled URL, fence that document boundary.
+  let documentChanged = false,
+    pendingNavigations = 0
+  const onNavigation = (details: WebContentsDidStartNavigationEventParams): void => {
+    const frame = details.frame
+    if (frame && !frames.includes(frame)) return
+    if (!details.isSameDocument || !frame) documentChanged = true
+    else if (frame === project) pendingNavigations = Math.min(100, pendingNavigations + 1)
+  }
+  const onDocumentNavigation = (
+    _event: unknown,
+    _url: string,
+    _responseCode: number,
+    _statusText: string,
+    isMainFrame: boolean,
+    processId: number,
+    routingId: number
+  ): void => {
+    // Also fence a navigation which had already started when recording was requested.
+    if (isMainFrame || navigationIds.some(([p, r]) => p === processId && r === routingId))
+      documentChanged = true
+  }
+  const detachNavigation = (): void => {
+    contents.off('did-start-navigation', onNavigation)
+    contents.off('did-frame-navigate', onDocumentNavigation)
+  }
   const zoom = contents.getZoomFactor()
   const frameRate = options.frameRate ?? 10
   const segmentDurationMs = options.segmentDurationMs ?? 3000
@@ -134,6 +181,7 @@ export async function startElectronSurfaceRecording(
     signal.throwIfAborted()
     if (
       !caller.isAuthorizationCurrent() ||
+      documentChanged ||
       contents.isDestroyed() ||
       window.isDestroyed() ||
       webContents.fromId(contents.id) !== contents ||
@@ -185,8 +233,13 @@ export async function startElectronSurfaceRecording(
       throw new Error('surface-changed')
     return { outer, inner }
   }
-  const initial = await measure()
-  const initialKey = JSON.stringify(initial)
+  contents.on('did-start-navigation', onNavigation)
+  contents.on('did-frame-navigate', onDocumentNavigation)
+  const initial = await measure().catch((error: unknown) => {
+    detachNavigation()
+    throw error
+  })
+  const initialKey = geometryKey(initial)
   const ratio = Math.min(
     1,
     1280 / (initial.inner.rect.width * initial.outer.devicePixelRatio),
@@ -200,10 +253,14 @@ export async function startElectronSurfaceRecording(
     2,
     Math.floor((initial.inner.rect.height * initial.outer.devicePixelRatio * ratio) / 2) * 2
   )
-  if (subscriptions.has(contents.id)) throw new Error('Browser recording surface is busy.')
+  if (subscriptions.has(contents.id)) {
+    detachNavigation()
+    throw new Error('Browser recording surface is busy.')
+  }
   subscriptions.add(contents.id)
   const encoder = await createWebmEncoder({ width, height, frameRate }).catch((error: unknown) => {
     subscriptions.delete(contents.id)
+    detachNavigation()
     throw error
   })
   const eventKey = `__openScienceRecording${randomBytes(12).toString('hex')}`
@@ -265,7 +322,7 @@ export async function startElectronSurfaceRecording(
     lastAttempt = stamp
     try {
       assertSurface()
-      if (JSON.stringify(await measure()) !== initialKey) throw Error('layout-changed')
+      if (geometryKey(await measure()) !== initialKey) throw Error('layout-changed')
       const size = image.getSize(),
         dpr = initial.outer.devicePixelRatio
       if (
@@ -318,7 +375,7 @@ export async function startElectronSurfaceRecording(
           height: (m.height / initial.inner.rect.height) * height
         })
       }
-      if (JSON.stringify(await measure()) !== initialKey) throw Error('layout-changed')
+      if (geometryKey(await measure()) !== initialKey) throw Error('layout-changed')
       assertSurface()
       if (stopped || paused) return
       if (gap) await finishSegment(gap.startMs)
@@ -332,6 +389,9 @@ export async function startElectronSurfaceRecording(
       encodedFrames++
       consecutiveFailures = 0
       lastFrame = stamp
+      for (let remaining = pendingNavigations; remaining > 0; remaining--)
+        options.onEvent({ kind: 'navigation', source: 'host-observed', offsetMs: stamp })
+      pendingNavigations = 0
       for (const entry of record.events) {
         const e = entry as { kind?: unknown; x?: unknown; y?: unknown }
         if (e && (e.kind === 'click' || e.kind === 'scroll') && safeNumber(e.x) && safeNumber(e.y))
@@ -429,6 +489,7 @@ export async function startElectronSurfaceRecording(
       if (heartbeat) clearInterval(heartbeat)
       signal.removeEventListener('abort', abort)
       disarm()
+      detachNavigation()
       subscriptions.delete(contents.id)
       await pending
       try {
@@ -500,7 +561,7 @@ export async function startElectronSurfaceRecording(
     async resume() {
       if (stopped) throw Error('Browser recording stopped.')
       assertSurface()
-      if (JSON.stringify(await measure()) !== initialKey)
+      if (geometryKey(await measure()) !== initialKey)
         throw Error('Browser recording layout changed.')
       paused = false
       scheduleCapture()

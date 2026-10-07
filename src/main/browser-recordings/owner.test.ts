@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi, type Mock } from 'vitest'
@@ -10,8 +10,21 @@ import {
   type BrowserRecordingStatus
 } from './owner'
 import { createElectronCallerContext } from '../caller-context'
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../run-observation/auxiliary-output'
+import {
+  saveAuxiliaryOutput,
+  type AuxiliaryOutput,
+  type AuxiliaryOutputResult
+} from '../run-observation/auxiliary-output'
+import { createProvenanceTestFixture } from '../artifacts/provenance-test-fixtures'
+import { createManagedExecutionOutputWriter } from '../notebook/managed-execution-output'
+import { SessionRepository } from '../session-persistence/repository'
+import { initDataRoot } from '../storage-root'
 import { parseBrowserRecording } from '../../shared/browser-recording'
+
+vi.mock('electron', () => ({
+  app: { getPath: () => '/home/user', isPackaged: true },
+  safeStorage: { isEncryptionAvailable: () => false }
+}))
 
 const target = {
   projectId: 'project',
@@ -24,7 +37,14 @@ const host = {
   viewerOrigin: 'http://viewer-test.localhost:1234',
   projectOrigin: 'http://rv-test.localhost:1234'
 }
-function fixture(options: { maxBytes?: number; failIndex?: boolean; dataRoot?: string } = {}): {
+function fixture(
+  options: {
+    maxBytes?: number
+    failIndex?: boolean
+    dataRoot?: string
+    save?: (output: AuxiliaryOutput) => Promise<AuxiliaryOutputResult>
+  } = {}
+): {
   owner: BrowserRecordingOwner
   registration: ReturnType<BrowserRecordingOwner['register']>
   saved: AuxiliaryOutput[]
@@ -43,11 +63,16 @@ function fixture(options: { maxBytes?: number; failIndex?: boolean; dataRoot?: s
   const save = vi.fn(async (output: AuxiliaryOutput): Promise<AuxiliaryOutputResult> => {
     if (options.failIndex && output.filename.endsWith('.json'))
       return { status: 'failed', code: 'artifact-save-failed' }
+    if (options.save) {
+      const result = await options.save(output)
+      if (result.status === 'saved') saved.push(output)
+      return result
+    }
     saved.push(output)
     return {
       status: 'saved',
       artifact: {
-        artifactId: output.filename.endsWith('.json') ? 'index' : `media-${saved.length}`,
+        artifactId: `artifact-${saved.length}`,
         versionId: `version-${saved.length}`
       }
     } as AuxiliaryOutputResult
@@ -103,6 +128,107 @@ function fixture(options: { maxBytes?: number; failIndex?: boolean; dataRoot?: s
 }
 
 describe('browser recording evidence owner', () => {
+  it('publishes multiple checkpoints and one final index through the real managed writer', async () => {
+    const real = await createProvenanceTestFixture()
+    initDataRoot(real.storageRoot)
+    await real.client.project.create({ data: { id: target.projectId, name: 'Browser evidence' } })
+    await new SessionRepository(real.storageRoot).saveSession({
+      id: target.sessionId,
+      projectId: target.projectId,
+      title: 'Browser evidence',
+      cwd: '',
+      status: 'idle',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1
+    })
+    const writer = createManagedExecutionOutputWriter(
+      {
+        dataRoot: real.storageRoot,
+        artifacts: real.repository,
+        notebooks: real.notebookRepository
+      },
+      {
+        projectId: target.projectId,
+        sessionId: target.sessionId,
+        operationId: target.operationId,
+        workspaceCwd: '',
+        artifactRunId: 'ordinary-turn-artifacts',
+        artifactStorageSessionId: target.sessionId,
+        writeNamespace: 'recording-test',
+        messageAncestry: ['prompt-1'],
+        provenanceContext: {
+          rootFrameId: 'root-1',
+          agentFrameId: 'root-1',
+          messageBranchId: 'branch-1',
+          runtimeSegmentId: 'segment-1',
+          promptMessageId: 'prompt-1'
+        }
+      },
+      new AbortController().signal
+    )
+    const f = fixture({
+      dataRoot: real.storageRoot,
+      save: (output) => saveAuxiliaryOutput(output, writer.saveOutput)
+    })
+    try {
+      const recording = await f.start()
+      await f.segment(0, 1000)
+      const checkpointTarget = f.owner.status('viewer').target!
+      await f.segment(1000, 2000)
+      expect(f.owner.status('viewer')).toMatchObject({ state: 'recording', segments: 2 })
+      await f.registration.close('finished')
+      await f.registration.close('finished')
+      const completed = f.owner.status('viewer')
+      expect(completed).toMatchObject({ state: 'finalized', segments: 2 })
+      expect(completed.error).toBeUndefined()
+      expect(completed.target!.artifactId).not.toBe(checkpointTarget.artifactId)
+      const indexes = f.saved.filter((output) => output.filename.endsWith('.json'))
+      expect(indexes.map((output) => output.filename)).toEqual([
+        `web-recording-${recording.recordingId}-checkpoint-1.json`,
+        `web-recording-${recording.recordingId}-checkpoint-2.json`,
+        `web-recording-${recording.recordingId}.json`
+      ])
+      const versions = await real.client.artifactVersion.findMany()
+      expect(versions).toHaveLength(5)
+      expect(
+        versions.every((version) => !version.producerRunId && !version.notebookSessionId)
+      ).toBe(true)
+      expect(
+        await real.notebookRepository.readSessionDocuments(target.projectId, target.sessionId)
+      ).toEqual([])
+      const finalVersion = versions.find((version) => version.id === completed.target!.versionId)!
+      const final = parseBrowserRecording(
+        await readFile(join(real.storageRoot, finalVersion.contentStorageKey), 'utf8')
+      )
+      expect(final.segments).toHaveLength(2)
+      expect(final.coverage.stopReason).toBe('finished')
+      for (const media of final.media) {
+        const version = versions.find((entry) => entry.id === media.sourceVersionId)!
+        const bytes = await readFile(join(real.storageRoot, version.contentStorageKey))
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(media.checksum)
+        expect(bytes.byteLength).toBe(media.sizeBytes)
+      }
+      const firstVersion = versions.find((version) => version.id === checkpointTarget.versionId)!
+      expect(
+        parseBrowserRecording(
+          await readFile(join(real.storageRoot, firstVersion.contentStorageKey), 'utf8')
+        ).segments
+      ).toHaveLength(1)
+      // The fix must preserve the existing writer's rejection of changed content at one identity.
+      expect(
+        await saveAuxiliaryOutput(
+          { ...indexes[0], source: { kind: 'inline', content: 'changed' } },
+          writer.saveOutput
+        )
+      ).toEqual({ status: 'failed', code: 'artifact-save-failed' })
+      expect(await real.client.artifactVersion.count()).toBe(5)
+    } finally {
+      await f.owner.close()
+      await real.dispose()
+    }
+  })
+
   it('retains exact native media attestation across restart without trusting imported sender IDs', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'browser-recording-receipts-'))
     const f = fixture({ dataRoot })
@@ -155,6 +281,7 @@ describe('browser recording evidence owner', () => {
       expect(first.recordingId).toBe(repeated.recordingId)
       expect(f.startDriver).toHaveBeenCalledTimes(1)
       await f.segment()
+      expect(f.saved[1].filename).toBe(`web-recording-${first.recordingId}-checkpoint-1.json`)
       const checkpoint = parseBrowserRecording(f.saved[1].source.content)
       expect(checkpoint.coverage.stopReason).toBe('interrupted')
       expect(checkpoint.media[0].sourceVersionId).toBe('version-1')
@@ -168,6 +295,10 @@ describe('browser recording evidence owner', () => {
       expect(closed.state).toBe('finalized')
       expect(f.stop).toHaveBeenCalledTimes(1)
       const final = parseBrowserRecording(f.saved.at(-1)!.source.content)
+      expect(f.saved.at(-1)!.filename).toBe(`web-recording-${first.recordingId}.json`)
+      expect(f.saved.filter((output) => output.filename === f.saved.at(-1)!.filename)).toHaveLength(
+        1
+      )
       expect(final.coverage.stopReason).toBe('stopped')
       expect(final.media).toEqual(checkpoint.media)
     } finally {

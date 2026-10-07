@@ -39,7 +39,7 @@ it.skipIf(!enabled)(
     const directory = await mkdtemp(join(tmpdir(), 'browser-recording-electron-'))
     cleanups.push(() => rm(directory, { recursive: true, force: true }))
     const project = await serve(
-      `<!doctype html><style>html,body{margin:0;background:rgb(0,180,70);width:100%;height:100%;overflow:hidden}canvas{display:block;width:100%;height:100%}button{position:absolute;left:12px;top:12px}input{position:absolute;left:12px;top:50px;width:160px;height:30px;border:0;background:white;color:red}</style><canvas width="640" height="360"></canvas><button>Click me</button><input value="must-never-record-this"><script>const canvas=document.querySelector('canvas'),c=canvas.getContext('2d');let f=0;function frame(){globalThis.animationFrames=f;c.fillStyle='rgb(0,180,70)';c.fillRect(0,0,640,360);c.fillStyle='rgb(220,20,20)';c.fillRect((f++*2)%560,140,80,80);requestAnimationFrame(frame)}frame();document.querySelector('button').onclick=e=>e.target.textContent='Clicked';</script>`
+      `<!doctype html><style>html,body{margin:0;background:rgb(0,180,70);width:100%;height:100%;overflow:hidden}canvas{display:block;width:100%;height:100%}button{position:absolute;left:12px;top:12px}input{position:absolute;left:12px;top:50px;width:160px;height:30px;border:0;background:white;color:red}</style><canvas width="640" height="360"></canvas><button>Click me</button><input value="must-never-record-this"><script>const canvas=document.querySelector('canvas'),c=canvas.getContext('2d');let f=0;function frame(){globalThis.animationFrames=f;c.fillStyle='rgb(0,180,70)';c.fillRect(0,0,640,360);c.fillStyle='rgb(220,20,20)';c.fillRect((f++*2)%560,140,80,80);requestAnimationFrame(frame)}frame();document.querySelector('button').onclick=e=>{e.target.textContent='Clicked';history.pushState({},'', '?run=fixture&tab=diagnostics&token=must-not-store');};</script>`
     )
     const viewer = await serve(
       `<!doctype html><style>html,body{margin:0;background:magenta;width:100%;height:100%}iframe{position:absolute;left:40px;top:42px;width:640px;height:360px;border:0}</style><iframe id="project" src="${project.origin}/" sandbox="allow-scripts allow-forms allow-same-origin"></iframe>`
@@ -142,6 +142,8 @@ it.skipIf(!enabled)(
         .locator('canvas')
         .evaluate(() => performance.timeOrigin)
     ).toBe(navigation)
+    expect(result.ended).toEqual([])
+    expect(JSON.stringify(result.events)).not.toContain('must-not-store')
     expect(result.segments.length, JSON.stringify(result)).toBeGreaterThanOrEqual(3)
     expect(
       result.segments.every(
@@ -156,7 +158,8 @@ it.skipIf(!enabled)(
       ).toBe(false)
     expect(result.events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'click', source: 'browser-observed' })
+        expect.objectContaining({ kind: 'click', source: 'browser-observed' }),
+        expect.objectContaining({ kind: 'navigation', source: 'host-observed' })
       ])
     )
     expect(result.gaps).toEqual(
@@ -222,14 +225,37 @@ it.skipIf(!enabled)(
           2
         )
       )
-    for (const action of ['resize', 'remove']) {
+    for (const action of ['reload', 'resize', 'remove']) {
       await app.evaluate(async () =>
         (globalThis as unknown as { startRecording(): Promise<void> }).startRecording()
       )
       await page.waitForTimeout(450)
-      await control(action)
-      await expect.poll(async () => (await control('inspect')).ended).toEqual(['source-lost'])
+      const beforeDocument = await page
+        .frameLocator('#viewer')
+        .frameLocator('#project')
+        .locator('canvas')
+        .evaluate(() => performance.timeOrigin)
+      if (action === 'reload')
+        await page
+          .frameLocator('#viewer')
+          .frameLocator('#project')
+          .locator('button')
+          .evaluate(() => location.reload())
+      else await control(action)
+      await expect
+        .poll(async () => (await control('inspect')).ended, { message: action, timeout: 5000 })
+        .toEqual(['source-lost'])
       await control('stop')
+      if (action === 'reload') {
+        await page.frameLocator('#viewer').frameLocator('#project').locator('button').waitFor()
+        expect(
+          await page
+            .frameLocator('#viewer')
+            .frameLocator('#project')
+            .locator('canvas')
+            .evaluate(() => performance.timeOrigin)
+        ).not.toBe(beforeDocument)
+      }
     }
     console.info(
       'Browser recording real compositor evidence',

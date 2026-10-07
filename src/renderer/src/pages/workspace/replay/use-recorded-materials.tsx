@@ -229,6 +229,16 @@ export function useRecordedMaterials(
         }}
       >
         <option value="">{t('Research source files')}</option>
+        {selected &&
+        !candidates.some(
+          (candidate) => JSON.stringify(candidate.target) === JSON.stringify(selected.target)
+        ) ? (
+          // A later discovery page may replace a checkpoint in the catalog. Keep the user's
+          // explicitly opened immutable Version selected without silently switching its footage.
+          <option value={JSON.stringify(selected.target)} disabled>
+            {selected.resource.name}
+          </option>
+        ) : null}
         {candidates.map((candidate) => (
           <option key={JSON.stringify(candidate.target)} value={JSON.stringify(candidate.target)}>
             {candidate.localHistory ? `${t('Local historical run')} · ` : ''}

@@ -388,7 +388,7 @@ export class BrowserRecordingOwner {
         record.recording.durationMs = Math.max(record.recording.durationMs, segment.endMs)
         // Every committed segment gets an immutable partial index. Crash recovery never needs
         // to restart the project or reinterpret an unfinalized encoder buffer.
-        await this.publish(record, 'interrupted')
+        await this.publish(record, 'interrupted', 'checkpoint')
       })
       .catch(() => {
         record.error = 'publication-failed'
@@ -426,7 +426,8 @@ export class BrowserRecordingOwner {
 
   private async publish(
     record: RecordState,
-    reason: BrowserRecording['coverage']['stopReason']
+    reason: BrowserRecording['coverage']['stopReason'],
+    publication: 'checkpoint' | 'final'
   ): Promise<void> {
     record.source.assertCurrent()
     const durationMs = Math.max(
@@ -440,7 +441,12 @@ export class BrowserRecordingOwner {
       coverage: { ...record.recording.coverage, stopReason: reason }
     })
     const result = await record.source.save({
-      filename: `web-recording-${record.id}.json`,
+      // The managed writer binds an idempotent write to its filename for this operation.
+      // A changed index needs its own immutable filename, never a repeated write identity.
+      filename:
+        publication === 'checkpoint'
+          ? `web-recording-${record.id}-checkpoint-${recording.segments.length}.json`
+          : `web-recording-${record.id}.json`,
       contentType: 'application/json',
       source: { kind: 'inline', content: JSON.stringify(recording) }
     })
@@ -561,7 +567,7 @@ export class BrowserRecordingOwner {
       record.controller.abort()
       try {
         if (record.recording.segments.length) {
-          await this.publish(record, record.error ? 'interrupted' : reason)
+          await this.publish(record, record.error ? 'interrupted' : reason, 'final')
           record.state =
             !record.error && ['finished', 'stopped'].includes(reason) ? 'finalized' : 'partial'
         } else {
