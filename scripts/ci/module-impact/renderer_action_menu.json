@@ -117,7 +117,12 @@
       "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/main/research-demos/owner.macos.integration.test.ts",
-      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/main/replay-viewer/recorded-resource-context-menu.integration.test.ts",
+      "src/renderer/src/pages/workspace/replay/results/ResultsPanel.test.tsx",
+      "src/renderer/src/lib/replay/recorded-results.test.ts",
+      "src/renderer/src/pages/workspace/use-run-observation-question.test.tsx",
+      "src/renderer/src/pages/workspace/RunObservationPreview.test.tsx"
     ]
   },
   "capabilityOverlays": [],
