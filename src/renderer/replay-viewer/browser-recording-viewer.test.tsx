@@ -47,6 +47,8 @@ it('loads readonly browser footage and retains an exact selected moment without 
   render(<ViewerApp client={new ReplayViewerClient(fetcher)} />)
   await screen.findByLabelText('Recorded webpage')
   fireEvent.change(screen.getByRole('slider'), { target: { value: '3200' } })
+  fireEvent.loadedMetadata(screen.getByLabelText('Recorded webpage'))
+  fireEvent.loadedData(screen.getByLabelText('Recorded webpage'))
   fireEvent.click(screen.getByRole('button', { name: 'Ask about this moment' }))
   const reference = (await screen.findByRole('textbox', {
     name: 'Recorded moment reference'

@@ -28,6 +28,7 @@ it('seeks into exact segments and asks at the selected time without any runtime'
   const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
   expect(video.getAttribute('src')).toBe('/api/recording/media?mediaKey=media-1')
   fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
   expect(video.currentTime).toBe(1.2)
   fireEvent.click(screen.getByRole('button', { name: 'Ask about this moment' }))
   await act(async () => {})
@@ -130,6 +131,7 @@ it('pauses before asking and cites the actual media time between sparse timeupda
   const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
   Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
   fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
   fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
   await act(async () => {})
   video.currentTime = 1.375
@@ -156,4 +158,83 @@ it('distinguishes host observations, browser interactions and author declaration
   expect(screen.getByText(/navigation · Host-observed event/)).toBeTruthy()
   expect(screen.getByText(/click · Browser-observed action/)).toBeTruthy()
   expect(screen.getByText(/author · Author-declared event/)).toBeTruthy()
+})
+
+it('reserves the viewport and holds one bounded decoded frame only while the next segment loads', () => {
+  const drawImage = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage
+  } as unknown as CanvasRenderingContext2D)
+  const recording = browserRecordingFixture()
+  const { unmount } = render(
+    <BrowserRecordingPlayer recording={recording} mediaUrl={mediaUrl} onAskMoment={vi.fn()} />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  Object.defineProperties(first, {
+    readyState: { configurable: true, value: 2 },
+    videoWidth: { configurable: true, value: 3840 },
+    videoHeight: { configurable: true, value: 2160 }
+  })
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  first.currentTime = 1.999
+  fireEvent.ended(first)
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(canvas.width).toBe(1280)
+  expect(canvas.height).toBe(720)
+  expect(drawImage).toHaveBeenCalledWith(first, 0, 0, 1280, 720)
+  expect(canvas.hidden).toBe(false)
+  expect(screen.getByTestId('recorded-video-surface').style.aspectRatio).toBe('1280 / 720')
+  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(screen.getByRole('slider').getAttribute('value')).toBe('1999')
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  const second = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(second)
+  expect(canvas.hidden).toBe(false)
+  second.currentTime = 0.3
+  fireEvent.timeUpdate(second)
+  expect(screen.getByRole('slider').getAttribute('value')).toBe('1999')
+  fireEvent.loadedData(second)
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  expect(canvas.width).toBe(0)
+  expect(canvas.height).toBe(0)
+  expect(canvas.hidden).toBe(true)
+  fireEvent.ended(second)
+  expect(screen.queryByTestId('held-recorded-frame')).toBeNull()
+  expect(screen.getByText('Recording was paused at this time.')).toBeTruthy()
+  unmount()
+  expect(canvas.width).toBe(0)
+})
+
+it('waits for the remounted video to decode even if two segments resolve to the same media URL', async () => {
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={() => '/recorded/shared.webm'}
+      onAskMoment={vi.fn()}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage')
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+  await act(async () => {})
+  const play = vi.mocked(HTMLMediaElement.prototype.play)
+  play.mockClear()
+  fireEvent.ended(first)
+  const second = screen.getByLabelText('Recorded webpage')
+  expect(second).not.toBe(first)
+  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  expect(play).not.toHaveBeenCalled()
+  fireEvent.loadedMetadata(second)
+  fireEvent.loadedData(second)
+  await act(async () => {})
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  expect(play).toHaveBeenCalledTimes(1)
+  expect(play.mock.contexts[0]).toBe(second)
 })

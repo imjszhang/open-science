@@ -235,10 +235,53 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       await page.getByRole('button', { name: 'Go to next recorded moment' }).click()
       await expect(page.getByRole('slider')).toHaveValue('4200')
       await seek(0)
+      await expect(video).toBeVisible()
+      const surface = page.getByTestId('recorded-video-surface')
+      const viewportBeforeTransition = await surface.boundingBox()
+      let releaseNext: (() => void) | undefined
+      let delayNext = true
+      await page.route('**/api/recording/media?mediaKey=clip-1', async (route) => {
+        if (delayNext) {
+          delayNext = false
+          await new Promise<void>((done) => {
+            releaseNext = done
+          })
+        }
+        await route.continue()
+      })
       await page.getByRole('button', { name: 'Play replay', exact: true }).click()
+      await expect.poll(() => Boolean(releaseNext)).toBe(true)
+      await expect(page.getByTestId('recorded-segment-loading')).toBeVisible()
+      const held = page.getByTestId('held-recorded-frame')
+      await expect(held).toBeVisible()
+      const heldPixels = await held.evaluate((element: HTMLCanvasElement) => ({
+        width: element.width,
+        height: element.height
+      }))
+      expect(heldPixels.width).toBeGreaterThan(0)
+      expect(heldPixels.width).toBeLessThanOrEqual(1280)
+      expect(heldPixels.height).toBeLessThanOrEqual(720)
+      const heldTime = await page.getByRole('slider').inputValue()
+      await page.waitForTimeout(250)
+      expect(await page.getByRole('slider').inputValue()).toBe(heldTime)
+      expect(await surface.boundingBox()).toEqual(viewportBeforeTransition)
+      await expect(page.getByRole('button', { name: 'Ask about this moment' })).toBeDisabled()
+      if (process.env.BROWSER_RECORDING_VIEWER_EVIDENCE)
+        await page.screenshot({
+          path: process.env.BROWSER_RECORDING_VIEWER_EVIDENCE.replace(
+            /\.json$/,
+            '-segment-loading.png'
+          ),
+          fullPage: true
+        })
+      releaseNext!()
+
       await expect(video).toHaveAttribute('src', '/api/recording/media?mediaKey=clip-1', {
         timeout: 12000
       })
+      await expect(video).toBeVisible()
+      await expect(page.getByTestId('recorded-segment-loading')).toHaveCount(0)
+      expect(await surface.boundingBox()).toEqual(viewportBeforeTransition)
       await expect(
         page.getByText('Recording was paused at this time.', { exact: true })
       ).toBeVisible({ timeout: 12000 })
@@ -260,6 +303,10 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
               liveCalls,
               selections,
               crossSegmentPlayback: true,
+              heldPixels,
+              heldTime,
+              viewportBeforeTransition,
+              stableSegmentLoading: true,
               seekMs: 2400,
               segmentOffsetMs: 500,
               speed: 2,
