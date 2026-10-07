@@ -1,3 +1,8 @@
+import {
+  askReplayStep,
+  openReplayMaterial,
+  chooseReplayConversation
+} from './helpers/research-replay'
 import { expect } from '@playwright/test'
 import type { Locator, Page } from 'playwright'
 import type { PersistedChatSession } from '../src/shared/session-persistence'
@@ -123,6 +128,11 @@ test('asks immediately after seeking recorded artifact and upload steps without 
       sourceSessionId: source.id
     })
   const captured: SessionDiscussionSnapshot[] = []
+  // The imported research workspace persists its initial whole-research draft asynchronously.
+  // Settle that baseline before measuring the single explicit selection produced by Ask.
+  await expect
+    .poll(async () => (await snapshots()).filter((snapshot) => snapshot.scope === 'session').length)
+    .toBe(1)
 
   for (const file of [
     { name: artifact.name!, kind: 'artifact-version', versionId: artifact.versionId! },
@@ -137,7 +147,7 @@ test('asks immediately after seeking recorded artifact and upload steps without 
       .click()
     // Seek lands at offset zero and pauses. Asking immediately must use the recorded Version,
     // without playing through a fabricated input/activity phase to make that evidence available.
-    await replay.getByRole('button', { name: 'Ask about this step', exact: true }).click()
+    await askReplayStep(replay)
     await expect
       .poll(async () =>
         (await snapshots()).filter((snapshot) => !previousIds.includes(snapshot.id))
@@ -226,7 +236,6 @@ test('View replay opens the player from materials or a collapsed pane without ch
   const header = page.getByTestId('research-workspace-header')
   const viewReplay = header.getByRole('button', { name: 'View replay', exact: true })
   const replay = page.getByTestId('replay-panel')
-  const materials = page.getByRole('group', { name: 'Research materials', exact: true })
   const editor = page.getByRole('textbox', { name: 'Ask anything', exact: true })
   const progress = replay.getByRole('slider', { name: 'Replay progress', exact: true })
   const browse = replay.getByRole('button', { name: 'Browse steps', exact: true })
@@ -249,8 +258,8 @@ test('View replay opens the player from materials or a collapsed pane without ch
   const expectUnchangedPlayer = async (): Promise<void> => {
     await expect(replay).toBeVisible()
     await expect(
-      materials.getByRole('button', { name: 'Session process', exact: true })
-    ).toHaveAttribute('aria-pressed', 'true')
+      replay.getByRole('tab', { name: 'Original conversation', exact: true })
+    ).toHaveAttribute('aria-selected', 'true')
     await expect(progress).toHaveAttribute('aria-valuenow', position!)
     await expect(replay.getByRole('button', { name: 'Play replay', exact: true })).toBeVisible()
     await expect(editor).toContainText(draft)
@@ -263,7 +272,7 @@ test('View replay opens the player from materials or a collapsed pane without ch
   }
 
   for (const mode of ['Source files', 'Original records']) {
-    await materials.getByRole('button', { name: mode, exact: true }).click()
+    await openReplayMaterial(replay, mode)
     const material = page.getByRole('region', { name: mode, exact: true })
     await expect(material).toBeVisible()
     await expect(replay).not.toBeVisible()
@@ -370,7 +379,7 @@ test('replaces the discussion Session without replacing the draft or changing so
       await expect(replayTab(page, sourceA.id)).toHaveAttribute('aria-selected', 'true')
     await header.getByRole('button', { name: 'View replay', exact: true }).click()
     await expect(replayTab(page, source.id)).toHaveAttribute('aria-selected', 'true')
-    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
+    await chooseReplayConversation(replay)
     const chooser = page.getByRole('dialog', { name: 'Ask in a conversation' })
     if (source.id === sourceA.id) {
       await expect(chooser.getByRole('combobox')).toBeFocused()
@@ -414,10 +423,10 @@ test('replaces the discussion Session without replacing the draft or changing so
     await expect(chooser.getByRole('option').filter({ hasText: sourceB.title })).toHaveCount(0)
     await chooser.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(chooser).not.toBeVisible()
-    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
+    await chooseReplayConversation(replay)
     await chooser.getByRole('combobox').press('Escape')
     await expect(chooser).not.toBeVisible()
-    await replay.getByRole('button', { name: 'Add to another conversation…', exact: true }).click()
+    await chooseReplayConversation(replay)
     await chooser.getByRole('combobox').fill(target.title)
     await chooser.getByRole('option').filter({ hasText: target.title }).click()
     await expect(sessionRow(page, target.title)).toHaveAttribute('aria-current', 'page')
@@ -646,15 +655,14 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await page.mouse.up()
   await expect.poll(async () => (await replay.boundingBox())!.width).toBeLessThan(beforeWidth - 20)
   await expect(editor()).toContainText('Draft question for study A.')
-  const materials = page.locator('[role="group"][aria-label="Research materials"]:visible')
-  await materials.getByRole('button', { name: 'Original records', exact: true }).click()
+  await openReplayMaterial(replay, 'Original records')
   const records = page.getByRole('region', { name: 'Original records', exact: true })
   await expect(records).toContainText('Research A retained its own recorded result.')
   await expect(records.getByRole('textbox')).toHaveCount(0)
-  await materials.getByRole('button', { name: 'Source files', exact: true }).click()
+  await openReplayMaterial(replay, 'Source files')
   await expect(page.getByRole('region', { name: 'Source files', exact: true })).toBeVisible()
   await expect(header()).toContainText(sourceA.title)
-  await materials.getByRole('button', { name: 'Session process', exact: true }).click()
+  await openReplayMaterial(replay, 'Session process')
   await page.screenshot({ path: testInfo.outputPath('research-workspace-draft-isolation.png') })
 
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -706,10 +714,7 @@ test('keeps ordinary and two research drafts independent, persists research owne
 
   // Watching B from A does not change ownership; Ask explicitly enters B's pending draft.
   await replayTab(page, sourceB.id).click()
-  await page
-    .getByTestId('replay-panel')
-    .getByRole('button', { name: 'Ask about this step', exact: true })
-    .click()
+  await askReplayStep(page.getByTestId('replay-panel'))
   await expect(header()).toContainText(sourceB.title)
   await expect(editor()).toContainText('Draft question for study B.')
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -752,15 +757,15 @@ test('keeps ordinary and two research drafts independent, persists research owne
   await page.screenshot({ path: testInfo.outputPath('research-workspace-restored-membership.png') })
 })
 
-test('Run inspection never creates a discussion or consumes a research draft on unavailable evidence', async ({
+test('saved run inspection stays read-only and preserves a research draft without execution controls', async ({
   app
 }) => {
   await app.completeOnboarding()
   let page = await app.configureFakeAgent()
   const projectName = 'Read-only run inspection'
   const projectId = await createProject(page, projectName)
-  // Deliberately no retained import receipt: this exercises the real Main authority failure,
-  // without replacing researchRuns.inspect or trusting a presentation-only packageOrigin.
+  // No retained run recording or receipt: browsing this imported source must stay
+  // read-only and preserve its pending discussion instead of creating execution work.
   const source = sourceFixture(projectId, 'a')
   page = await app.restartWithSessionFixture(source)
   await page
@@ -776,18 +781,17 @@ test('Run inspection never creates a discussion or consumes a research draft on 
     sessionId: source.id
   })
   const prompts = await app.readFakeAgentPrompts()
-  await page
-    .getByTestId('research-workspace-header')
-    .getByRole('button', { name: 'Run…', exact: true })
-    .click()
-  const dialog = page.getByRole('dialog', { name: 'Run this research', exact: true })
-  await expect(dialog).toBeVisible()
-  await expect(dialog).toContainText('Results will be saved in a new discussion.')
-  await expect(dialog).toContainText('Could not inspect this research. Please retry.')
-  await expect(dialog.getByRole('button', { name: 'Start run', exact: true })).toBeDisabled()
-  await dialog.getByRole('button', { name: 'Retry', exact: true }).click()
-  await expect(dialog).toContainText('Could not inspect this research. Please retry.')
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(
+    page.getByTestId('research-workspace-header').getByRole('button', { name: 'Run…', exact: true })
+  ).toHaveCount(0)
+  const replay = page.getByTestId('replay-panel')
+  await openReplayMaterial(replay, 'Run recordings')
+  const recordings = page.getByRole('region', { name: 'Run recordings', exact: true })
+  await expect(recordings).toBeVisible()
+  await expect(recordings).toContainText('Opening a recording does not run the experiment.')
+  await expect(recordings).toContainText('No saved run recordings were found.')
+  await expect(recordings.getByRole('button', { name: 'Start run', exact: true })).toHaveCount(0)
+  await openReplayMaterial(replay, 'Session process')
   await expect(editor).toContainText(draft)
   expect(await app.readFakeAgentPrompts()).toEqual(prompts)
   expect(
