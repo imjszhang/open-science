@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
 import type { ReplayResource } from '../../../../../../shared/replay'
 import { staticHtml } from '@/lib/replay/static-html'
 import { replayImageSource } from '../replay-svg'
+import { useRegisterPreviewContextMenuFrame } from '../../preview-actions/preview-action-hooks'
 import {
   fixedReplayResource,
   type RecordedResourceContent,
@@ -19,6 +20,15 @@ export function RecordedResourcePreview({
   resource: ReplayResource
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
+  useRegisterPreviewContextMenuFrame({
+    id: 'recorded-resource-' + resource.id,
+    frameUrl: 'about:srcdoc',
+    frameRef,
+    // Opaque static documents have no unique managed-preview identity. Keep native text/image
+    // actions; never impersonate a trusted protocol or relax Main's frame allowlist for srcdoc.
+    enabled: false
+  })
   const fixed = useMemo(() => fixedReplayResource(resource), [resource])
   const [loaded, setLoaded] = useState<{
     resource: ReplayResource
@@ -61,12 +71,14 @@ export function RecordedResourcePreview({
   ) : null
   if (result.mimeType === 'text/html' || /\.html?$/i.test(resource.name))
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-full min-h-0 flex-col" data-preview-context-menu-passthrough>
         <p className="shrink-0 p-2 text-xs text-muted-foreground">
           {t('Saved HTML preview. Scripts and external connections are disabled.')}
         </p>
         {truncated}
         <iframe
+          ref={frameRef}
+          data-preview-context-menu-passthrough
           title={resource.name}
           sandbox=""
           referrerPolicy="no-referrer"
