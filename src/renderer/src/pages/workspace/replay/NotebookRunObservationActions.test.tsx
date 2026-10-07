@@ -38,7 +38,7 @@ it('opens the exact Run and only exposes an archive action after Main returns it
   expect(screen.getByText('Recording observations')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'View archived replay' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Observe run' }))
-  expect(actions.showRunObservation).toHaveBeenCalledWith(target, expect.any(String))
+  expect(actions.showRunObservation).toHaveBeenCalledWith(target, 'Run observation · run')
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000)
   })
@@ -65,7 +65,8 @@ it('does not invent an archive for an unrecorded completed Run or poll it foreve
   render(<NotebookRunObservationActions target={target} runStatus="completed" />)
   await act(async () => {})
   expect(screen.getByText('This Run has no saved observation recording.')).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'View run record' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'View run record' }))
+  expect(actions.showRunObservation).toHaveBeenCalledWith(target, 'Run observation · run')
   expect(screen.queryByRole('button', { name: 'View archived replay' })).toBeNull()
   await act(async () => {
     await vi.advanceTimersByTimeAsync(9000)

@@ -49,7 +49,7 @@ export const NotebookRunObservationActions = ({
         onClick={() =>
           showRunObservation(
             target,
-            `${t('Replay')} · ${(runId ?? executionInvocationId ?? operationId ?? '').slice(0, 8)}`
+            `${t('Run observation')} · ${(runId ?? executionInvocationId ?? operationId ?? '').slice(0, 8)}`
           )
         }
       >

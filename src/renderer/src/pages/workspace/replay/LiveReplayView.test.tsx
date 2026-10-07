@@ -332,6 +332,9 @@ describe('shared live Replay viewer', () => {
       const record =
         state === 'completed' ? { ...snapshot(1), phase: 'completed' as const } : snapshot(1)
       render(<LiveReplayView {...props(record)} recorded={state === 'recorded'} />)
+      expect(screen.getByTestId('replay-panel').getAttribute('aria-label')).toBe(
+        state === 'recorded' ? 'Research replay' : 'Run observation'
+      )
       fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
       expect(screen.getByText('Run history')).toBeTruthy()
       fireEvent.pointerDown(screen.getByRole('region', { name: 'Execution record' }))

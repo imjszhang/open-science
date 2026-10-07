@@ -731,7 +731,7 @@ const ReplayPanelContent = ({
         }
       }}
       tabIndex={0}
-      aria-label={t('Research replay')}
+      aria-label={live && !live.recorded ? t('Run observation') : t('Research replay')}
     >
       <div
         data-testid="replay-header"

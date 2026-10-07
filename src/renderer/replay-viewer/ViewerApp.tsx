@@ -253,7 +253,7 @@ export const ViewerApp = ({
     <main className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1">
         <div className="min-w-0">
-          <span className="text-sm font-medium">{t('Research replay')}</span>
+          <span className="text-sm font-medium">{t('Run observation')}</span>
           {recordingStatus ? (
             <ObservationRecordingStatus
               status={recordingStatus}

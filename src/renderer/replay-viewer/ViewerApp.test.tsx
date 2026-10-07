@@ -177,6 +177,9 @@ describe('standalone browser viewer', () => {
     }))
     render(<ViewerApp client={client} />)
     await screen.findByText('actual browser host output')
+    expect(screen.getByText('Run observation')).toBeTruthy()
+    expect(screen.getByTestId('replay-panel').getAttribute('aria-label')).toBe('Run observation')
+    expect(screen.queryByText('Research replay')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Pause following' }))
     fireEvent.click(screen.getByRole('button', { name: 'Project interface' }))
     await screen.findByRole('img', { name: 'Recorded project image' })
@@ -206,7 +209,7 @@ describe('standalone browser viewer', () => {
       .mockResolvedValue({ ...context, presentation: 'desktop', locale: 'zh-Hans' })
     expect(await client.initialLocale('en')).toBe('en')
     render(<ViewerApp client={client} />)
-    await screen.findAllByText('研究回放')
+    await screen.findAllByText('运行观察')
     expect(document.documentElement.lang).toBe('zh-Hans')
   })
 
