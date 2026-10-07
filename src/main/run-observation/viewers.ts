@@ -10,6 +10,9 @@ import type { RunObservationOwner, RunObservationViewer } from './owner'
 import {
   recordedObservationTargetSchema,
   recordedObservationPayloadSchema,
+  recordedFileSelectionSchema,
+  recordedFileSelectionForPayload,
+  type RecordedObservationFileSelection,
   type RecordedObservationTarget,
   type RecordedObservationPayload,
   type RecordedRunObservationSelection
@@ -55,6 +58,10 @@ export type ObservationViewersDependencies = Readonly<{
   recorded?: Readonly<{
     authorizeScope(target: RecordedObservationTarget): Promise<void>
     read(target: RecordedObservationTarget): Promise<RecordedObservationPayload>
+    selectFile?(
+      target: RecordedObservationTarget,
+      mediaKey: string
+    ): Promise<RecordedObservationFileSelection>
   }>
   onRevoked?(viewerId: string, reason: RevokeReason): void | Promise<void>
   onCleanupError?(error: unknown): void
@@ -74,6 +81,7 @@ type ViewerRecord = {
   descriptor: ObservationViewDescriptor
   caller: CallerContext
   selection?: RecordedRunObservationSelection
+  fileSelection?: RecordedObservationFileSelection
   grants: Set<string>
   capabilities: Set<string>
   expiry: ReturnType<typeof setTimeout>
@@ -513,6 +521,54 @@ export class ObservationViewers {
     return this.withViewer(viewerId, auth, async (record) => {
       await this.readRecording(record)
       return record.selection ? structuredClone(record.selection) : null
+    })
+  }
+  private async readFileSelection(
+    record: ViewerRecord,
+    mediaKey: string
+  ): Promise<RecordedObservationFileSelection> {
+    const payload = await this.readRecording(record)
+    if (!this.dependencies.recorded?.selectFile)
+      throw new ObservationViewerError('unavailable', 'Recorded file selection is unavailable.')
+    const expected = recordedFileSelectionForPayload(payload, mediaKey)
+    const selected = recordedFileSelectionSchema.parse(
+      await this.dependencies.recorded.selectFile(payload.receiving, mediaKey)
+    )
+    const content = { ...selected }
+    delete content.selectionId
+    delete content.selectedAt
+    if (JSON.stringify(content) !== JSON.stringify(expected))
+      throw new ObservationViewerError(
+        'unavailable',
+        'Recorded file selection does not match the archive.'
+      )
+    return { ...selected, selectionId: randomUUID(), selectedAt: this.now() }
+  }
+  async selectRecordingFile(
+    viewerId: string,
+    mediaKey: string,
+    auth: ObservationViewAuthorization
+  ): Promise<RecordedObservationFileSelection> {
+    return this.withViewer(viewerId, auth, async (record) => {
+      const selected = await this.readFileSelection(record, mediaKey)
+      record.fileSelection = structuredClone(selected)
+      return selected
+    })
+  }
+  async recordingFileSelection(
+    viewerId: string,
+    auth: ObservationViewAuthorization
+  ): Promise<RecordedObservationFileSelection | null> {
+    return this.withViewer(viewerId, auth, async (record) => {
+      await this.readRecording(record)
+      if (!record.fileSelection) return null
+      const current = await this.readFileSelection(record, record.fileSelection.mediaKey)
+      if (JSON.stringify(current.resource) !== JSON.stringify(record.fileSelection.resource))
+        throw new ObservationViewerError(
+          'unavailable',
+          'The selected immutable file is unavailable.'
+        )
+      return structuredClone(record.fileSelection)
     })
   }
   async revoke(viewerId: string, auth: ObservationViewAuthorization): Promise<void> {

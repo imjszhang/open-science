@@ -4,6 +4,7 @@ import type { RunObservationTarget } from '../../shared/run-observation'
 import { RunObservationOwner, type RunObservationSource } from './owner'
 import { ObservationViewers, type ObservationViewersDependencies } from './viewers'
 import { recordedFixture } from './recorded-viewer.test-support'
+import { recordedFileSelectionForPayload } from '../../shared/run-observation-recorded'
 
 const target: RunObservationTarget = {
   projectId: 'project-a',
@@ -351,6 +352,40 @@ describe('ObservationViewers', () => {
 })
 
 describe('recorded viewer authority', () => {
+  it('keeps file Ask separate from step Ask and revalidates its exact readable Version on retrieval', async () => {
+    const { payload } = recordedFixture()
+    let available = true
+    const recorded = {
+      authorizeScope: vi.fn(async () => undefined),
+      read: vi.fn(async () => structuredClone(payload)),
+      selectFile: vi.fn(async () => {
+        if (!available) throw new Error('Version no longer available.')
+        return recordedFileSelectionForPayload(payload, 'export-a')
+      })
+    }
+    const h = harness(undefined, recorded)
+    const access = await h.viewers.createRecorded(payload.receiving, h.caller)
+    const browser = await h.viewers.authenticateGrant(access.grant)
+    const auth = { capability: browser.capability }
+    expect(await h.viewers.recordingFileSelection(access.viewerId, auth)).toBeNull()
+    const step = await h.viewers.selectRecording(access.viewerId, 'observation-0', auth)
+    const selected = await h.viewers.selectRecordingFile(access.viewerId, 'export-a', auth)
+    expect(selected).toMatchObject({
+      kind: 'recorded-observation-file',
+      resource: { versionId: 'receiver-version' }
+    })
+    expect(selected).not.toHaveProperty('stepKey')
+    selected.resource.versionId = 'caller-mutation'
+    expect(
+      (await h.viewers.recordingFileSelection(access.viewerId, auth))?.resource.versionId
+    ).toBe('receiver-version')
+    expect(await h.viewers.recordingSelection(access.viewerId, auth)).toEqual(step)
+    expect(recorded.selectFile).toHaveBeenCalledWith(payload.receiving, 'export-a')
+    expect(h.read).not.toHaveBeenCalled()
+    expect(h.scope).not.toHaveBeenCalled()
+    available = false
+    await expect(h.viewers.recordingFileSelection(access.viewerId, auth)).rejects.toThrow()
+  })
   it('reads a receiving Artifact without borrowing a live Run and freezes browser-selected source evidence', async () => {
     const payload = {
       ...recordedFixture().payload,

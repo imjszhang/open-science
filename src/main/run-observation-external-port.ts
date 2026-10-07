@@ -6,6 +6,11 @@ import {
 } from '../shared/run-observation'
 import {
   recordedObservationTargetSchema,
+  recordedObservationPayloadSchema,
+  recordedProjectPayloadSchema,
+  recordedFileRequestSchema,
+  recordedFileSelectionSchema,
+  type RecordedFileRequest,
   type RecordedObservationTarget
 } from '../shared/run-observation-recorded'
 import type { CallerContext } from './caller-context'
@@ -28,6 +33,11 @@ import {
 export const RUN_OBSERVATION_EXTERNAL_METHODS = [
   'open',
   'openRecorded',
+  'readRecorded',
+  'readProjectRecording',
+  'selectRecordedFile',
+  'selectRecordingFile',
+  'recordingFileSelection',
   'recording',
   'selectRecording',
   'recordingSelection',
@@ -81,6 +91,9 @@ export function createRunObservationExternalPort(dependencies: {
     caller: CallerContext
   ): Promise<RunObservationRecordingStatus>
   openRecordedViewer?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
+  readRecorded?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
+  readProjectRecording?(target: RecordedObservationTarget, caller: CallerContext): Promise<unknown>
+  selectRecordedFile?(request: RecordedFileRequest, caller: CallerContext): Promise<unknown>
   openViewer(
     target: RunObservationTarget,
     caller: CallerContext,
@@ -111,6 +124,52 @@ export function createRunObservationExternalPort(dependencies: {
         let result: unknown
         const auth = { caller: caller! }
         switch (method) {
+          case 'readRecorded':
+          case 'readProjectRecording': {
+            const { target } = z
+              .object({ target: recordedObservationTargetSchema })
+              .strict()
+              .parse(payload)
+            const reader =
+              method === 'readRecorded'
+                ? dependencies.readRecorded
+                : dependencies.readProjectRecording
+            if (!reader) throw new Error('Recorded content is unavailable.')
+            const value = await reader(target, caller!)
+            const parsed = (
+              method === 'readRecorded'
+                ? recordedObservationPayloadSchema
+                : recordedProjectPayloadSchema
+            ).safeParse(value)
+            if (
+              !parsed.success ||
+              Object.entries(target).some(
+                ([key, value]) =>
+                  parsed.data.receiving[key as keyof RecordedObservationTarget] !== value
+              )
+            )
+              throw new Error('Recorded content does not match the requested scope.')
+            result = parsed.data
+            break
+          }
+          case 'selectRecordedFile': {
+            const request = recordedFileRequestSchema.parse(payload)
+            if (!dependencies.selectRecordedFile) throw new Error('Recorded files are unavailable.')
+            const selected = await dependencies.selectRecordedFile(request, caller!)
+            const parsed = recordedFileSelectionSchema.safeParse(selected)
+            if (
+              !parsed.success ||
+              parsed.data.mediaKey !== request.mediaKey ||
+              parsed.data.source !== request.format ||
+              Object.entries(request.target).some(
+                ([key, value]) =>
+                  parsed.data.receiving[key as keyof RecordedObservationTarget] !== value
+              )
+            )
+              throw new Error('Recorded file does not match the requested scope.')
+            result = parsed.data
+            break
+          }
           case 'captures': {
             const { viewerId } = observationCapturesRequestSchema.parse(payload)
             if (!dependencies.captures) throw new Error('Captured images are unavailable.')
@@ -199,6 +258,23 @@ export function createRunObservationExternalPort(dependencies: {
               auth
             )
             break
+          case 'recordingFileSelection':
+            result = await dependencies.viewers.recordingFileSelection(
+              viewerReference.parse(payload).viewerId,
+              auth
+            )
+            break
+          case 'selectRecordingFile': {
+            const request = viewerReference
+              .extend({ mediaKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/) })
+              .parse(payload)
+            result = await dependencies.viewers.selectRecordingFile(
+              request.viewerId,
+              request.mediaKey,
+              auth
+            )
+            break
+          }
           case 'selectRecording': {
             const request = viewerReference
               .extend({ stepKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/) })

@@ -52,6 +52,8 @@ type Viewers = Pick<
   | 'recording'
   | 'selectRecording'
   | 'recordingSelection'
+  | 'selectRecordingFile'
+  | 'recordingFileSelection'
   | 'issueGrant'
   | 'authenticateGrant'
   | 'describe'
@@ -751,6 +753,15 @@ export class ReplayViewerHttpHost {
             return this.dependencies.viewers.recording(viewerId, auth)
           if (request.method === 'GET' && url.pathname === '/api/recording/selection')
             return this.dependencies.viewers.recordingSelection(viewerId, auth)
+          if (request.method === 'GET' && url.pathname === '/api/recording/file-selection')
+            return this.dependencies.viewers.recordingFileSelection(viewerId, auth)
+          if (request.method === 'POST' && url.pathname === '/api/recording/file-selection') {
+            const { mediaKey } = z
+              .object({ mediaKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/) })
+              .strict()
+              .parse(await readBody(request))
+            return this.dependencies.viewers.selectRecordingFile(viewerId, mediaKey, auth)
+          }
           if (request.method === 'POST' && url.pathname === '/api/recording/select') {
             const { stepKey } = z
               .object({ stepKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/) })

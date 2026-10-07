@@ -1,4 +1,11 @@
-import type { RecordedRunObservationSelection } from '../run-observation-recorded'
+import type {
+  RecordedRunObservationSelection,
+  RecordedObservationPayload,
+  RecordedProjectPayload,
+  RecordedObservationTarget,
+  RecordedObservationFileSelection,
+  RecordedFileRequest
+} from '../run-observation-recorded'
 import type { RunObservationSelection, RunObservationTarget } from '../run-observation'
 import type { RunObservationRecordingStatus } from '../run-observation-recording-status'
 import type {
@@ -13,6 +20,23 @@ import { callable, ELECTRON } from './definition'
 // The scoped observation IPC adapter owns validation and caller leases. These are not
 // ApplicationCommand router methods; marking them as such installs a second owner.
 export const contracts = {
+  'observations.selectRecordingFile': callable<
+    (
+      request: RunObservationViewerReference & { mediaKey: string }
+    ) => Promise<RecordedObservationFileSelection>
+  >()('run-observation', ['run-observation:selectRecordingFile', ELECTRON]),
+  'observations.recordingFileSelection': callable<
+    (request: RunObservationViewerReference) => Promise<RecordedObservationFileSelection | null>
+  >()('run-observation', ['run-observation:recordingFileSelection', ELECTRON]),
+  'observations.readRecorded': callable<
+    (request: { target: RecordedObservationTarget }) => Promise<RecordedObservationPayload>
+  >()('run-observation', ['run-observation:readRecorded', ELECTRON]),
+  'observations.readProjectRecording': callable<
+    (request: { target: RecordedObservationTarget }) => Promise<RecordedProjectPayload>
+  >()('run-observation', ['run-observation:readProjectRecording', ELECTRON]),
+  'observations.selectRecordedFile': callable<
+    (request: RecordedFileRequest) => Promise<RecordedObservationFileSelection>
+  >()('run-observation', ['run-observation:selectRecordedFile', ELECTRON]),
   'observations.recordingStatus': callable<
     (request: { target: RunObservationTarget }) => Promise<RunObservationRecordingStatus>
   >()('run-observation', ['run-observation:recordingStatus', ELECTRON]),

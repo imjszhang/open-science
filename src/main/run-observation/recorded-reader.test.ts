@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RecordedObservationTarget } from '../../shared/run-observation-recorded'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import type { RunObservationArchive } from '../../shared/run-observation-archive'
+import { validateProjectRecording } from '../../shared/project-recording'
 import { createProvenanceTestFixture } from '../artifacts/provenance-test-fixtures'
 import { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
 import { createPngBytes } from '../artifacts/artifact-test-fixtures'
@@ -169,6 +170,172 @@ async function setup(): Promise<{
 }
 
 describe('receiving-session recorded observation reader', () => {
+  it('selects the exact readable receiving file without constructing a step or author-side Run', async () => {
+    const h = await setup()
+    const selection = await h.reader.selectFile({ target: h.target, mediaKey: 'frame-0' })
+    expect(selection).toMatchObject({
+      kind: 'recorded-observation-file',
+      source: 'run-observation',
+      stage: 'unspecified',
+      receiving: h.target,
+      scope: 'step',
+      stepKeys: ['observation-0'],
+      resource: {
+        ...scope,
+        artifactId: h.media.fileId,
+        versionId: h.media.versionId,
+        checksum,
+        sizeBytes: bytes.length
+      }
+    })
+    expect(selection).not.toHaveProperty('stepId')
+    expect(selection).not.toHaveProperty('record')
+    await expect(
+      h.reader.selectFile({ target: h.target, mediaKey: 'not-declared' })
+    ).rejects.toMatchObject({ code: 'media-unavailable' })
+    h.revoke()
+    await expect(
+      h.reader.selectFile({ target: h.target, mediaKey: 'frame-0' })
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+  })
+  it('reads an independent project recording and its historical media after a real .science roundtrip', async () => {
+    const h = await setup()
+    const recording = validateProjectRecording({
+      format: 'open-science-project-recording',
+      version: 1,
+      recordingId: 'project-recording',
+      startedAt: 0,
+      endedAt: 10,
+      frames: [],
+      states: [],
+      events: [],
+      media: [
+        {
+          mediaKey: 'result',
+          name: 'result.png',
+          mimeType: 'image/png',
+          checksum,
+          sizeBytes: bytes.length,
+          sourceVersionId: h.media.versionId
+        }
+      ],
+      coverage: {
+        kind: 'sampled-project-recording',
+        stopReason: 'finished',
+        failures: 0,
+        unchangedSamples: 0,
+        droppedSamples: 0,
+        missingMediaKeys: []
+      }
+    })
+    const index = await h.versions.adoptLegacyArtifact({
+      ...scope,
+      sourceFileId: 'project-recording-index',
+      logicalFilename: 'project-recording.json',
+      content: Buffer.from(JSON.stringify(recording)),
+      contentType: 'application/json'
+    })
+    const originalTarget = { ...scope, artifactId: index.fileId, versionId: index.versionId }
+    expect((await h.reader.readProject(originalTarget)).recording).toEqual(recording)
+    const originalSelection = await h.reader.selectFile({
+      target: originalTarget,
+      mediaKey: 'result',
+      format: 'project-recording'
+    })
+    expect(originalSelection).toMatchObject({
+      scope: 'recording',
+      stepKeys: [],
+      stage: 'unspecified'
+    })
+    // A second name with exactly the same bytes must not choose a random immutable Version.
+    const duplicate = await h.versions.adoptLegacyArtifact({
+      ...scope,
+      sourceFileId: 'duplicate-result',
+      logicalFilename: 'duplicate.png',
+      content: bytes,
+      contentType: 'image/png'
+    })
+    expect((await h.reader.readProject(originalTarget)).media).toEqual([])
+    await expect(
+      h.reader.selectFile({
+        target: originalTarget,
+        mediaKey: 'result',
+        format: 'project-recording'
+      })
+    ).rejects.toMatchObject({ code: 'media-unavailable' })
+    expect(duplicate.versionId).not.toBe(h.media.versionId)
+    const receiving = await createProvenanceTestFixture()
+    fixtures.push(receiving)
+    const exporter = new SessionPackageService({
+      storageRoot: h.fixture.storageRoot,
+      getClient: async () => h.fixture.client
+    })
+    const importer = new SessionPackageService({
+      storageRoot: receiving.storageRoot,
+      getClient: async () => receiving.client
+    })
+    try {
+      const path = join(h.fixture.storageRoot, 'project-recording.science')
+      await exporter.exportTo(scope, path)
+      initDataRoot(receiving.storageRoot)
+      const imported = await importer.importFrom(path)
+      const origin = await importer.readOrigin(imported)
+      const target = {
+        projectId: imported.projectId,
+        sessionId: imported.sessionId,
+        artifactId: origin.identities[index.fileId],
+        versionId: origin.identities[index.versionId]
+      }
+      const { authority, files, provenance } = adapters(receiving)
+      const reader = createRecordedObservationReader({
+        immutableInputAuthority: authority,
+        projectFilesRepository: files,
+        artifactProvenanceRepository: provenance,
+        authorizeScope: async (request) => {
+          expect(request.projectId).toBe(imported.projectId)
+          expect(request.sessionId).toBe(imported.sessionId)
+        },
+        readSourceVersionMapping: (current, identity) =>
+          importer.readArtifactSourceVersionMapping(imported, {
+            artifactId: current.artifactId,
+            versionId: current.versionId,
+            checksum: identity.checksum,
+            sizeBytes: identity.sizeBytes
+          })
+      })
+      const payload = await reader.readProject(target)
+      expect(payload.recording).toEqual(recording)
+      expect(payload.media).toEqual([
+        {
+          mediaKey: 'result',
+          artifactId: origin.identities[h.media.fileId],
+          versionId: origin.identities[h.media.versionId],
+          checksum,
+          sizeBytes: bytes.length
+        }
+      ])
+      expect(await reader.readProjectMedia(target, 'result')).toEqual({
+        body: new Uint8Array(bytes),
+        mimeType: 'image/png'
+      })
+      const selected = await reader.selectFile({
+        target,
+        mediaKey: 'result',
+        format: 'project-recording'
+      })
+      expect(selected.resource.versionId).toBe(origin.identities[h.media.versionId])
+      expect(selected.receiving).toEqual(target)
+      expect(selected).not.toHaveProperty('record')
+      const session = await new SessionRepository(receiving.storageRoot).loadSession(
+        imported.projectId,
+        imported.sessionId
+      )
+      expect(session?.activeRun).toBeUndefined()
+    } finally {
+      await exporter.close()
+      await importer.close()
+    }
+  }, 60000)
   async function advanceMediaHead(h: Awaited<ReturnType<typeof setup>>): Promise<void> {
     const version = await h.provenance.writeAppGeneratedVersion({
       projectId: scope.projectId,

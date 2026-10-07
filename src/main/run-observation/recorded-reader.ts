@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   MAX_RUN_OBSERVATION_ARCHIVE_BYTES,
   parseRunObservationArchive,
@@ -6,10 +6,20 @@ import {
 } from '../../shared/run-observation-archive'
 import {
   recordedObservationTargetSchema,
+  recordedFileRequestSchema,
+  recordedFileSelectionForPayload,
+  type RecordedFileRequest,
+  type RecordedObservationFileSelection,
+  type RecordedProjectPayload,
   type RecordedObservationPayload,
   type RecordedObservationTarget,
   type ResolvedObservationMedia
 } from '../../shared/run-observation-recorded'
+import {
+  MAX_PROJECT_RECORDING_BYTES,
+  parseProjectRecording,
+  type ProjectRecording
+} from '../../shared/project-recording'
 import type { NotebookRunInputFile } from '../../shared/notebook'
 import type { ImmutableInputAuthority } from '../immutable-input-authority'
 import type { ArtifactProvenanceRepository } from '../artifacts/provenance-repository'
@@ -43,6 +53,19 @@ export type RecordedObservationReader = {
     mediaKey: string,
     signal?: AbortSignal
   ): Promise<{ body: Uint8Array; mimeType: string }>
+  readProject(
+    target: RecordedObservationTarget,
+    signal?: AbortSignal
+  ): Promise<RecordedProjectPayload>
+  readProjectMedia(
+    target: RecordedObservationTarget,
+    mediaKey: string,
+    signal?: AbortSignal
+  ): Promise<{ body: Uint8Array; mimeType: string }>
+  selectFile(
+    request: RecordedFileRequest,
+    signal?: AbortSignal
+  ): Promise<RecordedObservationFileSelection>
 }
 export class RecordedObservationReadError extends Error {
   readonly name = 'RecordedObservationReadError'
@@ -404,6 +427,145 @@ export function createRecordedObservationReader(
     await guard(target, signal)
     return { receiving: { ...target }, archive, media, executionContext }
   }
+  const loadProject = async (
+    target: RecordedObservationTarget,
+    signal?: AbortSignal
+  ): Promise<RecordedProjectPayload> => {
+    const bytes = await readVersion(target, MAX_PROJECT_RECORDING_BYTES, signal)
+    let recording: ProjectRecording
+    try {
+      recording = parseProjectRecording(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    } catch {
+      throw new RecordedObservationReadError('invalid-archive')
+    }
+    const files = await dependencies.projectFilesRepository.readExportFiles({
+      projectId: target.projectId,
+      sessionId: target.sessionId
+    })
+    if (files.length > MAX_CANDIDATES) throw new RecordedObservationReadError('unavailable')
+    const candidates = new Map<
+      string,
+      { artifactId: string; versionId: string; checksum: string; sizeBytes: number }
+    >()
+    for (const file of files) {
+      if (
+        file.source !== 'artifact' ||
+        file.projectId !== target.projectId ||
+        file.sessionId !== target.sessionId ||
+        ['deleted', 'deleting'].includes(file.originSession?.state ?? '') ||
+        !file.checksum ||
+        !/^[a-f0-9]{64}$/.test(file.checksum) ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 0 ||
+        file.size > MAX_MEDIA_BYTES
+      )
+        continue
+      candidates.set(file.sourceVersionId, {
+        artifactId: file.sourceFileId,
+        versionId: file.sourceVersionId,
+        checksum: file.checksum,
+        sizeBytes: file.size
+      })
+    }
+    const mapping = await dependencies.readSourceVersionMapping?.(target, {
+      recordingId: recording.recordingId,
+      checksum: checksum(bytes),
+      sizeBytes: bytes.byteLength,
+      content: bytes
+    })
+    const contents = [
+      ...new Map(
+        recording.media.map((item) => [
+          `${item.checksum}:${item.sizeBytes}`,
+          { checksum: item.checksum, sizeBytes: item.sizeBytes }
+        ])
+      ).values()
+    ]
+    const repository = dependencies.artifactProvenanceRepository
+    if (repository)
+      for (let start = 0; start < contents.length; start += 100) {
+        await guard(target, signal)
+        const batch = contents.slice(start, start + 100)
+        const historical = await repository.resolvePublishedSessionVersionsByContent({
+          projectId: target.projectId,
+          appSessionId: target.sessionId,
+          contents: batch
+        })
+        if (historical.length > 1000 || candidates.size + historical.length > MAX_CANDIDATES)
+          throw new RecordedObservationReadError('unavailable')
+        for (const file of historical) {
+          if (
+            file.projectId !== target.projectId ||
+            file.sessionId !== target.sessionId ||
+            file.state !== 'finalized' ||
+            file.isPublished !== true ||
+            !SAFE_ID.test(file.artifactId) ||
+            !SAFE_ID.test(file.versionId) ||
+            !batch.some((item) => item.checksum === file.checksum && item.sizeBytes === file.size)
+          )
+            continue
+          candidates.set(file.versionId, {
+            artifactId: file.artifactId,
+            versionId: file.versionId,
+            checksum: file.checksum,
+            sizeBytes: file.size
+          })
+        }
+      }
+    const media: ResolvedObservationMedia[] = []
+    for (const declared of recording.media) {
+      const matching = [...candidates.values()].filter(
+        (item) => item.checksum === declared.checksum && item.sizeBytes === declared.sizeBytes
+      )
+      const mapped = mapping?.[declared.sourceVersionId]
+      const selected = mapped
+        ? matching.find((item) => item.versionId === mapped)
+        : matching.length === 1
+          ? matching[0]
+          : undefined
+      if (!selected) continue
+      try {
+        const input = await resolve({
+          ...target,
+          artifactId: selected.artifactId,
+          versionId: selected.versionId
+        })
+        if (input.checksum !== declared.checksum || input.sizeBytes !== declared.sizeBytes) continue
+      } catch (error) {
+        if (error instanceof RecordedObservationReadError && error.code === 'unavailable') continue
+        throw error
+      }
+      media.push({ mediaKey: declared.mediaKey, ...selected })
+    }
+    await resolve(target)
+    await guard(target, signal)
+    return { receiving: { ...target }, recording, media }
+  }
+  const mediaBytes = async (
+    payload: RecordedObservationPayload | RecordedProjectPayload,
+    mediaKey: string,
+    signal?: AbortSignal
+  ): Promise<{ body: Uint8Array; mimeType: string }> => {
+    const source = 'archive' in payload ? payload.archive : payload.recording
+    const declared = source.media.find((item) => item.mediaKey === mediaKey)
+    const resolved = payload.media.find((item) => item.mediaKey === mediaKey)
+    if (!declared || !resolved) throw new RecordedObservationReadError('media-unavailable')
+    const body = await readVersion(
+      { ...payload.receiving, artifactId: resolved.artifactId, versionId: resolved.versionId },
+      MAX_MEDIA_BYTES,
+      signal
+    )
+    if (body.byteLength !== declared.sizeBytes || checksum(body) !== declared.checksum)
+      throw new RecordedObservationReadError('media-unavailable')
+    await resolve(payload.receiving)
+    await guard(payload.receiving, signal)
+    return {
+      body,
+      mimeType: /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(declared.mimeType)
+        ? declared.mimeType
+        : 'application/octet-stream'
+    }
+  }
   const safe = async <T>(operation: () => Promise<T>): Promise<T> => {
     try {
       return await operation()
@@ -414,6 +576,32 @@ export function createRecordedObservationReader(
   }
   return {
     read: (input, signal) => safe(() => load(recordedObservationTargetSchema.parse(input), signal)),
+    readProject: (input, signal) =>
+      safe(() => loadProject(recordedObservationTargetSchema.parse(input), signal)),
+    readProjectMedia: (input, mediaKey, signal) =>
+      safe(async () => {
+        if (!SAFE_ID.test(mediaKey)) throw new RecordedObservationReadError('media-unavailable')
+        return mediaBytes(
+          await loadProject(recordedObservationTargetSchema.parse(input), signal),
+          mediaKey,
+          signal
+        )
+      }),
+    selectFile: (input, signal) =>
+      safe(async () => {
+        const request = recordedFileRequestSchema.parse(input)
+        const payload =
+          request.format === 'project-recording'
+            ? await loadProject(request.target, signal)
+            : await load(request.target, signal)
+        // A selection is concrete readable evidence, not just a catalog or claimed source Version.
+        await mediaBytes(payload, request.mediaKey, signal)
+        return {
+          ...recordedFileSelectionForPayload(payload, request.mediaKey),
+          selectionId: randomUUID(),
+          selectedAt: Date.now()
+        }
+      }),
     readMedia: (input, mediaKey, signal) =>
       safe(async () => {
         const target = recordedObservationTargetSchema.parse(input)

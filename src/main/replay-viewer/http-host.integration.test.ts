@@ -5,6 +5,7 @@ import { createCallerContext, type CallerContext } from '../caller-context'
 import { RunObservationOwner, type RunObservationSource } from '../run-observation/owner'
 import { ObservationViewers } from '../run-observation/viewers'
 import { recordedFixture } from '../run-observation/recorded-viewer.test-support'
+import { recordedFileSelectionForPayload } from '../../shared/run-observation-recorded'
 import type { RuntimeViewAccess } from '../../shared/runtime-view'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import {
@@ -90,7 +91,12 @@ function harness(
       ? {
           recorded: {
             authorizeScope: async () => undefined,
-            read: async (target) => ({ ...recordedFixture().payload, receiving: target })
+            read: async (target) => ({ ...recordedFixture().payload, receiving: target }),
+            selectFile: async (target, mediaKey) =>
+              recordedFileSelectionForPayload(
+                { ...recordedFixture().payload, receiving: target },
+                mediaKey
+              )
           }
         }
       : {}),
@@ -811,6 +817,25 @@ describe('recorded Replay HTTP viewer', () => {
     expect(await h.viewers.recordingSelection(access.viewerId, { caller: h.owner })).toEqual(
       JSON.parse(selection.body)
     )
+    const fileSelection = await post('/api/recording/file-selection', { mediaKey: 'export-a' })
+    expect(fileSelection.status).toBe(200)
+    expect(JSON.parse(fileSelection.body)).toMatchObject({
+      kind: 'recorded-observation-file',
+      resource: { projectId: payload.receiving.projectId, versionId: 'receiver-version' }
+    })
+    expect(JSON.parse((await get('/api/recording/file-selection')).body)).toEqual(
+      JSON.parse(fileSelection.body)
+    )
+    expect(JSON.parse((await get('/api/recording/selection')).body)).toEqual(
+      JSON.parse(selection.body)
+    )
+    expect(
+      (await post('/api/recording/file-selection', { mediaKey: 'export-a', versionId: 'foreign' }))
+        .status
+    ).toBe(400)
+    expect((await post('/api/recording/file-selection', { mediaKey: '../private' })).status).toBe(
+      400
+    )
     expect(
       (await post('/api/recording/select', { stepKey: 'observation-0', target: scope })).status
     ).toBe(400)
@@ -828,5 +853,6 @@ describe('recorded Replay HTTP viewer', () => {
     expect((await http(access.url)).status).toBe(401)
     h.setAuthorized(false)
     await expect(get('/api/recording')).resolves.toMatchObject({ status: 401 })
+    await expect(get('/api/recording/file-selection')).resolves.toMatchObject({ status: 401 })
   })
 })

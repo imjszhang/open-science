@@ -6,6 +6,8 @@ import type {
   ObservationCaptureContent,
   ObservationViewerCapture
 } from '../shared/run-observation-capture'
+import { recordedFixture } from './run-observation/recorded-viewer.test-support'
+import { recordedFileSelectionForPayload } from '../shared/run-observation-recorded'
 
 const viewerId = '9df13077-848f-412b-a2bc-e77ea2d07f48'
 const target = { projectId: 'project', sessionId: 'session', runId: 'run' }
@@ -80,6 +82,73 @@ const harness = () => {
   }
 }
 describe('local observation public adapter', () => {
+  it('loads immutable recorded content and selects exact files without opening any live viewer', async () => {
+    const { payload } = recordedFixture()
+    const selection = recordedFileSelectionForPayload(payload, 'export-a')
+    const readRecorded = vi.fn(async () => payload)
+    const selectRecordedFile = vi.fn(async () => selection)
+    const openViewer = vi.fn(),
+      openRecordedViewer = vi.fn()
+    const port = createRunObservationExternalPort({
+      viewers: {} as ObservationViewers,
+      assertOpen: vi.fn(),
+      openViewer,
+      openRecordedViewer,
+      readRecorded,
+      selectRecordedFile
+    })
+    const caller = createTaskCallerContext()
+    expect(await port.call('readRecorded', { target: payload.receiving }, caller)).toEqual(payload)
+    expect(
+      await port.call(
+        'selectRecordedFile',
+        { target: payload.receiving, mediaKey: 'export-a' },
+        caller
+      )
+    ).toEqual(selection)
+    expect(selectRecordedFile).toHaveBeenCalledExactlyOnceWith(
+      { target: payload.receiving, mediaKey: 'export-a', format: 'run-observation' },
+      caller
+    )
+    expect(openViewer).not.toHaveBeenCalled()
+    expect(openRecordedViewer).not.toHaveBeenCalled()
+    for (const additional of [
+      { path: '/private/file' },
+      { command: 'run' },
+      { stepId: 'invented' },
+      { versionId: 'replacement' }
+    ])
+      await expect(
+        port.call(
+          'selectRecordedFile',
+          { target: payload.receiving, mediaKey: 'export-a', ...additional },
+          caller
+        )
+      ).rejects.toMatchObject({ code: 'invalid_request' })
+    expect(selectRecordedFile).toHaveBeenCalledTimes(1)
+    selectRecordedFile.mockResolvedValueOnce({ ...selection, mediaKey: 'replacement' })
+    await expect(
+      port.call('selectRecordedFile', { target: payload.receiving, mediaKey: 'export-a' }, caller)
+    ).rejects.toMatchObject({ code: 'unavailable' })
+  })
+  it('discards a recorded-file read if the caller lease expires during authorization', async () => {
+    const { payload } = recordedFixture()
+    let current = true
+    const caller = createTaskCallerContext({ isAuthorizationCurrent: () => current })
+    const readRecorded = vi.fn(async () => {
+      current = false
+      return payload
+    })
+    const port = createRunObservationExternalPort({
+      viewers: {} as ObservationViewers,
+      assertOpen: vi.fn(),
+      openViewer: vi.fn(),
+      readRecorded
+    })
+    await expect(
+      port.call('readRecorded', { target: payload.receiving }, caller)
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+  })
   it('reads current capture metadata and exact bounded chunks through the caller-owned viewer', async () => {
     const h = harness(),
       caller = createTaskCallerContext()

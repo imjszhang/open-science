@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testin
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   recordedObservationPayloadSchema,
+  recordedFileSelectionForPayload,
   type RecordedObservationPayload,
   type RecordedRunObservationSelection
 } from '../../shared/run-observation-recorded'
@@ -135,6 +136,50 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('recorded browser viewer', () => {
+  it('uses a separate authenticated file-selection route and rejects substituted immutable evidence', async () => {
+    const recording = payload()
+    const selection = {
+      ...recordedFileSelectionForPayload(recording, 'saved-file'),
+      selectionId: 'selection-1',
+      selectedAt: 100
+    }
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify(selection), { headers: { 'content-type': 'application/json' } })
+      )
+    const client = new ReplayViewerClient(fetcher)
+    expect(await client.selectRecordingFile(recording, 'saved-file')).toEqual(selection)
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/recording/file-selection',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify({ mediaKey: 'saved-file' })
+      })
+    )
+    fetcher.mockResolvedValue(
+      new Response(JSON.stringify(selection), { headers: { 'content-type': 'application/json' } })
+    )
+    expect(await client.recordedFileSelection(recording)).toEqual(selection)
+    fetcher.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...selection,
+          resource: { ...selection.resource, versionId: 'replacement' }
+        }),
+        { headers: { 'content-type': 'application/json' } }
+      )
+    )
+    await expect(client.recordedFileSelection(recording)).rejects.toMatchObject({
+      kind: 'invalid-response'
+    })
+    fetcher.mockClear()
+    await expect(
+      client.selectRecordingFile({ ...recording, media: [] }, 'saved-file')
+    ).rejects.toMatchObject({ kind: 'unavailable' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
   it('shows server-validated demo context without adding purpose to archive v1 or treating it as a live run', async () => {
     const recording: RecordedObservationPayload = {
       ...payload(),

@@ -15,6 +15,9 @@ import {
 import {
   recordedObservationTargetSchema,
   recordedObservationPayloadSchema,
+  recordedFileSelectionSchema,
+  recordedFileSelectionForPayload,
+  type RecordedObservationFileSelection,
   type RecordedObservationPayload,
   type RecordedObservationTarget,
   type RecordedRunObservationSelection
@@ -197,6 +200,24 @@ export class ReplayViewerRequestError extends Error {
     super('The scoped observation request did not complete.')
     this.name = 'ReplayViewerRequestError'
   }
+}
+const verifiedRecordedFileSelection = (
+  value: unknown,
+  payload: RecordedObservationPayload,
+  mediaKey?: string
+): RecordedObservationFileSelection => {
+  const selection = recordedFileSelectionSchema.parse(value)
+  try {
+    const expected = recordedFileSelectionForPayload(payload, selection.mediaKey)
+    const content = { ...selection }
+    delete content.selectionId
+    delete content.selectedAt
+    if ((mediaKey && mediaKey !== selection.mediaKey) || !equivalent(content, expected))
+      throw new Error('Mismatched evidence.')
+  } catch {
+    throw new ReplayViewerRequestError('invalid-response')
+  }
+  return selection
 }
 const boundedBytes = async (
   response: Response,
@@ -417,6 +438,36 @@ export class ReplayViewerClient {
       signal
     )
     return response ? verifiedRecordedSelection(response, payload) : null
+  }
+  async selectRecordingFile(
+    payload: RecordedObservationPayload,
+    mediaKey: string,
+    signal?: AbortSignal
+  ): Promise<RecordedObservationFileSelection> {
+    try {
+      recordedFileSelectionForPayload(payload, mediaKey)
+    } catch {
+      throw new ReplayViewerRequestError('unavailable')
+    }
+    const response = await this.json(
+      '/api/recording/file-selection',
+      recordedFileSelectionSchema,
+      { mediaKey },
+      signal
+    )
+    return verifiedRecordedFileSelection(response, payload, mediaKey)
+  }
+  async recordedFileSelection(
+    payload: RecordedObservationPayload,
+    signal?: AbortSignal
+  ): Promise<RecordedObservationFileSelection | null> {
+    const response = await this.json(
+      '/api/recording/file-selection',
+      recordedFileSelectionSchema.nullable(),
+      undefined,
+      signal
+    )
+    return response ? verifiedRecordedFileSelection(response, payload) : null
   }
   async recordedMedia(
     payload: RecordedObservationPayload,

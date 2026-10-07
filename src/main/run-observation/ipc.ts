@@ -7,6 +7,11 @@ export function registerRunObservationIpc(port: RunObservationExternalPort): voi
   for (const method of [
     'open',
     'openRecorded',
+    'readRecorded',
+    'readProjectRecording',
+    'selectRecordedFile',
+    'selectRecordingFile',
+    'recordingFileSelection',
     'selection',
     'recordingSelection',
     'recordingStatus',
