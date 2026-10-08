@@ -10,7 +10,11 @@ import {
   replayStepFailure
 } from './replay-navigation'
 import { cn } from '@/lib/utils'
-import { replayRecordedCoverage, type ReplayRecordedRange } from './replay-recorded-gaps'
+import {
+  formatReplayRecordedTime,
+  replayRecordedCoverage,
+  type ReplayRecordedRange
+} from './replay-recorded-gaps'
 import { matchNotebookRunTool, resolveNotebookRunToolName } from '../notebook-tool-names'
 import {
   Select,
@@ -263,8 +267,8 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
               title={t('Coverage combines saved recordings in this branch.')}
               onClick={() => props.onSeek(coverage.footage[0].startMs)}
             >
-              {t('Recorded footage')} · {formatReplayTime(coverage.footage[0].startMs)}–
-              {formatReplayTime(coverage.footage.at(-1)!.endMs)}
+              {t('Recorded footage')} · {formatReplayRecordedTime(coverage.footage[0].startMs)}–
+              {formatReplayRecordedTime(coverage.footage.at(-1)!.endMs)}
             </button>
             {coverage.gaps.length ? (
               <Popover
@@ -299,8 +303,8 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
                         onClick={() => props.onSeek(range.startMs)}
                       >
                         {t('No footage: {{from}}–{{to}}', {
-                          from: formatReplayTime(range.startMs),
-                          to: formatReplayTime(range.endMs)
+                          from: formatReplayRecordedTime(range.startMs),
+                          to: formatReplayRecordedTime(range.endMs)
                         })}
                       </Button>
                     </PopoverClose>
@@ -324,12 +328,12 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
                   width: `${((range.endMs - range.startMs) / props.durationMs) * 100}%`
                 }}
                 aria-label={t('Footage: {{from}}–{{to}}', {
-                  from: formatReplayTime(range.startMs),
-                  to: formatReplayTime(range.endMs)
+                  from: formatReplayRecordedTime(range.startMs),
+                  to: formatReplayRecordedTime(range.endMs)
                 })}
                 title={t('Footage: {{from}}–{{to}}', {
-                  from: formatReplayTime(range.startMs),
-                  to: formatReplayTime(range.endMs)
+                  from: formatReplayRecordedTime(range.startMs),
+                  to: formatReplayRecordedTime(range.endMs)
                 })}
                 onClick={() => props.onSeek(range.startMs)}
               />
@@ -344,12 +348,12 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
                   width: `${((range.endMs - range.startMs) / props.durationMs) * 100}%`
                 }}
                 aria-label={t('No footage: {{from}}–{{to}}', {
-                  from: formatReplayTime(range.startMs),
-                  to: formatReplayTime(range.endMs)
+                  from: formatReplayRecordedTime(range.startMs),
+                  to: formatReplayRecordedTime(range.endMs)
                 })}
                 title={t('No footage: {{from}}–{{to}}', {
-                  from: formatReplayTime(range.startMs),
-                  to: formatReplayTime(range.endMs)
+                  from: formatReplayRecordedTime(range.startMs),
+                  to: formatReplayRecordedTime(range.endMs)
                 })}
                 onClick={() => props.onSeek(range.startMs)}
               />

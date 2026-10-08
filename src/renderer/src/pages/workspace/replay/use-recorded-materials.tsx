@@ -29,6 +29,7 @@ import {
 } from '../../../../../shared/project-recording'
 import { recordedResults, recordedMediaResource } from '@/lib/replay/recorded-results'
 import {
+  fixedReplayResource,
   readRecordedResource,
   type RecordedResourceReader
 } from './results/recorded-resource-reader'
@@ -392,18 +393,24 @@ export function useRecordedMaterials(
     (requested, signal) => {
       // A UI filter is not authority: only exact resources in the resolved research catalog
       // can reach the existing immutable reader. No latest-Version or mutable path fallback.
-      const entry = resultCatalog.entries.find(
-        ({ resource }) =>
-          resource.projectId === requested.projectId &&
-          resource.sessionId === requested.sessionId &&
-          resource.artifactId === requested.artifactId &&
-          resource.fileId === requested.fileId &&
-          resource.versionId === requested.versionId &&
-          resource.checksum === requested.checksum &&
-          resource.locator === requested.locator
-      )
-      if (!entry) return Promise.reject(new Error('The recorded file is unavailable.'))
-      return readRecordedResource(entry.resource, signal)
+      const requestedFixed = fixedReplayResource(requested)
+      if (!requestedFixed) return Promise.reject(new Error('The recorded file is unavailable.'))
+      const resource = resultCatalog.entries
+        .map((entry) => fixedReplayResource(entry.resource))
+        .find(
+          (resource) =>
+            resource &&
+            (resource.source ?? 'artifact') === (requestedFixed.source ?? 'artifact') &&
+            resource.projectId === requestedFixed.projectId &&
+            resource.sessionId === requestedFixed.sessionId &&
+            resource.artifactId === requestedFixed.artifactId &&
+            resource.fileId === requestedFixed.fileId &&
+            resource.versionId === requestedFixed.versionId &&
+            resource.checksum === requestedFixed.checksum &&
+            resource.locator === requestedFixed.locator
+        )
+      if (!resource) return Promise.reject(new Error('The recorded file is unavailable.'))
+      return readRecordedResource(resource, signal)
     },
     [resultCatalog]
   )

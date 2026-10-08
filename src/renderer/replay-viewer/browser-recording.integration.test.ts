@@ -718,10 +718,14 @@ createRoot(document.getElementById('root')).render(<App/> )`
                 requestAnimationFrame(() => requestAnimationFrame(() => done()))
               )
           )
-          await child.getByRole('button', { name: 'Fit to window', exact: true }).click()
+          // The compact research toolbar offers one toggle for the next sizing action.
+          // Its initial state already fits; later iterations retain the chosen native size.
+          if ((await stage.getAttribute('data-size-mode')) === 'actual')
+            await child.getByRole('button', { name: 'Fit to window', exact: true }).click()
+          await expect(stage).toHaveAttribute('data-size-mode', 'fit')
           await expect(
-            child.getByRole('button', { name: 'Fit to window', exact: true })
-          ).toHaveAttribute('aria-pressed', 'true')
+            child.getByRole('button', { name: 'Actual size (100%)', exact: true })
+          ).toBeVisible()
           await expect
             .poll(async () => {
               const box = await surface.boundingBox(),
@@ -744,6 +748,10 @@ createRoot(document.getElementById('root')).render(<App/> )`
           expect(fitOverflow.width).toBeLessThanOrEqual(1)
           expect(fitOverflow.height).toBeLessThanOrEqual(1)
           await child.getByRole('button', { name: 'Actual size (100%)', exact: true }).click()
+          await expect(stage).toHaveAttribute('data-size-mode', 'actual')
+          await expect(
+            child.getByRole('button', { name: 'Fit to window', exact: true })
+          ).toBeVisible()
           await expect
             .poll(async () => {
               const box = await surface.boundingBox()

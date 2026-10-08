@@ -50,7 +50,11 @@ import { createReplayPresentation } from './replay-presentation'
 import { ReplayStage, type ReplayMaterialView } from './ReplayStage'
 import { ReplayControls } from './ReplayControls'
 import { ReplayMaterialActionProvider, type ReplayMaterialAction } from './replay-material-action'
-import { advanceResearchReplay, type ReplayRecordedRange } from './replay-recorded-gaps'
+import {
+  advanceResearchReplay,
+  formatReplayRecordedTime,
+  type ReplayRecordedRange
+} from './replay-recorded-gaps'
 import { formatReplayTime } from './replay-navigation'
 import type {
   RunObservationExecutionContext,
@@ -1761,11 +1765,15 @@ const ReplayPanelContent = ({
           >
             <span>
               {referencePosition !== undefined && referencePosition >= 0 && !contentDisabled
-                ? t('Reference time: {{time}}', { time: formatReplayTime(referencePosition) })
+                ? t('Reference time: {{time}}', {
+                    time: formatReplayRecordedTime(referencePosition)
+                  })
                 : t('Reference time unavailable')}
             </span>
             <span>
-              {t('Playback position: {{time}}', { time: formatReplayTime(scene.positionMs) })}
+              {t('Playback position: {{time}}', {
+                time: formatReplayRecordedTime(scene.positionMs)
+              })}
             </span>
           </div>
           <div className="flex w-full min-w-0 items-center">

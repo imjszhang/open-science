@@ -1929,13 +1929,39 @@ describe('single-material research presentation', () => {
       />
     )
     const coverage = screen.getByTestId('replay-recording-coverage')
-    const footage = within(coverage).getByRole('button', { name: 'Footage: 0:00–0:01' })
+    const footage = within(coverage).getByRole('button', { name: 'Footage: 0:00.5–0:01' })
     expect(footage.style.left).toBe(`${(500 / 3000) * 100}%`)
-    fireEvent.click(within(coverage).getByRole('button', { name: 'No footage: 0:01–0:01' }))
+    fireEvent.click(within(coverage).getByRole('button', { name: 'No footage: 0:01–0:01.5' }))
     expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1000')
     expect(footage.style.left).toBe(`${(500 / 3000) * 100}%`)
-    fireEvent.click(within(coverage).getByRole('button', { name: 'Footage: 0:01–0:03' }))
+    fireEvent.click(within(coverage).getByRole('button', { name: 'Footage: 0:01.5–0:03' }))
     expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1500')
+  })
+
+  it('displays a real subsecond encoder gap distinctly and seeks its exact start', () => {
+    const document = makeDocument()
+    document.branches[0].durationMs = 90000
+    render(
+      <ReplayPanel
+        document={document}
+        {...callbacks()}
+        host={null}
+        presentationMode="research"
+        recordedTimeOrigins={{ main: 100000 }}
+        recordedCoverage={{
+          main: [
+            { startedAt: 183000, endedAt: 185435 },
+            { startedAt: 185551, endedAt: 187000 }
+          ]
+        }}
+      />
+    )
+    const coverage = screen.getByTestId('replay-recording-coverage')
+    const gapLabel = 'No footage: 1:25.435–1:25.551'
+    fireEvent.click(within(coverage).getByRole('button', { name: gapLabel }))
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('85435')
+    fireEvent.click(within(coverage).getByRole('button', { name: 'Recording gaps' }))
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: gapLabel })).toBeTruthy()
   })
 
   it('distinguishes the selected material timestamp from the research playhead and pauses on media failure', async () => {
@@ -1974,14 +2000,14 @@ describe('single-material research presentation', () => {
     )
     seekProgress(2500)
     fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
-    expect(screen.getByText('Reference time: 0:00')).toBeTruthy()
-    expect(screen.getByText('Playback position: 0:02')).toBeTruthy()
+    expect(screen.getByText('Reference time: 0:00.7')).toBeTruthy()
+    expect(screen.getByText('Playback position: 0:02.5')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
     expect(screen.getByRole('button', { name: 'Pause replay' })).toBeTruthy()
     act(() => pauseMedia?.())
     expect(screen.getByRole('button', { name: 'Play replay' })).toBeTruthy()
     expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('2500')
-    expect(screen.getByText('Reference time: 0:00')).toBeTruthy()
+    expect(screen.getByText('Reference time: 0:00.7')).toBeTruthy()
   })
 
   it('keeps browser fullscreen distinct from expanding the native preview', async () => {

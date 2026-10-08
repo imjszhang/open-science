@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { advanceResearchReplay, replayRecordedCoverage } from './replay-recorded-gaps'
+import {
+  advanceResearchReplay,
+  formatReplayRecordedTime,
+  replayRecordedCoverage
+} from './replay-recorded-gaps'
 import type { ReplayStep } from '../../../../../shared/replay'
 const step = (recordedAt: number): ReplayStep => ({ recordedAt }) as ReplayStep
 const base = {
@@ -46,6 +50,23 @@ describe('optional gaps in a research clock', () => {
 })
 
 describe('actual footage coverage', () => {
+  it('retains small encoder gaps and formats their distinct millisecond boundaries', () => {
+    const coverage = replayRecordedCoverage(
+      [
+        { startedAt: 183000, endedAt: 185435 },
+        { startedAt: 185551, endedAt: 187000 }
+      ],
+      100000,
+      90000
+    )
+    expect(coverage.gaps).toEqual([{ startMs: 85435, endMs: 85551 }])
+    expect(formatReplayRecordedTime(coverage.gaps[0].startMs)).toBe('1:25.435')
+    expect(formatReplayRecordedTime(coverage.gaps[0].endMs)).toBe('1:25.551')
+    expect(formatReplayRecordedTime(85400)).toBe('1:25.4')
+    expect(formatReplayRecordedTime(85040)).toBe('1:25.04')
+    expect(formatReplayRecordedTime(85000)).toBe('1:25')
+    expect(formatReplayRecordedTime(59999.7)).toBe('1:00')
+  })
   it('merges overlapping sources and retains only actual interior gaps', () => {
     expect(
       replayRecordedCoverage(

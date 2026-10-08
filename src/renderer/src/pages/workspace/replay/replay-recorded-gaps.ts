@@ -4,6 +4,14 @@ export type ReplayRecordedRange = Readonly<{ startedAt: number; endedAt: number 
 
 export type ReplayCoverageRange = Readonly<{ startMs: number; endMs: number }>
 
+/** Evidence boundaries keep millisecond precision, without padding whole-second positions. */
+export function formatReplayRecordedTime(milliseconds: number): string {
+  const time = Number.isFinite(milliseconds) ? Math.max(0, Math.round(milliseconds)) : 0
+  const seconds = Math.floor(time / 1000)
+  const remainder = time % 1000
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}${remainder ? `.${String(remainder).padStart(3, '0').replace(/0+$/, '')}` : ''}`
+}
+
 /** Union actual segment coverage on the research clock, independent of playback progress.
  * Only holes between saved segments are gaps; leading/trailing time is outside coverage. */
 export function replayRecordedCoverage(

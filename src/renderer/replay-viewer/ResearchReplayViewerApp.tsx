@@ -14,6 +14,9 @@ import {
 import { recordedMediaResource } from '../src/lib/replay/recorded-results'
 import type { ReplayNotebookRunReader } from '../src/lib/replay/notebook-details'
 import { ErrorNotice } from '../src/components/error-notice'
+import { Info } from 'lucide-react'
+import { Button } from '../src/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '../src/components/ui/popover'
 import { ReplayPanel } from '../src/pages/workspace/replay/ReplayPanel'
 import type {
   ReplayMaterialPlayback,
@@ -343,9 +346,12 @@ const ResearchReplayContent = ({
           const at = playback?.recordedAt
           return (
             <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
+              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border-200 px-2 py-1">
                 {recordings.length <= 1 ? (
-                  <p className="truncate text-sm text-text-200" title={current?.descriptor.name}>
+                  <p
+                    className="min-w-0 flex-1 truncate text-sm text-text-200"
+                    title={current?.descriptor.name}
+                  >
                     {current
                       ? recordingLabel(current, recordings.indexOf(current))
                       : t('Project recording')}
@@ -354,7 +360,7 @@ const ResearchReplayContent = ({
                 {recordings.length > 1 ? (
                   <select
                     aria-label={t('Project recording')}
-                    className="w-full rounded border border-border-200 bg-bg-000 p-2 text-xs"
+                    className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-000 px-2 text-xs"
                     value={recordingId}
                     onChange={(event) => setRecordingId(event.target.value)}
                   >
@@ -366,13 +372,26 @@ const ResearchReplayContent = ({
                   </select>
                 ) : null}
                 {current ? (
-                  <details className="text-xs text-text-300">
-                    <summary className="cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      {t('Recording details')}
-                    </summary>
-                    <p className="mt-1 break-all">{current.descriptor.name}</p>
-                    <p className="break-all">{current.descriptor.target.versionId}</p>
-                  </details>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0"
+                        aria-label={t('Recording details')}
+                      >
+                        <Info className="size-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="max-w-72 space-y-1 break-all">
+                      <p>{current.descriptor.name}</p>
+                      <p>
+                        {t('Version')}
+                        {': '}
+                        <code>{current.descriptor.target.versionId}</code>
+                      </p>
+                    </PopoverContent>
+                  </Popover>
                 ) : null}
               </div>
               {!current ? (

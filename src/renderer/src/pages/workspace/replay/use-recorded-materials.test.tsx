@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useRunObservationQuestionStore } from '@/stores/run-observation-question-store'
-import type { ReplayDocument } from '../../../../../shared/replay'
+import type { ReplayDocument, ReplayResource } from '../../../../../shared/replay'
 import type { ResearchDemoHistory, ResearchDemoSource } from '../../../../../shared/research-demo'
 import {
   recordedFileSelectionForPayload,
@@ -210,6 +210,7 @@ const api = {
   },
   projectRecordings: { selection: vi.fn(), read: vi.fn() },
   artifacts: { readPreview: vi.fn() },
+  uploads: { readPreview: vi.fn() },
   notebook: { ...runtime }
 }
 type HarnessProps = {
@@ -821,3 +822,68 @@ it('keeps research results independent of project selection and asks the exact r
   )
   expectNoExecution()
 })
+
+it.each(['artifact', 'upload'] as const)(
+  'reads a fixed %s result whose catalog resource has no locator',
+  async (source) => {
+    const doc = documentFixture()
+    const resource: ReplayResource = {
+      id: 'stored-result',
+      name: 'Stored output.txt',
+      source,
+      projectId: receiving.projectId,
+      sessionId: receiving.sessionId,
+      ...(source === 'artifact' ? { artifactId: 'stored-file' } : { fileId: 'stored-file' }),
+      versionId: 'stored-version',
+      availability: 'recorded',
+      checksum: 'c'.repeat(64),
+      mimeType: 'text/plain'
+    }
+    doc.resources = [
+      resource,
+      {
+        ...resource,
+        id: 'contradictory',
+        name: 'Invalid output.txt',
+        locator: '/mutable/latest.txt'
+      }
+    ]
+    const catalog = discovery()
+    const reader = source === 'artifact' ? api.artifacts.readPreview : api.uploads.readPreview
+    reader.mockResolvedValue({
+      content: 'Original immutable result',
+      encoding: 'utf8',
+      truncated: false
+    })
+    function ResultsHarness(): React.JSX.Element {
+      const materials = useRecordedMaterials(doc, catalog, undefined, undefined, 'research')
+      const view = materials.views.find((item) => item.id === 'results')!
+      return (
+        <>
+          <output data-testid="ready">{String(materials.timingReady)}</output>
+          {typeof view.content === 'function' ? view.content(true) : view.content}
+        </>
+      )
+    }
+    render(<ResultsHarness />)
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+    expect(screen.queryByRole('button', { name: 'Invalid output.txt' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Stored output.txt' }))
+    await screen.findByText('Original immutable result')
+    expect(reader).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        projectId: receiving.projectId,
+        sessionId: receiving.sessionId,
+        fileId: 'stored-file',
+        versionId: 'stored-version',
+        encoding: 'utf8',
+        path: expect.stringContaining('stored-version')
+      })
+    )
+    expect(
+      source === 'artifact' ? api.uploads.readPreview : api.artifacts.readPreview
+    ).not.toHaveBeenCalled()
+    expect(resource.locator).toBeUndefined()
+    expectNoExecution()
+  }
+)
