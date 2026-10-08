@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Info } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { recordingSourceLabel } from './recording-source-label'
+import { RecordingTimelineFollow } from './RecordingTimelineFollow'
+import { recordingTargetKey } from './recording-timeline-follow'
 import { ErrorNotice } from '@/components/error-notice'
 import { useNavigationStore } from '@/stores/navigation-store'
 import {
@@ -83,6 +85,7 @@ export function useRecordedMaterials(
   const [history, setHistory] = useState<ResearchDemoHistory>()
   const [historyFailed, setHistoryFailed] = useState(false)
   const [selected, setSelected] = useState<Candidate>()
+  const [followingRecording, setFollowingRecording] = useState(true)
   const [selectionInitialized, setSelectionInitialized] = useState(false)
   const [request, setRequest] = useState<{ id: string; revision: number }>()
   const [payload, setPayload] = useState<RecordedObservationPayload | RecordedProjectPayload>()
@@ -101,6 +104,7 @@ export function useRecordedMaterials(
   if (loadedSourceKey !== sourceKey) {
     setLoadedSourceKey(sourceKey)
     setSelected(undefined)
+    setFollowingRecording(true)
     setSelectionInitialized(false)
     setPayload(undefined)
     setBrowserPayload(undefined)
@@ -155,7 +159,8 @@ export function useRecordedMaterials(
     ],
     [discovery.recordings, history]
   )
-  const choose = useCallback((candidate: Candidate, reveal = true) => {
+  const choose = useCallback((candidate: Candidate, reveal = true, follow = false) => {
+    setFollowingRecording(follow)
     askRequest.current?.abort()
     setSelectionInitialized(true)
     setSelected(candidate)
@@ -242,7 +247,7 @@ export function useRecordedMaterials(
         setSelectionInitialized(true)
         const first =
           candidates.find((candidate) => candidate.format === 'web-recording') ?? candidates[0]
-        if (first) choose(first, false)
+        if (first) choose(first, false, true)
       }
     })
     return () => {
@@ -529,6 +534,7 @@ export function useRecordedMaterials(
             className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-000 px-2 text-xs"
             value={selected ? JSON.stringify(selected.target) : ''}
             onChange={(event) => {
+              setFollowingRecording(false)
               const next = candidates.find(
                 (candidate) => JSON.stringify(candidate.target) === event.target.value
               )
@@ -656,101 +662,117 @@ export function useRecordedMaterials(
           return (
             <>
               {catalog}
-              {selected &&
-              (selected.localHistory ||
-                (payload && 'archive' in payload) ||
-                (selected.format === 'web-recording' && browserPayload && !browserAligned)) ? (
-                <div className="shrink-0 px-3 py-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      showRecordedObservation(
-                        selected.target,
-                        selected.resource.name,
-                        selected.format
-                      )
-                    }
-                  >
-                    {t('Open recording separately')}
-                  </Button>
-                </div>
-              ) : null}
-              {selected?.format === 'web-recording' && loadFailed ? (
-                <ErrorNotice
-                  inline
-                  title={t('Could not read the recorded material.')}
-                  primaryButton={{ label: t('Retry'), onClick: () => choose({ ...selected }) }}
-                />
-              ) : null}
-              {selected?.format === 'web-recording' ? (
-                <RunObservationPreview
-                  presentationMode={presentationMode}
-                  mode="recorded"
-                  format="web-recording"
-                  target={selected.target}
-                  title={selected.resource.name}
-                  isActive={active}
-                  questionRecovery={recovery}
-                  playback={
-                    playback
-                      ? {
-                          ...playback,
-                          recordedAt: browserAligned ? playback.recordedAt : undefined,
-                          playing: browserAligned && playback.playing
-                        }
-                      : undefined
-                  }
-                  onAskBrowserMoment={(selection) => {
-                    if (!useRunObservationQuestionStore.getState().askRecorded(selection))
-                      throw new Error('Discussion unavailable')
-                  }}
-                />
-              ) : (
-                (pending ??
-                (track ? (
-                  <ProjectReplay
+              <RecordingTimelineFollow
+                enabled={presentationMode === 'research' && (prepared?.recordings.length ?? 0) > 1}
+                following={followingRecording}
+                onFollowingChange={setFollowingRecording}
+                coverage={playback?.branchId ? (timed?.coverage[playback.branchId] ?? []) : []}
+                recordedAt={playback?.continuous ? playback.recordedAt : undefined}
+                selected={selected?.target}
+                availableTargets={prepared?.recordings.map((item) => item.receiving) ?? []}
+                onSelect={(target) => {
+                  const next = discoveredRecordings.find(
+                    (item) => recordingTargetKey(item.target) === recordingTargetKey(target)
+                  )
+                  if (next) choose(next, false, true)
+                }}
+              >
+                {selected &&
+                (selected.localHistory ||
+                  (payload && 'archive' in payload) ||
+                  (selected.format === 'web-recording' && browserPayload && !browserAligned)) ? (
+                  <div className="shrink-0 px-3 py-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        showRecordedObservation(
+                          selected.target,
+                          selected.resource.name,
+                          selected.format
+                        )
+                      }
+                    >
+                      {t('Open recording separately')}
+                    </Button>
+                  </div>
+                ) : null}
+                {selected?.format === 'web-recording' && loadFailed ? (
+                  <ErrorNotice
+                    inline
+                    title={t('Could not read the recorded material.')}
+                    primaryButton={{ label: t('Retry'), onClick: () => choose({ ...selected }) }}
+                  />
+                ) : null}
+                {selected?.format === 'web-recording' ? (
+                  <RunObservationPreview
                     presentationMode={presentationMode}
-                    active={active}
-                    transport={
+                    mode="recorded"
+                    format="web-recording"
+                    target={selected.target}
+                    title={selected.resource.name}
+                    isActive={active}
+                    questionRecovery={recovery}
+                    playback={
                       playback
                         ? {
                             ...playback,
-                            recordedAt:
-                              !selected?.localHistory &&
-                              payload?.receiving.projectId === document?.source.projectId &&
-                              payload?.receiving.sessionId === document?.source.sessionId
-                                ? playback.recordedAt
-                                : undefined
+                            recordedAt: browserAligned ? playback.recordedAt : undefined,
+                            playing: browserAligned && playback.playing
                           }
                         : undefined
                     }
-                    track={track}
-                    missingMediaKeys={
-                      payload
-                        ? track.media
-                            .filter(
-                              (media) =>
-                                !payload.media.some(
-                                  (resolved) => resolved.mediaKey === media.mediaKey
-                                )
-                            )
-                            .map((media) => media.mediaKey)
-                        : undefined
-                    }
-                    readImage={readImage}
-                    onAskFrame={(frame) => askFile(frame.mediaKey)}
+                    onAskBrowserMoment={(selection) => {
+                      if (!useRunObservationQuestionStore.getState().askRecorded(selection))
+                        throw new Error('Discussion unavailable')
+                    }}
                   />
                 ) : (
-                  <p className="p-3 text-sm text-muted-foreground">
-                    {candidates.length && !selected
-                      ? t('Choose saved project evidence. No environment is started.')
-                      : t(
-                          'No project images were recorded. Other research materials remain available.'
-                        )}
-                  </p>
-                )))
-              )}
+                  (pending ??
+                  (track ? (
+                    <ProjectReplay
+                      presentationMode={presentationMode}
+                      active={active}
+                      transport={
+                        playback
+                          ? {
+                              ...playback,
+                              recordedAt:
+                                !selected?.localHistory &&
+                                payload?.receiving.projectId === document?.source.projectId &&
+                                payload?.receiving.sessionId === document?.source.sessionId
+                                  ? playback.recordedAt
+                                  : undefined
+                            }
+                          : undefined
+                      }
+                      track={track}
+                      missingMediaKeys={
+                        payload
+                          ? track.media
+                              .filter(
+                                (media) =>
+                                  !payload.media.some(
+                                    (resolved) => resolved.mediaKey === media.mediaKey
+                                  )
+                              )
+                              .map((media) => media.mediaKey)
+                          : undefined
+                      }
+                      readImage={readImage}
+                      onAskFrame={(frame) => askFile(frame.mediaKey)}
+                    />
+                  ) : (
+                    <p className="p-3 text-sm text-muted-foreground">
+                      {candidates.length && !selected
+                        ? t('Choose saved project evidence. No environment is started.')
+                        : t(
+                            'No project images were recorded. Other research materials remain available.'
+                          )}
+                    </p>
+                  )))
+                )}
+              </RecordingTimelineFollow>
             </>
           )
         }

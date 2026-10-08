@@ -60,9 +60,10 @@ unsupported codecs stay explicit; Replay never fills missing evidence by executi
 
 The player shares the existing Project Replay material view, supporting time-based seeking,
 playback speed, segment transitions and event markers. Explicit gaps are not fabricated into
-frames. Image-only historical recordings keep their sampling semantics. Switching material or
-research pauses playback and cancels pending media reads. Notebook and Results retain independent
-selection and execution behavior.
+frames. Image-only historical recordings keep their sampling semantics. Switching material tabs
+keeps the research clock playing; hidden media can suspend decoding without pausing that clock.
+Changing the research source disposes its media reads. Notebook and Results keep independent
+selection and evidence readers.
 
 `recorded-project-moment` references contain the receiving index Version/checksum, recording ID,
 relative time, exact segment Version and segment-relative time. They do not fabricate Notebook
@@ -91,15 +92,22 @@ material adapters; they do not call each other's APIs. A standalone recording vi
 own transport. Snapshot-only recordings follow the selected recorded step.
 
 The normal conversation timeline uses compressed reading durations, so those offsets are not
-wall-clock evidence. Selecting a source-matched web recording builds a temporary elapsed timeline
-from actual step timestamps and the recording's `startedAt`. Only that derived view is sorted
-chronologically (stable for ties); original messages, source files, and `.science` are unchanged.
-The selected recording keeps this clock across material tabs. Compressed-timeline view checkpoints
-are not overwritten by the temporary elapsed view. Earlier overlapping Notebook runs do not show
+wall-clock evidence. The verified recording catalog and actual step timestamps establish one
+elapsed timeline before playback starts. That derived view is sorted chronologically (stable for
+ties); original messages, source files, and `.science` are unchanged. Changing the selected
+recording cannot rebuild the clock. View checkpoints identify whether their time belongs to the
+recorded or compressed clock. Earlier overlapping Notebook runs do not show
 their final outputs until their recorded end time. Missing timestamps, unrelated local history,
 or ambiguous branch identity leave synchronization unavailable with an explicit standalone-view
 fallback; footage is never stretched to fit a reading timeline. Outside recording coverage or
 inside a gap, the master timeline can continue while the material reports missing footage.
+
+When a research has multiple web recordings, project footage follows the one uniquely covering
+the current time on the current branch. Selecting a recording manually disables automatic source
+changes until “Follow replay” is selected again. This affects only the footage selection: it
+neither pauses nor seeks. Overlapping recordings require a manual choice; gaps, unavailable media,
+unaligned sources and separate local runs are never filled by a nearby recording. Sampled image
+archives retain their existing manual selection semantics.
 
 Only opted-in desktop embeds (`name="open-science-research-clock"`) receive clock updates; their
 authorized navigation URLs remain unchanged. A fresh transferred

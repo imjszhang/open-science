@@ -78,7 +78,11 @@
     "src/renderer/src/pages/workspace/replay/BrowserRecording.test-support.ts",
     "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx",
     "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.tsx",
-    "src/renderer/src/pages/workspace/replay/browser-recording-playback.ts"
+    "src/renderer/src/pages/workspace/replay/browser-recording-playback.ts",
+    "src/renderer/src/pages/workspace/replay/recording-timeline-follow.ts",
+    "src/renderer/src/pages/workspace/replay/recording-timeline-follow.test.ts",
+    "src/renderer/src/pages/workspace/replay/RecordingTimelineFollow.tsx",
+    "src/renderer/src/pages/workspace/replay/RecordingTimelineFollow.test.tsx"
   ],
   "interfacePaths": [
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
@@ -161,7 +165,9 @@
       "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
       "src/renderer/replay-viewer/browser-recording.integration.test.ts",
       "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
-      "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx"
+      "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx",
+      "src/renderer/src/pages/workspace/replay/recording-timeline-follow.test.ts",
+      "src/renderer/src/pages/workspace/replay/RecordingTimelineFollow.test.tsx"
     ],
     "contract": [],
     "consumer": [

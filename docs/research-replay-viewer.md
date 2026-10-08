@@ -76,6 +76,16 @@ have independent positions. A recording gap distinguishes not-started, ended and
 intervals in the media stage, with an explicit jump to actual footage. Later local runs and
 unaligned recordings remain available separately.
 
+With multiple verified web recordings, both desktop and external Replay default to “Following
+replay”: the project pane selects the unique recording whose segment coverage contains the master
+time on the current branch. It uses exact receiving Version identities from the existing verified
+coverage map, never a filename, trial name, publication order or inferred duration. Adjacent
+recordings switch at the new segment boundary. Overlaps ask the viewer to choose; absent footage
+remains absent. Manually selecting any source (including local history or an image archive) stops
+automatic source selection until “Follow replay” is chosen again. Neither manual nor automatic
+source changes pause or seek the research clock. Browser follow preference is per-viewer UI state,
+not research evidence or a `.science` field. Sampled image archives still use manual selection.
+
 `RecordedMediaViewport` only owns sizing and scrolling. Fit uses the remaining stage dimensions;
 100% uses decoded media dimensions and allows internal scrolling. Changing size or source does not
 replace the research clock. Video and screenshot adapters keep independent decoding/resource

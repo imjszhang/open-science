@@ -30,6 +30,8 @@ import type {
 import { BrowserRecordingPlayer } from '../src/pages/workspace/replay/BrowserRecordingPlayer'
 import { ProjectReplay } from '../src/pages/workspace/replay/ProjectReplay'
 import { recordingSourceLabel } from '../src/pages/workspace/replay/recording-source-label'
+import { RecordingTimelineFollow } from '../src/pages/workspace/replay/RecordingTimelineFollow'
+import { recordingTargetKey } from '../src/pages/workspace/replay/recording-timeline-follow'
 import { ResultsPanel } from '../src/pages/workspace/replay/results/ResultsPanel'
 import type { SessionDiscussionCapture } from '../src/pages/workspace/replay/replay-context'
 import { BrowserArtifactPreview } from './BrowserArtifactPreview'
@@ -65,6 +67,7 @@ const saveView = (viewerId: string, document: ReplayDocument, view: ReplayViewSt
 type MaterialPreferences = {
   materialId: 'conversation' | 'notebook' | 'project' | 'results'
   recordingId?: string
+  followingRecording?: boolean
 }
 const restoreMaterials = (viewerId: string, document: ReplayDocument): MaterialPreferences => {
   try {
@@ -74,7 +77,8 @@ const restoreMaterials = (viewerId: string, document: ReplayDocument): MaterialP
     if (saved && ['conversation', 'notebook', 'project', 'results'].includes(saved.materialId))
       return {
         materialId: saved.materialId,
-        recordingId: typeof saved.recordingId === 'string' ? saved.recordingId : undefined
+        recordingId: typeof saved.recordingId === 'string' ? saved.recordingId : undefined,
+        followingRecording: saved.followingRecording !== false
       }
   } catch {
     /* Optional browser navigation state. */
@@ -191,6 +195,9 @@ const ResearchReplayContent = ({
     id: preferences.materialId,
     revision: 0
   })
+  const [followingRecording, setFollowingRecording] = useState(
+    preferences.followingRecording !== false
+  )
   const [recordingId, setRecordingId] = useState(
     () =>
       recordings.find(({ descriptor }) => descriptor.id === preferences.recordingId)?.descriptor
@@ -202,12 +209,12 @@ const ResearchReplayContent = ({
     try {
       sessionStorage.setItem(
         `${storageKey(context.viewerId, document)}:materials`,
-        JSON.stringify({ materialId, recordingId })
+        JSON.stringify({ materialId, recordingId, followingRecording })
       )
     } catch {
       /* Optional browser navigation state. */
     }
-  }, [context.viewerId, document, materialId, recordingId])
+  }, [context.viewerId, document, materialId, recordingId, followingRecording])
   const pending = useRef(0)
   useEffect(() => {
     const controller = new AbortController()
@@ -396,7 +403,10 @@ const ResearchReplayContent = ({
                     aria-label={t('Project recording')}
                     className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-000 px-2 text-xs"
                     value={recordingId}
-                    onChange={(event) => setRecordingId(event.target.value)}
+                    onChange={(event) => {
+                      setFollowingRecording(false)
+                      setRecordingId(event.target.value)
+                    }}
                   >
                     {recordings.map((material, index) => (
                       <option key={material.descriptor.id} value={material.descriptor.id}>
@@ -428,83 +438,102 @@ const ResearchReplayContent = ({
                   </Popover>
                 ) : null}
               </div>
-              {!current ? (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('No project images were recorded. Other research materials remain available.')}
-                </p>
-              ) : null}
-              {web ? (
-                <BrowserRecordingPlayer
-                  presentationMode="research"
-                  key={current!.descriptor.id}
-                  active={active}
-                  recording={web.recording}
-                  mediaUrl={mediaUrl}
-                  retryRevision={readRevision}
-                  onPlaybackError={() => void checkConnection()}
-                  missingMediaKeys={web.recording.media
-                    .filter(
-                      (declared) =>
-                        !web.media.some((resolved) => resolved.mediaKey === declared.mediaKey)
-                    )
-                    .map((media) => media.mediaKey)}
-                  transport={{
-                    offsetMs:
-                      aligned && at !== undefined ? at - web.recording.startedAt : undefined,
-                    playing: Boolean(playback?.playing && aligned),
-                    speed: playback?.speed ?? 1,
-                    onPause: playback?.onPause,
-                    onSeek: (offsetMs) =>
-                      playback?.onSeekRecordedAt(web.recording.startedAt + offsetMs)
-                  }}
-                  onAskMoment={async (offsetMs) => {
-                    const position = researchPosition(
-                      document,
-                      timed.recordedTimeOrigins,
-                      playback,
-                      web.recording.startedAt + offsetMs
-                    )
-                    if (!position) throw new ReplayViewerRequestError('unavailable')
-                    await select({ ...position, recordingId: current!.descriptor.id, offsetMs })
-                  }}
-                />
-              ) : null}
-              {track ? (
-                <ProjectReplay
-                  presentationMode="research"
-                  key={current!.descriptor.id}
-                  track={track}
-                  active={active}
-                  readImage={readImage}
-                  missingMediaKeys={
-                    current && track
-                      ? track.frames
-                          .filter(
-                            (frame) =>
-                              !current.payload.media.some(
-                                (media) => media.mediaKey === frame.mediaKey
-                              )
-                          )
-                          .map((frame) => frame.mediaKey)
-                      : undefined
-                  }
-                  retryRevision={readRevision}
-                  onPlaybackError={() => void checkConnection()}
-                  transport={{
-                    recordedAt: playback?.recordedAt,
-                    onPause: playback?.onPause,
-                    onSeekRecordedAt: (at) => playback?.onSeekRecordedAt(at)
-                  }}
-                  onAskFrame={async (frame) => {
-                    if (!current || 'indexChecksum' in current.payload) return
-                    await askResource(
-                      recordedMediaResource(current.payload, frame.mediaKey),
-                      playback,
-                      frame.recordedAt
-                    )
-                  }}
-                />
-              ) : null}
+              <RecordingTimelineFollow
+                enabled={recordings.filter((item) => 'indexChecksum' in item.payload).length > 1}
+                following={followingRecording}
+                onFollowingChange={setFollowingRecording}
+                coverage={playback?.branchId ? (timed.coverage[playback.branchId] ?? []) : []}
+                recordedAt={playback?.continuous ? at : undefined}
+                selected={current?.descriptor.target}
+                availableTargets={recordings.map((item) => item.descriptor.target)}
+                onSelect={(target) => {
+                  const next = recordings.find(
+                    (item) =>
+                      recordingTargetKey(item.descriptor.target) === recordingTargetKey(target)
+                  )
+                  if (next) setRecordingId(next.descriptor.id)
+                }}
+              >
+                {!current ? (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t(
+                      'No project images were recorded. Other research materials remain available.'
+                    )}
+                  </p>
+                ) : null}
+                {web ? (
+                  <BrowserRecordingPlayer
+                    presentationMode="research"
+                    key={current!.descriptor.id}
+                    active={active}
+                    recording={web.recording}
+                    mediaUrl={mediaUrl}
+                    retryRevision={readRevision}
+                    onPlaybackError={() => void checkConnection()}
+                    missingMediaKeys={web.recording.media
+                      .filter(
+                        (declared) =>
+                          !web.media.some((resolved) => resolved.mediaKey === declared.mediaKey)
+                      )
+                      .map((media) => media.mediaKey)}
+                    transport={{
+                      offsetMs:
+                        aligned && at !== undefined ? at - web.recording.startedAt : undefined,
+                      playing: Boolean(playback?.playing && aligned),
+                      speed: playback?.speed ?? 1,
+                      onPause: playback?.onPause,
+                      onSeek: (offsetMs) =>
+                        playback?.onSeekRecordedAt(web.recording.startedAt + offsetMs)
+                    }}
+                    onAskMoment={async (offsetMs) => {
+                      const position = researchPosition(
+                        document,
+                        timed.recordedTimeOrigins,
+                        playback,
+                        web.recording.startedAt + offsetMs
+                      )
+                      if (!position) throw new ReplayViewerRequestError('unavailable')
+                      await select({ ...position, recordingId: current!.descriptor.id, offsetMs })
+                    }}
+                  />
+                ) : null}
+                {track ? (
+                  <ProjectReplay
+                    presentationMode="research"
+                    key={current!.descriptor.id}
+                    track={track}
+                    active={active}
+                    readImage={readImage}
+                    missingMediaKeys={
+                      current && track
+                        ? track.frames
+                            .filter(
+                              (frame) =>
+                                !current.payload.media.some(
+                                  (media) => media.mediaKey === frame.mediaKey
+                                )
+                            )
+                            .map((frame) => frame.mediaKey)
+                        : undefined
+                    }
+                    retryRevision={readRevision}
+                    onPlaybackError={() => void checkConnection()}
+                    transport={{
+                      recordedAt: playback?.recordedAt,
+                      onPause: playback?.onPause,
+                      onSeekRecordedAt: (at) => playback?.onSeekRecordedAt(at)
+                    }}
+                    onAskFrame={async (frame) => {
+                      if (!current || 'indexChecksum' in current.payload) return
+                      await askResource(
+                        recordedMediaResource(current.payload, frame.mediaKey),
+                        playback,
+                        frame.recordedAt
+                      )
+                    }}
+                  />
+                ) : null}
+              </RecordingTimelineFollow>
             </div>
           )
         }
@@ -530,6 +559,7 @@ const ResearchReplayContent = ({
       timed,
       recordings,
       recordingId,
+      followingRecording,
       mediaUrl,
       document,
       select,

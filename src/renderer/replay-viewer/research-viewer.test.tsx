@@ -618,3 +618,55 @@ it('shows imported intermediate states on the master clock and references the ex
   ).toBe('4000')
   expect(fetcher.mock.calls.every(([path]) => !String(path).includes('/execute'))).toBe(true)
 })
+
+it('follows the verified browser recording at the master time and resumes after an explicit source choice', async () => {
+  const research = researchFixture(),
+    first = researchRecordingFixture(),
+    second = researchRecordingFixture()
+  second.receiving = { ...second.receiving, artifactId: 'second', versionId: 'second-v1' }
+  second.recording.recordingId = 'second'
+  second.recording.startedAt = 12000
+  research.recordings.push({
+    id: 'second-v1',
+    kind: 'web-recording',
+    name: 'Second trial',
+    target: second.receiving
+  })
+  const projected = createResearchReplayTimeline(research.document, [first, second])
+  research.document = projected.document
+  research.timing = {
+    recordedTimeOrigins: projected.recordedTimeOrigins,
+    coverage: projected.coverage,
+    timelineCoverage: projected.timelineCoverage,
+    unalignedBranchIds: projected.unalignedBranchIds
+  }
+  const { client } = makeClient(research)
+  vi.spyOn(client, 'researchRecording').mockImplementation(async (descriptor) =>
+    descriptor.id === 'second-v1' ? second : first
+  )
+  render(<ResearchReplayViewerApp context={context} client={client} />)
+  await screen.findByTestId('research-replay-viewer')
+  fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
+  seek(13000)
+  const chooser = (await screen.findByRole('combobox', {
+    name: 'Project recording'
+  })) as HTMLSelectElement
+  await waitFor(() => expect(chooser.value).toBe('second-v1'))
+  expect(
+    screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+  ).toBe('13000')
+  fireEvent.change(chooser, { target: { value: 'index-version' } })
+  await screen.findByRole('button', { name: 'Follow replay' })
+  seek(14000)
+  expect(chooser.value).toBe('index-version')
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+  await screen.findByRole('button', { name: 'Pause replay' })
+  fireEvent.click(screen.getByRole('button', { name: 'Follow replay' }))
+  await waitFor(() => expect(chooser.value).toBe('second-v1'))
+  expect(screen.getByRole('button', { name: 'Pause replay' })).toBeTruthy()
+  expect(
+    screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+  ).toBe('14000')
+  seek(4000)
+  await waitFor(() => expect(chooser.value).toBe('index-version'))
+})

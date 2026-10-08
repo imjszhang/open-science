@@ -981,3 +981,87 @@ it('stages only the selected immutable intermediate observation in the existing 
   expect(recovery.onClick).toHaveBeenCalledTimes(1)
   expectNoExecution()
 })
+
+it('follows successive native recordings without pausing or seeking and keeps an explicit choice until follow resumes', async () => {
+  const doc = documentFixture()
+  doc.branches = [
+    {
+      id: 'main',
+      kind: 'conversation',
+      durationMs: 20000,
+      steps: [
+        {
+          id: 'request',
+          branchId: 'main',
+          kind: 'message',
+          recordedAt: 0,
+          startMs: 0,
+          endMs: 20000,
+          durationMs: 20000,
+          evidence: [],
+          resourceIds: [],
+          runs: [],
+          activities: [],
+          issues: []
+        }
+      ]
+    }
+  ]
+  const first = browserPayloadFixture(),
+    second = browserPayloadFixture()
+  first.receiving = receiving
+  first.recording.source = {
+    projectId: receiving.projectId,
+    sessionId: receiving.sessionId,
+    operationId: 'first'
+  }
+  second.receiving = { ...receiving, artifactId: 'second', versionId: 'second-v1' }
+  second.recording.recordingId = 'second'
+  second.recording.startedAt = 10000
+  second.recording.source = { ...first.recording.source, operationId: 'second' }
+  api.projectRecordings.read.mockImplementation(async ({ target }) =>
+    target.versionId === second.receiving.versionId ? second : first
+  )
+  const catalog = discovery([
+    { ...candidate(), format: 'web-recording' },
+    { ...candidate(second.receiving), format: 'web-recording' }
+  ])
+  const onPause = vi.fn(),
+    onSeekRecordedAt = vi.fn()
+  function FollowingHarness({ at }: { at: number }): React.JSX.Element {
+    const materials = useRecordedMaterials(doc, catalog, undefined, undefined, 'research')
+    const view = materials.views.find((view) => view.id === 'project')!
+    return (
+      <>
+        {typeof view.content === 'function'
+          ? view.content(true, {
+              branchId: 'main',
+              recordedAt: at,
+              playing: true,
+              speed: 1,
+              continuous: true,
+              onPause,
+              onSeekRecordedAt
+            })
+          : view.content}
+      </>
+    )
+  }
+  const view = render(<FollowingHarness at={1500} />)
+  const chooser = (await screen.findByRole('combobox', {
+    name: 'Project recording'
+  })) as HTMLSelectElement
+  await screen.findByRole('button', { name: 'Following replay' })
+  await waitFor(() => expect(chooser.value).toBe(JSON.stringify(first.receiving)))
+  view.rerender(<FollowingHarness at={11000} />)
+  await waitFor(() => expect(chooser.value).toBe(JSON.stringify(second.receiving)))
+  select(first.receiving)
+  await screen.findByRole('button', { name: 'Follow replay' })
+  view.rerender(<FollowingHarness at={12000} />)
+  expect(chooser.value).toBe(JSON.stringify(first.receiving))
+  fireEvent.click(screen.getByRole('button', { name: 'Follow replay' }))
+  await waitFor(() => expect(chooser.value).toBe(JSON.stringify(second.receiving)))
+  expect(onPause).not.toHaveBeenCalled()
+  expect(onSeekRecordedAt).not.toHaveBeenCalled()
+  expectNoExecution()
+})
