@@ -705,10 +705,13 @@ const ReplayPanelContent = ({
     let previous: number | undefined
     const advance = (time: number): void => {
       if (previous !== undefined) {
+        // React can defer a functional update until after this animation callback returns.
+        // Capture the elapsed interval before advancing the mutable frame timestamp.
+        const elapsedMs = Math.min(250, time - previous) * speed
         setPositionMs((position) => {
           const next = advanceResearchReplay({
             positionMs: position,
-            elapsedMs: Math.min(250, time - previous!) * speed,
+            elapsedMs,
             durationMs: scene.durationMs,
             origin: recordedTimeOrigins?.[scene.branchId],
             steps: branch?.steps ?? [],

@@ -1,52 +1,11 @@
 // @vitest-environment jsdom
-import { useEffect, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { ReplayDocument, ReplayStep } from '../../../../../shared/replay'
 import { ReplayPanel, type ReplayPanelProps } from './ReplayPanel'
 import type { ReplayMaterialPlayback, ReplayMaterialView } from './ReplayStage'
 import { useReplayMaterialAction } from './replay-material-action'
-
-// These tests exercise Replay ownership and event routing. Native separator sizing and keyboard
-// geometry belong to the browser suite; jsdom cannot supply measured panel layouts to the library.
-vi.mock('@/components/ui/resizable', () => ({
-  ResizablePanelGroup: ({
-    children,
-    className,
-    style
-  }: {
-    children: ReactNode
-    className?: string
-    style?: CSSProperties
-  }) => (
-    <div className={className} style={style}>
-      {children}
-    </div>
-  ),
-  ResizablePanel: ({
-    children,
-    id,
-    className,
-    'aria-hidden': hidden,
-    inert
-  }: {
-    children: ReactNode
-    id?: string
-    className?: string
-    'aria-hidden'?: boolean
-    inert?: boolean
-  }) => (
-    <div id={id} className={className} aria-hidden={hidden} inert={inert}>
-      {children}
-    </div>
-  ),
-  ResizableHandle: ({
-    disabled,
-    ...props
-  }: HTMLAttributes<HTMLDivElement> & { disabled?: boolean }) => (
-    <div role="separator" tabIndex={disabled ? -1 : 0} {...props} />
-  )
-}))
 
 const makeDocument = (): ReplayDocument => {
   const step: ReplayStep = {

@@ -943,7 +943,6 @@ describe('replay readiness clock', () => {
     await tick(5200)
     await tick(5300)
     await tick(5400)
-    await tick(5500)
     expect(screen.getByRole('button', { name: 'Pause replay' })).toBe(pauseButton)
     expect(pauseButton.querySelector('.lucide-pause')).toBe(pauseIcon)
     expect(
@@ -953,8 +952,9 @@ describe('replay readiness clock', () => {
       Number(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow'))
     ).toBeLessThan(2000)
     const position = Number(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow'))
-    // Capture readiness is pending as logical time advances; it must not throttle the player.
-    for (const time of [5516, 5532, 5548]) await tick(time)
+    // Stay within this step (the next starts at 2000 ms). Its capture readiness is pending
+    // as logical time advances; the paint barrier must not throttle the player.
+    for (const time of [5416, 5432, 5448]) await tick(time)
     expect(Number(screen.getByLabelText('Replay progress').getAttribute('aria-valuenow'))).toBe(
       position + 48
     )
