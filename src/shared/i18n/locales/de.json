@@ -7518,6 +7518,13 @@
     "Copy state reference": "Statusverweis kopieren",
     "Could not link saved execution states.": "Gespeicherte Ausführungszustände konnten nicht verknüpft werden.",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Einige gespeicherte Zustände konnten keinem Notebook-Lauf zugeordnet werden. Öffnen Sie die zugehörige Aufzeichnung separat.",
-    "Reading saved execution states…": "Gespeicherte Ausführungszustände werden gelesen…"
+    "Reading saved execution states…": "Gespeicherte Ausführungszustände werden gelesen…",
+    "Replay layout": "Replay-Layout",
+    "Side-by-side": "Nebeneinander",
+    "Expand into columns": "In Spalten aufklappen",
+    "Show all panes": "Alle Bereiche anzeigen",
+    "Visible panes": "Sichtbare Bereiche",
+    "Reset replay layout": "Replay-Layout zurücksetzen",
+    "Resize {{left}} and {{right}}": "Breite von {{left}} und {{right}} ändern"
   }
 }

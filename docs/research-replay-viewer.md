@@ -33,15 +33,32 @@ anchor instead of treating the old reading duration as elapsed experiment time.
 
 ## Presentation
 
-Read-only research entrypoints opt into `presentationMode="research"`. One primary material fills
-the available area: original conversation, Notebook, project recording, or results. The header,
-one-line current context, shared timeline and question footer remain visible while content scrolls.
+Read-only research entrypoints opt into `presentationMode="research"`. In a normal preview, one
+primary material fills the available area: original conversation, Notebook, project recording, or
+results. Fullscreen defaults to original conversation beside a tabbed material pane. The layout
+menu can expand selected materials, or all four, into independently resizable horizontal columns.
+Minimum readable widths produce horizontal scrolling in the content body only; the header, one-line
+current context, shared timeline and question footer remain visible while content scrolls.
+
+The same pane instances remain mounted across fullscreen, tab, and column changes. Hidden material
+adapters become inactive; visible adapters all receive the one research clock. Layout controls and
+resizing neither pause nor seek. Pure scrolling and loading earlier records suspend only that pane's
+following; returning to the current record resumes it. Explicit evidence inspection and asking keep
+the existing frozen-reference semantics. File inspection stays inside its owning pane and does not
+replace other visible material. Each material has a scoped question action; user focus chooses the
+footer target, while asynchronous media or file updates cannot take that focus.
+
+Versioned UI layout preferences are independent of Replay checkpoints and `.science`: native viewers
+use local storage, and external viewers use their existing origin-scoped browser session storage.
+A refresh of the same external viewer restores the layout; a newly issued viewer origin need not.
+Widths are remembered separately for each pane combination. Corrupt or unavailable storage falls
+back to a readable default. Live observation and the canonical capture layout do not use this shell.
 Source information, branch selection, original records and source files remain in secondary details.
 Normal conversations, live observations, independent recordings and canonical 1280 × 720 capture
 retain their existing presentation paths.
 
-Manual conversation or Notebook inspection pauses following and selects its associated saved step
-without changing the clock. Playback restores following. The footer asks about the active record,
+Explicit conversation or Notebook record selection pauses playback and selects its associated saved
+step without changing the clock; scrolling alone only suspends that pane’s automatic following. Playback restores following. The footer asks about the active record,
 saved run, decoded moment or immutable result; current-step and whole-research actions are in its
 menu. Notebook references identify the exact selected saved run and owning step through an optional
 application-only `notebookRunId`. The current research clock determines which output was visible;

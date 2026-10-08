@@ -7686,6 +7686,13 @@
     "Copy state reference": "Copiar referencia al estado",
     "Could not link saved execution states.": "No se pudieron vincular los estados de ejecución guardados.",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Algunos estados guardados no se pudieron vincular a una ejecución de Notebook. Abra su grabación por separado.",
-    "Reading saved execution states…": "Leyendo estados de ejecución guardados…"
+    "Reading saved execution states…": "Leyendo estados de ejecución guardados…",
+    "Replay layout": "Diseño de la reproducción",
+    "Side-by-side": "En paralelo",
+    "Expand into columns": "Expandir en columnas",
+    "Show all panes": "Mostrar todos los paneles",
+    "Visible panes": "Paneles visibles",
+    "Reset replay layout": "Restablecer el diseño",
+    "Resize {{left}} and {{right}}": "Ajustar el ancho de {{left}} y {{right}}"
   }
 }

@@ -1929,8 +1929,11 @@ describe('single-material research presentation', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
     expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1500')
     expect(
-      screen.getByRole('region', { name: 'Historical conversation', hidden: true }).className
-    ).toContain('hidden')
+      screen
+        .getByRole('region', { name: 'Historical conversation', hidden: true })
+        .closest('[data-replay-pane]')
+        ?.getAttribute('data-replay-pane-visible')
+    ).toBe('false')
     expect(screen.getByTestId('replay-question-footer')).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: 'Ask about this content' }) as HTMLButtonElement).disabled
@@ -2609,7 +2612,12 @@ describe('optional research execution observations', () => {
         before
       )
     }
-    expect(screen.getByText('recording ready')).toBeTruthy()
-    expect(screen.queryByText('actions completed')).toBeNull()
+    // Stable panes no longer interrupt readiness when switching tabs: ten 100 ms
+    // frames at 2× advance from 400 ms to 2400 ms, past the second saved observation.
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('2400')
+    expect(screen.getByText('actions completed')).toBeTruthy()
+    expect(screen.queryByText('recording ready')).toBeNull()
+    expect(screen.queryByText('window ended')).toBeNull()
+    expect(screen.queryByText('final scientific output')).toBeNull()
   })
 })

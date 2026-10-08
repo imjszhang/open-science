@@ -7358,6 +7358,13 @@
     "Copy state reference": "状態の参照をコピー",
     "Could not link saved execution states.": "保存された実行状態を関連付けられませんでした。",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "一部の保存済み状態を Notebook の実行に関連付けられませんでした。対応する記録を個別に開いてください。",
-    "Reading saved execution states…": "保存された実行状態を読み込み中…"
+    "Reading saved execution states…": "保存された実行状態を読み込み中…",
+    "Replay layout": "リプレイのレイアウト",
+    "Side-by-side": "左右に並べる",
+    "Expand into columns": "列に展開",
+    "Show all panes": "すべてのペインを表示",
+    "Visible panes": "表示するペイン",
+    "Reset replay layout": "レイアウトをリセット",
+    "Resize {{left}} and {{right}}": "{{left}}と{{right}}の幅を調整"
   }
 }

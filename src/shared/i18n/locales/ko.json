@@ -7356,6 +7356,13 @@
     "Copy state reference": "상태 참조 복사",
     "Could not link saved execution states.": "저장된 실행 상태를 연결하지 못했습니다.",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "일부 저장된 상태를 Notebook 실행에 연결하지 못했습니다. 해당 기록을 별도로 여세요.",
-    "Reading saved execution states…": "저장된 실행 상태 읽는 중…"
+    "Reading saved execution states…": "저장된 실행 상태 읽는 중…",
+    "Replay layout": "다시 보기 레이아웃",
+    "Side-by-side": "나란히 보기",
+    "Expand into columns": "열로 펼치기",
+    "Show all panes": "모든 패널 표시",
+    "Visible panes": "표시할 패널",
+    "Reset replay layout": "레이아웃 초기화",
+    "Resize {{left}} and {{right}}": "{{left}} 및 {{right}} 너비 조절"
   }
 }

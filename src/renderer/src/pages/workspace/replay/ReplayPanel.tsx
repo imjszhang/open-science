@@ -55,7 +55,9 @@ import {
   type ReplayNotebookRunReader
 } from '@/lib/replay'
 import { createReplayPresentation } from './replay-presentation'
-import { ReplayStage, type ReplayMaterialView } from './ReplayStage'
+import { ReplayStage, type ReplayMaterialView, type ReplayStageProps } from './ReplayStage'
+import { ReplayLayoutMenu } from './ReplayLayoutMenu'
+import { useResearchReplayLayout } from './use-research-replay-layout'
 import { ReplayControls } from './ReplayControls'
 import { ReplayMaterialActionProvider, type ReplayMaterialAction } from './replay-material-action'
 import {
@@ -302,13 +304,71 @@ const ReplayPanelContent = ({
     materialViewRequest?.id ?? (researchPresentation ? 'conversation' : 'notebook')
   )
   const [materialAction, setMaterialAction] = useState<ReplayMaterialAction>()
-  const [inspectedContent, setInspectedContent] = useState<{
-    kind: 'conversation' | 'notebook'
-    stepId: string
-    runId?: string
-    savedHistory?: boolean
-  }>()
+  const [paneActions, setPaneActions] = useState<Record<string, ReplayMaterialAction | undefined>>(
+    {}
+  )
+  const [inspectedContents, setInspectedContents] = useState<
+    Partial<Record<'conversation' | 'notebook', ReplayStageProps['selectedContent']>>
+  >({})
+  const [focusedPane, setFocusedPane] = useState(materialViewId)
+  const [selectedResourcePaneId, setSelectedResourcePaneId] = useState<string>()
   const [fullscreen, setFullscreen] = useState(false)
+  const paneCatalog = useMemo(
+    () => [
+      { id: 'conversation', label: t('Original conversation') },
+      { id: 'notebook', label: t('Notebook') },
+      ...(materialViews ?? []).map(({ id, label }) => ({ id, label }))
+    ],
+    [materialViews, t]
+  )
+  const paneIds = useMemo(() => paneCatalog.map(({ id }) => id), [paneCatalog])
+  const {
+    preferences: layoutPreferences,
+    changePreferences: changeLayoutPreferences,
+    rememberMaterial,
+    layout: researchLayout
+  } = useResearchReplayLayout({
+    enabled: researchPresentation,
+    fullscreen,
+    paneIds,
+    materialId: materialViewId,
+    native: host !== null,
+    sourceKey: JSON.stringify([
+      incomingDocument.source.projectId,
+      incomingDocument.source.sessionId,
+      incomingDocument.source.fingerprint
+    ])
+  })
+  const focusedPaneId =
+    researchPresentation && fullscreen
+      ? researchLayout.visiblePaneIds.includes(focusedPane)
+        ? focusedPane
+        : (researchLayout.visiblePaneIds[0] ?? 'conversation')
+      : materialViewId
+  const inspectedContent = inspectedContents[focusedPaneId as 'conversation' | 'notebook']
+  const setInspectedContent = (selection: ReplayStageProps['selectedContent']): void => {
+    if (!selection) setInspectedContents({})
+    else {
+      setInspectedContents((previous) => ({ ...previous, [selection.kind]: selection }))
+      setFocusedPane(selection.kind)
+    }
+  }
+  const renderMaterialPane = useCallback(
+    (id: string, content: React.ReactNode) => (
+      <ReplayMaterialActionProvider
+        key={id}
+        enabled={researchPresentation}
+        onActionChange={(action) =>
+          setPaneActions((previous) =>
+            previous[id] === action ? previous : { ...previous, [id]: action }
+          )
+        }
+      >
+        {content}
+      </ReplayMaterialActionProvider>
+    ),
+    [researchPresentation]
+  )
   // Inspecting freezes both record navigation and bounded evidence. New logs never replace
   // the evidence a user is reading or about to reference in a question.
   const [inspection, setInspection] = useState<{
@@ -384,12 +444,24 @@ const ReplayPanelContent = ({
     materialViewRequest ? true : undefined
   )
   const materialsOpen = researchPresentation
-    ? materialViewId !== 'conversation' || Boolean(selectedResourceId)
+    ? researchLayout.visiblePaneIds.some((id) => id !== 'conversation') ||
+      Boolean(selectedResourceId)
     : (materialsOverride ?? ((!live || !!recorded) && (expanded || wide)))
   const [handledMaterialRequest, setHandledMaterialRequest] = useState(materialViewRequest)
   if (materialViewRequest && materialViewRequest !== handledMaterialRequest) {
     setHandledMaterialRequest(materialViewRequest)
     setMaterialViewId(materialViewRequest.id)
+    setFocusedPane(materialViewRequest.id)
+    rememberMaterial(materialViewRequest.id)
+    if (
+      fullscreen &&
+      layoutPreferences.mode === 'columns' &&
+      !layoutPreferences.visiblePaneIds.includes(materialViewRequest.id)
+    )
+      changeLayoutPreferences({
+        ...layoutPreferences,
+        visiblePaneIds: [...layoutPreferences.visiblePaneIds, materialViewRequest.id]
+      })
     if (materialViewRequest.id !== materialViewId) setMaterialAction(undefined)
     setInspectedContent(undefined)
     setMaterialsOverride(true)
@@ -426,7 +498,10 @@ const ReplayPanelContent = ({
   const panel = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!researchPresentation) return
-    const update = (): void => setFullscreen(document.fullscreenElement === panel.current)
+    const update = (): void => {
+      const next = document.fullscreenElement === panel.current
+      setFullscreen(next)
+    }
     document.addEventListener('fullscreenchange', update)
     return () => document.removeEventListener('fullscreenchange', update)
   }, [researchPresentation])
@@ -764,9 +839,10 @@ const ReplayPanelContent = ({
     (id?: string): void => {
       if (id && !materialCatalog.files.some((resource) => resource.id === id)) return
       pause()
-      if (id) setNotebookFollowing(false)
+      if (id && (!researchPresentation || focusedPaneId === 'notebook')) setNotebookFollowing(false)
       if (id && !selectedResourceId) beforeFile.current = materialsOpen
       setSelectedResourceId(id)
+      if (id) setSelectedResourcePaneId(focusedPaneId)
       setMaterialsOverride(id ? true : beforeFile.current)
       if (id && (!wide || researchPresentation)) setFilesOverride(false)
       if (id) {
@@ -793,7 +869,8 @@ const ReplayPanelContent = ({
       materialsId,
       materialsOpen,
       wide,
-      researchPresentation
+      researchPresentation,
+      focusedPaneId
     ]
   )
   const seek = useCallback(
@@ -1031,24 +1108,41 @@ const ReplayPanelContent = ({
       </Select>
     ) : null
   const selectMaterial = (id: string): void => {
+    setFocusedPane(id)
+    rememberMaterial(id)
+    if (
+      fullscreen &&
+      layoutPreferences.mode === 'columns' &&
+      !layoutPreferences.visiblePaneIds.includes(id)
+    )
+      changeLayoutPreferences({
+        ...layoutPreferences,
+        visiblePaneIds: [...layoutPreferences.visiblePaneIds, id]
+      })
     if (id === materialViewId) return
-    setMaterialAction(undefined)
-    setSelectedResourceId(undefined)
-    setInspectedContent(undefined)
+    if (!researchPresentation) {
+      setMaterialAction(undefined)
+      setSelectedResourceId(undefined)
+      setInspectedContent(undefined)
+    }
     setMaterialViewId(id)
     onMaterialViewChange?.(id)
   }
   const inspectedStep =
-    inspectedContent?.kind === materialViewId
+    inspectedContent?.kind === focusedPaneId
       ? branch?.steps.find((step) => step.id === inspectedContent.stepId)
       : undefined
   const notebookStep =
     inspectedStep ?? [...scene.visibleSteps].reverse().find((step) => step.runs.length)
-  const contentStep = materialViewId === 'notebook' ? notebookStep : (inspectedStep ?? scene.step)
+  const contentStep = focusedPaneId === 'notebook' ? notebookStep : (inspectedStep ?? scene.step)
   const contentAction =
-    materialViewId !== 'conversation' && materialViewId !== 'notebook' ? materialAction : undefined
+    focusedPaneId !== 'conversation' && focusedPaneId !== 'notebook'
+      ? researchPresentation
+        ? paneActions[focusedPaneId]
+        : materialAction
+      : undefined
   const selectedExecution =
-    materialViewId === 'notebook'
+    focusedPaneId === 'notebook'
       ? executionStates?.find(
           (state) =>
             state.track.runId ===
@@ -1102,7 +1196,7 @@ const ReplayPanelContent = ({
       return
     }
     if (!contentStep) return
-    if (materialViewId === 'notebook') {
+    if (focusedPaneId === 'notebook') {
       const runId = inspectedContent?.runId ?? contentStep.runs.at(-1)?.runId
       if (!runId) return
       const captured = captureDiscussionNotebookRun(
@@ -1135,9 +1229,9 @@ const ReplayPanelContent = ({
   const contentLabel =
     (observationAction ? t('Ask about this status') : undefined) ??
     contentAction?.label ??
-    (materialViewId === 'notebook'
+    (focusedPaneId === 'notebook'
       ? t('Ask about this run')
-      : materialViewId === 'conversation'
+      : focusedPaneId === 'conversation'
         ? t('Ask about this record')
         : t('Ask about this content'))
   const contentDisabled =
@@ -1145,11 +1239,11 @@ const ReplayPanelContent = ({
     !active ||
     discussionPending ||
     Boolean(contentAction?.disabled || contentAction?.pending) ||
-    (materialViewId === 'conversation' || materialViewId === 'notebook'
+    (focusedPaneId === 'conversation' || focusedPaneId === 'notebook'
       ? !contentStep
       : !contentAction)
   const selectedRun =
-    materialViewId === 'notebook'
+    focusedPaneId === 'notebook'
       ? (contentStep?.runs.find((run) => run.runId === inspectedContent?.runId) ??
         contentStep?.runs.at(-1))
       : undefined
@@ -1167,11 +1261,68 @@ const ReplayPanelContent = ({
       ? referenceRecordedAt - referenceOrigin
       : undefined
 
+  const researchTabs =
+    researchPresentation && researchLayout.mode !== 'columns' ? (
+      <div
+        data-replay-layout-control
+        role="tablist"
+        aria-label={t('Research materials')}
+        onKeyDown={(event) => {
+          const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          const current = tabs.findIndex((tab) => tab === document.activeElement)
+          const next =
+            event.key === 'ArrowRight'
+              ? (current + 1) % tabs.length
+              : event.key === 'ArrowLeft'
+                ? (current - 1 + tabs.length) % tabs.length
+                : event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? tabs.length - 1
+                    : -1
+          if (next < 0) return
+          event.preventDefault()
+          tabs[next]?.click()
+          tabs[next]?.focus()
+        }}
+        className="flex shrink-0 gap-1 overflow-x-auto bg-bg-000 px-2 py-1"
+      >
+        {paneCatalog
+          .filter((view) => !fullscreen || view.id !== 'conversation')
+          .map((view) => (
+            <Button
+              key={view.id}
+              role="tab"
+              aria-selected={
+                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+              }
+              aria-controls={fullscreen ? `${researchContentId}-material` : researchContentId}
+              tabIndex={
+                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+                  ? 0
+                  : -1
+              }
+              data-replay-material-view={view.id}
+              variant={
+                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+                  ? 'secondary'
+                  : 'ghost'
+              }
+              size="sm"
+              className="h-8 shrink-0 px-2 text-xs"
+              onClick={() => selectMaterial(view.id)}
+            >
+              {view.label}
+            </Button>
+          ))}
+      </div>
+    ) : null
   return (
     <div
       ref={panel}
       className="flex h-full min-h-0 min-w-0 flex-col bg-bg-10"
       data-testid="replay-panel"
+      data-replay-layout-mode={researchPresentation ? researchLayout.mode : undefined}
       data-replay-presentation={researchPresentation ? 'research' : undefined}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -1420,6 +1571,13 @@ const ReplayPanelContent = ({
             </Tooltip>
           </TooltipProvider>
         ) : null}
+        {researchPresentation && fullscreen ? (
+          <ReplayLayoutMenu
+            preferences={layoutPreferences}
+            onChange={changeLayoutPreferences}
+            panes={paneCatalog}
+          />
+        ) : null}
         {researchPresentation ? (
           <Button
             variant="ghost"
@@ -1483,54 +1641,7 @@ const ReplayPanelContent = ({
           </TooltipProvider>
         ) : null}
       </div>
-      {researchPresentation ? (
-        <div
-          role="tablist"
-          aria-label={t('Research materials')}
-          onKeyDown={(event) => {
-            const tabs = [
-              ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-            ]
-            const current = tabs.findIndex((tab) => tab === document.activeElement)
-            const next =
-              event.key === 'ArrowRight'
-                ? (current + 1) % tabs.length
-                : event.key === 'ArrowLeft'
-                  ? (current - 1 + tabs.length) % tabs.length
-                  : event.key === 'Home'
-                    ? 0
-                    : event.key === 'End'
-                      ? tabs.length - 1
-                      : -1
-            if (next < 0) return
-            event.preventDefault()
-            tabs[next]?.click()
-            tabs[next]?.focus()
-          }}
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border-200 bg-bg-000 px-2 py-1"
-        >
-          {[
-            { id: 'conversation', label: t('Original conversation') },
-            { id: 'notebook', label: t('Notebook') },
-            ...(materialViews ?? [])
-          ].map((view) => (
-            <Button
-              key={view.id}
-              role="tab"
-              aria-selected={materialViewId === view.id}
-              aria-controls={researchContentId}
-              tabIndex={materialViewId === view.id ? 0 : -1}
-              data-replay-material-view={view.id}
-              variant={materialViewId === view.id ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-8 shrink-0 px-2 text-xs"
-              onClick={() => selectMaterial(view.id)}
-            >
-              {view.label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
+      {researchPresentation && !fullscreen ? researchTabs : null}
       {live ? (
         <div
           className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1 text-xs"
@@ -1605,15 +1716,17 @@ const ReplayPanelContent = ({
       <div
         className="min-h-0 min-w-0 flex-1 overflow-hidden"
         id={researchPresentation ? researchContentId : undefined}
-        role={researchPresentation ? 'tabpanel' : undefined}
+        role={researchPresentation ? (fullscreen ? 'region' : 'tabpanel') : undefined}
         aria-label={
-          researchPresentation
-            ? materialViewId === 'conversation'
-              ? t('Original conversation')
-              : materialViewId === 'notebook'
-                ? t('Notebook')
-                : materialViews?.find((view) => view.id === materialViewId)?.label
-            : undefined
+          researchPresentation && fullscreen
+            ? t('Research materials')
+            : researchPresentation
+              ? materialViewId === 'conversation'
+                ? t('Original conversation')
+                : materialViewId === 'notebook'
+                  ? t('Notebook')
+                  : materialViews?.find((view) => view.id === materialViewId)?.label
+              : undefined
         }
       >
         <ReplayMaterialActionProvider
@@ -1624,6 +1737,23 @@ const ReplayPanelContent = ({
             presentationMode={researchPresentation ? 'research' : undefined}
             onSelectContent={researchPresentation ? setInspectedContent : undefined}
             selectedContent={researchPresentation ? inspectedContent : undefined}
+            selectedContentByPane={researchPresentation ? inspectedContents : undefined}
+            researchLayout={researchPresentation ? researchLayout : undefined}
+            researchMaterialTabs={fullscreen ? researchTabs : undefined}
+            researchTabPanelId={`${researchContentId}-material`}
+            focusedPaneId={researchPresentation ? focusedPaneId : undefined}
+            onFocusPane={researchPresentation ? setFocusedPane : undefined}
+            selectedResourcePaneId={selectedResourcePaneId}
+            renderMaterialPane={researchPresentation ? renderMaterialPane : undefined}
+            onBrowsePane={(id) => {
+              if (id === 'notebook') setNotebookFollowing(false)
+            }}
+            onFollowPane={(id) => {
+              if (id === 'notebook') {
+                setNotebookFollowing(true)
+                setNotebookLimit(undefined)
+              }
+            }}
             sourceIdentity={live?.sourceIdentity}
             renderResource={renderResource}
             followPrimary={
@@ -1738,7 +1868,7 @@ const ReplayPanelContent = ({
                     variant="secondary"
                     className="max-w-full gap-1.5"
                     onClick={() => {
-                      pause()
+                      if (!researchPresentation) pause()
                       setNotebookFollowing(false)
                       setNotebookLimit(
                         (count) => (count ?? REPLAY_MATERIAL_RUN_LIMIT) + REPLAY_MATERIAL_RUN_LIMIT
@@ -1761,7 +1891,7 @@ const ReplayPanelContent = ({
             followNotebook={notebookFollowing && notebookLimit === undefined}
             conversationFocusRequest={conversationFocusRequest}
             onInspect={() => {
-              setNotebookFollowing(false)
+              if (!researchPresentation) setNotebookFollowing(false)
               pause()
             }}
             onReady={(result) => {
@@ -1871,6 +2001,11 @@ const ReplayPanelContent = ({
               })}
             </span>
           </div>
+          {fullscreen ? (
+            <span className="text-xs font-medium text-text-200" data-testid="replay-question-pane">
+              {paneCatalog.find((pane) => pane.id === focusedPaneId)?.label}
+            </span>
+          ) : null}
           <div className="flex w-full min-w-0 items-center">
             <Button
               size="sm"

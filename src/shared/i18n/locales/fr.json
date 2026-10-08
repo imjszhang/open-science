@@ -7686,6 +7686,13 @@
     "Copy state reference": "Copier la référence à l’état",
     "Could not link saved execution states.": "Impossible de relier les états d’exécution enregistrés.",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Certains états enregistrés n’ont pas pu être liés à une exécution Notebook. Ouvrez leur enregistrement séparément.",
-    "Reading saved execution states…": "Lecture des états d’exécution enregistrés…"
+    "Reading saved execution states…": "Lecture des états d’exécution enregistrés…",
+    "Replay layout": "Disposition du replay",
+    "Side-by-side": "Côte à côte",
+    "Expand into columns": "Déployer en colonnes",
+    "Show all panes": "Afficher tous les panneaux",
+    "Visible panes": "Panneaux visibles",
+    "Reset replay layout": "Réinitialiser la disposition",
+    "Resize {{left}} and {{right}}": "Redimensionner {{left}} et {{right}}"
   }
 }

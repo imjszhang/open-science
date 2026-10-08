@@ -7358,6 +7358,13 @@
     "Copy state reference": "複製狀態引用",
     "Could not link saved execution states.": "無法關聯已儲存的執行狀態。",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "部分已儲存的狀態無法關聯到 Notebook 執行，請單獨開啟對應記錄。",
-    "Reading saved execution states…": "正在讀取已儲存的執行狀態…"
+    "Reading saved execution states…": "正在讀取已儲存的執行狀態…",
+    "Replay layout": "回放版面",
+    "Side-by-side": "雙欄對照",
+    "Expand into columns": "橫向展開",
+    "Show all panes": "顯示所有欄位",
+    "Visible panes": "顯示的欄位",
+    "Reset replay layout": "恢復預設版面",
+    "Resize {{left}} and {{right}}": "調整{{left}}和{{right}}的寬度"
   }
 }

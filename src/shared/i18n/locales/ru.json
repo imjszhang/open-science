@@ -7825,6 +7825,13 @@
     "Copy state reference": "Копировать ссылку на состояние",
     "Could not link saved execution states.": "Не удалось связать сохранённые состояния выполнения.",
     "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Некоторые сохранённые состояния не удалось связать с запуском Notebook. Откройте соответствующую запись отдельно.",
-    "Reading saved execution states…": "Чтение сохранённых состояний выполнения…"
+    "Reading saved execution states…": "Чтение сохранённых состояний выполнения…",
+    "Replay layout": "Макет воспроизведения",
+    "Side-by-side": "Рядом",
+    "Expand into columns": "Развернуть в столбцы",
+    "Show all panes": "Показать все панели",
+    "Visible panes": "Видимые панели",
+    "Reset replay layout": "Сбросить макет",
+    "Resize {{left}} and {{right}}": "Изменить ширину {{left}} и {{right}}"
   }
 }
