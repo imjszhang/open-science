@@ -253,6 +253,101 @@ describe('package text policy', () => {
   })
 })
 
+describe('structured numeric research token usage', () => {
+  const keys = ['knownTokenUnits', 'knownDispatchedTokenUnits']
+  const streamed = (text: string, split: number): ReturnType<PackageTextScanner['finish']> => {
+    const scanner = new PackageTextScanner()
+    scanner.write(text.slice(0, split))
+    scanner.write(text.slice(split))
+    return scanner.finish()
+  }
+
+  it.each(keys)('accepts only complete JSON/NDJSON integer counts for %s', (key) => {
+    for (const count of [0, 123456, Number.MAX_SAFE_INTEGER]) {
+      for (const text of [
+        `{"${key}":${count}}`,
+        `{\n "rows": [{"${key}"\t:\r\n ${count},"complete":false}]\n}`,
+        `{"${key}":${count}}\n{"${key}":0}\n`
+      ]) {
+        expect(findSensitivePackageText(text), text).toBeUndefined()
+        for (let split = 0; split <= text.length; split++)
+          expect(streamed(text, split), `${key} split ${split}`).toBeUndefined()
+        const scanner = new PackageTextScanner()
+        for (const char of text) scanner.write(char)
+        expect(scanner.finish()).toBeUndefined()
+      }
+    }
+  })
+
+  it.each(keys)('does not exempt credential values or invalid input under %s', (key) => {
+    const cases = [
+      ...[
+        '"0"',
+        '"synthetic-private-value"',
+        '-1',
+        '-0',
+        '1.5',
+        '1e3',
+        '1e309',
+        '9007199254740992',
+        '00',
+        '0secret',
+        'null',
+        '{"token":"secret"}',
+        '[0]'
+      ].map((value) => `{"${key}":${value}}`),
+      `{"${key}":0`,
+      `{"${key}":0} trailing`,
+      `{"${key}":0}\ninvalid`,
+      `{"${key}":0,}`,
+      `{"${key}":0} {"ok":true}`,
+      `{"${key}":0}\n{"password":123456}`,
+      `{"${key}":0,"credentials":"synthetic-private-value"}`,
+      `{"${key}":0,"token":123456}`,
+      `{"${key}":"secret","${key}":0}`,
+      `{"${key}":0,"nested":{"note":"Bearer synthetic-private-value"}}`,
+      `{"${key}":${JSON.stringify(JSON.stringify({ token: 'secret' }))}}`,
+      `{"${key}":0\u00a0}`,
+      `{"${key} ":0}`,
+      `{"${key[0].toUpperCase() + key.slice(1)}":0}`,
+      `{"${key}Secret":0}`,
+      `{"access-${key}":0}`,
+      `${key}=0`,
+      `'${key}': 0`,
+      `--${key} 0`
+    ]
+    for (const text of cases) {
+      expect(findSensitivePackageText(text), text).toBeDefined()
+      for (let split = 0; split <= text.length; split++)
+        expect(streamed(text, split), `${text} split ${split}`).toBeDefined()
+    }
+  })
+
+  it.each(keys)('preserves the exact %s key at every retained-overlap alignment', (key) => {
+    const field = `{"${key}":123456}`
+    for (let splitWithin = 0; splitWithin <= field.length; splitWithin++) {
+      const text = ' '.repeat(65536 - 8192 - splitWithin) + field + ' '.repeat(8192)
+      expect(streamed(text, 65536), `${key} overlap ${splitWithin}`).toBeUndefined()
+      const invalid = text + 'invalid'
+      expect(streamed(invalid, 65536), `${key} invalid overlap ${splitWithin}`).toBeDefined()
+    }
+  })
+
+  it.each(keys)(
+    'keeps later secrets and unsafe count suffixes visible across overlaps: %s',
+    (key) => {
+      const padding = ' '.repeat(65536 - 8192)
+      for (const text of [
+        padding + `{"${key}":0,` + ' '.repeat(9000) + '"token":"secret"}',
+        padding + `{"${key}":0` + ' '.repeat(9000) + 'trailing}',
+        padding + `{"${key}":1` + '0'.repeat(9000) + '}',
+        padding + `{"prefix-${key}":123456}` + ' '.repeat(9000)
+      ])
+        expect(streamed(text, 65536)).toBeDefined()
+    }
+  )
+})
+
 describe('credential requirement declarations', () => {
   const slot = {
     key: 'g-provider-credential',

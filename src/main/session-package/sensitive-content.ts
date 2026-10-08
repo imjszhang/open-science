@@ -50,6 +50,7 @@ const boundary = (value: string): Boundary => {
 
 type DeclarationState = 'accepted' | 'pending' | 'rejected'
 const MAX_DECLARATION_TEXT = 4096
+const numericTokenUsageKeys = ['knownTokenUnits', 'knownDispatchedTokenUnits'] as const
 
 // Recognize references to recipient-supplied environment credentials, never credential values.
 // This is a bounded JSON structure rule, independent of filenames or package document formats.
@@ -398,6 +399,23 @@ const findPackageTextMatch = (
     const partialKey = match.index === 0 && /^[a-z0-9_-]$/i.test(preceding)
     if (separatorQuote && rest[0] === separatorQuote && preceding !== separatorQuote && !partialKey)
       continue
+    // These research usage totals are counts, not credentials. The structured policy is
+    // provisional until the entire JSON/NDJSON validates; the original match is retained
+    // by PackageTextScanner so invalid/truncated input still fails closed.
+    if (
+      jsonBooleans &&
+      numericTokenUsageKeys.some((key) => key === match[1]) &&
+      text[match.index - 1] === '"' &&
+      /^"[ \t\r\n]*:[ \t\r\n]*$/.test(match[2])
+    ) {
+      const count = /^(0|[1-9]\d{0,15})[ \t\r\n]*(?=[,}]|$)/.exec(rest)
+      if (
+        count &&
+        Number.isSafeInteger(Number(count[1])) &&
+        (count[0].length < rest.length || !complete)
+      )
+        continue
+    }
     // Serialized context/model usage counts are numbers, not credentials. Keep this exception
     // limited to the exact JSON metric keys and integer values, never quoted secrets.
     if (
@@ -511,7 +529,7 @@ export const findSensitivePackageText = (
 type TextFinding = { text: string; match: PackageTextMatch; offset: number }
 
 // Keep validation, overlap and both candidate policies under one stream owner.
-// Boolean-looking fields are exempt only after the entire file validates.
+// Structured field exceptions are exempt only after the entire file validates.
 export class PackageTextScanner {
   private readonly syntax = new PackageJsonSyntax()
   private tail = ''
@@ -545,8 +563,17 @@ export class PackageTextScanner {
     this.original ??= inspect(false)
     if (this.original) this.structured ??= inspect(true)
     this.offset += decoded.length
-    if (text.length > 8192) this.beforeTail = text[text.length - 8192 - 1]
-    this.tail = text.slice(-8192)
+    let tailStart = Math.max(0, text.length - 8192)
+    // Retain a whole allowlisted count key if the overlap would split it. Its suffix
+    // alone cannot prove an exact key match, and must never gain a broader exception.
+    // This adds at most one bounded key to the existing overlap, not its value.
+    for (const key of numericTokenUsageKeys) {
+      const quoted = `"${key}"`
+      const start = text.lastIndexOf(quoted, tailStart)
+      if (start >= 0 && start < tailStart && start + quoted.length > tailStart) tailStart = start
+    }
+    if (tailStart > 0) this.beforeTail = text[tailStart - 1]
+    this.tail = text.slice(tailStart)
   }
 
   finish(): TextFinding | undefined {
