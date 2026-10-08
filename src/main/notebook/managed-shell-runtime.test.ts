@@ -127,6 +127,70 @@ describe.skipIf(process.platform === 'win32')(
       ).toBe(managedCwd)
     })
 
+    it('admits the documented quoted managed runtime without granting ordinary environment authority', async () => {
+      const script = join(inputRoot, 'managed entry.mjs')
+      await writeFile(script, 'console.log("managed runtime executed")\n')
+      const command = '"$OPEN_SCIENCE_NODE" "$OPEN_SCIENCE_INPUT_DIR/managed entry.mjs"'
+      const result = await service.executeManagedShell(
+        request(command),
+        capability({
+          environment: {
+            HOME: managedCwd,
+            PATH: '/usr/bin:/bin',
+            OPEN_SCIENCE_NODE: process.execPath,
+            OPEN_SCIENCE_INPUT_DIR: inputRoot,
+            OPEN_SCIENCE_OUTPUT_DIR: managedCwd
+          }
+        })
+      )
+      expect(result).toMatchObject({ exitCode: 0, stdout: 'managed runtime executed\n' })
+      expect(invocations).toHaveLength(1)
+      expect(invocations[0].filesystem.readOnlyRoots).toContain(inputRoot)
+      expect(invocations[0].filesystem.deniedWriteRoots).toContain(inputRoot)
+
+      vi.stubEnv('OPEN_SCIENCE_NODE', process.execPath)
+      vi.stubEnv('OPEN_SCIENCE_INPUT_DIR', inputRoot)
+      const ordinary = await service.executeShell({
+        ...request(command),
+        executionInvocationId: 'ordinary-untrusted-runtime'
+      })
+      expect(ordinary).toMatchObject({
+        exitCode: 1,
+        stderr: expect.stringContaining('the command name cannot be resolved')
+      })
+      expect(invocations).toHaveLength(1)
+    })
+
+    it.each([
+      'OPEN_SCIENCE_NODE=find; "$OPEN_SCIENCE_NODE" /',
+      'OPEN_SCIENCE_NODE=/bin/ls sh -c \'"$OPEN_SCIENCE_NODE" /\'',
+      'env OPEN_SCIENCE_NODE=/bin/ls sh -c \'"$OPEN_SCIENCE_NODE" /\'',
+      'env -i sh -c \'"$OPEN_SCIENCE_NODE" /\'',
+      'find "$OPEN_SCIENCE_INPUT_DIR"',
+      '"$UNTRUSTED_EXECUTABLE" /',
+      '"$PRIVATE_EXECUTABLE" /'
+    ])('retains fail-closed managed search admission for %s', async (command) => {
+      const result = await service.executeManagedShell(
+        request(command),
+        capability({
+          environment: {
+            HOME: managedCwd,
+            PATH: '/usr/bin:/bin',
+            OPEN_SCIENCE_NODE: process.execPath,
+            OPEN_SCIENCE_INPUT_DIR: inputRoot,
+            OPEN_SCIENCE_OUTPUT_DIR: managedCwd,
+            UNTRUSTED_EXECUTABLE: 'find'
+          },
+          privateEnvironment: { PRIVATE_EXECUTABLE: 'find' }
+        })
+      )
+      expect(result).toMatchObject({
+        exitCode: null,
+        stderr: expect.stringContaining('Shell search scope denied:')
+      })
+      expect(invocations).toHaveLength(0)
+    })
+
     it('replays durable requests and rejects changed authority or a forged capability before launch', async () => {
       const input = request('echo once >> count.txt')
       const policy = capability()

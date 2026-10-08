@@ -399,7 +399,15 @@ const prepareShellLaunchOptions = async (
     options.grantedRoots ?? [],
     runtimePlatform,
     options.signal,
-    runtimeBinding
+    runtimeBinding,
+    managed
+      ? {
+          projectId: managed.projectId,
+          sessionId: managed.sessionId,
+          executionInvocationId: managed.executionInvocationId,
+          capability: options.managedExecution!
+        }
+      : undefined
   )
 
   let shellEnv: NodeJS.ProcessEnv
