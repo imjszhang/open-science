@@ -8,6 +8,7 @@ import { loadReplayDocument, projectReplayScene } from '@/lib/replay'
 import type { ReplayDocument, ReplayResource, ReplayStep } from '../../../../shared/replay'
 import type { ReplayViewState } from '../../../../shared/session-replay'
 import { ReplayPanel } from './replay/ReplayPanel'
+import { ReplaySourceBar } from './replay/ReplaySourceBar'
 import { captureDiscussionStep, type SessionDiscussionCapture } from './replay/replay-context'
 import ReplayFilePreview from './replay/ReplayFilePreview'
 import { fixedReplayResource } from './replay/results/recorded-resource-reader'
@@ -415,7 +416,12 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
         ) : (
           <ReplayPanel
             presentationMode="research"
-            info={materialNavigation}
+            info={
+              <>
+                <ReplaySourceBar item={item} variant="details" />
+                {materialNavigation}
+              </>
+            }
             recordedCoverage={recordedMaterials.timelineCoverage}
             recordedTimeOrigins={recordedMaterials.recordedTimeOrigins}
             expanded={expanded}

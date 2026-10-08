@@ -6,6 +6,21 @@ import {
 } from './browser-recording-transport'
 
 describe('recording presentation transport', () => {
+  it('accepts bounded decoded-frame context and rejects malformed metadata', () => {
+    const action = recordingTransportMessage({
+      type: 'action',
+      revision: 1,
+      disabled: false,
+      pending: false,
+      recordedAt: 2346,
+      title: 'Experiment'
+    })
+    expect(isBrowserRecordingTransportMessage(action)).toBe(true)
+    for (const recordedAt of [-1, Infinity, NaN, '2346'])
+      expect(isBrowserRecordingTransportMessage({ ...action, recordedAt })).toBe(false)
+    for (const title of [null, {}, 'a'.repeat(513)])
+      expect(isBrowserRecordingTransportMessage({ ...action, title })).toBe(false)
+  })
   it('accepts only the small presentation envelope and finite bounded clock values', () => {
     for (const type of ['offer', 'ready', 'close'] as const)
       expect(isBrowserRecordingTransportMessage(recordingTransportMessage({ type }))).toBe(true)

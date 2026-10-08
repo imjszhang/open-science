@@ -18,7 +18,14 @@ type TransportBody =
   | { type: 'offer' | 'ready' | 'close' }
   | { type: 'state'; revision: number; playback: BrowserRecordingPlaybackState }
   | { type: 'seek'; revision: number; recordedAt: number }
-  | { type: 'action'; revision: number; disabled: boolean; pending: boolean }
+  | {
+      type: 'action'
+      revision: number
+      disabled: boolean
+      pending: boolean
+      recordedAt?: number
+      title?: string
+    }
   | { type: 'ask'; revision: number }
 export type BrowserRecordingTransportMessage = Envelope & TransportBody
 
@@ -62,9 +69,11 @@ export const isBrowserRecordingTransportMessage = (
   if (value.type === 'ask') return keysWithin(value, [...envelope, 'revision'])
   if (value.type === 'action')
     return (
-      keysWithin(value, [...envelope, 'revision', 'disabled', 'pending']) &&
+      keysWithin(value, [...envelope, 'revision', 'disabled', 'pending', 'recordedAt', 'title']) &&
       typeof value.disabled === 'boolean' &&
-      typeof value.pending === 'boolean'
+      typeof value.pending === 'boolean' &&
+      (value.recordedAt === undefined || isBrowserRecordingRecordedAt(value.recordedAt)) &&
+      (value.title === undefined || (typeof value.title === 'string' && value.title.length <= 512))
     )
   if (value.type === 'state')
     return (

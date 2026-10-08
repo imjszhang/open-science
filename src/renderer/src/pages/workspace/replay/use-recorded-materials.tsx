@@ -2,6 +2,9 @@ import { RunObservationPreview } from '../RunObservationPreview'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { Info } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { recordingSourceLabel } from './recording-source-label'
 import { ErrorNotice } from '@/components/error-notice'
 import { useNavigationStore } from '@/stores/navigation-store'
 import {
@@ -24,11 +27,7 @@ import {
   projectLegacyObservationToTrack,
   projectRecordingToTrack
 } from '../../../../../shared/project-recording'
-import {
-  recordedResults,
-  recordedMediaResource,
-  authorizedRecordedResultsReader
-} from '@/lib/replay/recorded-results'
+import { recordedResults, recordedMediaResource } from '@/lib/replay/recorded-results'
 import {
   readRecordedResource,
   type RecordedResourceReader
@@ -321,52 +320,104 @@ export function useRecordedMaterials(
     },
     [payload]
   )
-  const results = useMemo<ReplayResultEntry[]>(() => {
-    const attachments = payload && !selected?.localHistory ? recordedResults(payload) : []
-    const mapped = new Set(attachments.map((entry) => entry.resource.versionId))
+  const recordingLabel = useCallback(
+    (candidate: Candidate): string => {
+      const key = JSON.stringify(candidate.target)
+      const saved = prepared?.payloads.get(key)
+      const index = candidates.findIndex((item) => JSON.stringify(item.target) === key)
+      return recordingSourceLabel(
+        {
+          format: candidate.format,
+          name: candidate.resource.name,
+          title: saved && !('archive' in saved) ? saved.recording.title : undefined,
+          number: index < 0 ? candidates.length + 1 : index + 1
+        },
+        t
+      )
+    },
+    [prepared, candidates, t]
+  )
+  // The result catalog belongs to the research, not to the currently displayed video. All
+  // payloads here have already been resolved by their existing exact-Version storage owners.
+  const resultCatalog = useMemo(() => {
+    const owners = new Map<ReplayResultEntry, RecordedObservationPayload | RecordedProjectPayload>()
+    const attachments: ReplayResultEntry[] = []
+    const resourceIdentity = (resource: ReplayResource): string =>
+      JSON.stringify([
+        resource.source ?? 'artifact',
+        resource.projectId,
+        resource.sessionId,
+        resource.artifactId,
+        resource.fileId,
+        resource.versionId,
+        resource.checksum
+      ])
+    const sourceResources = new Map(
+      (document?.resources ?? []).map((resource) => [resourceIdentity(resource), resource])
+    )
+    for (const [key, value] of prepared?.payloads ?? []) {
+      if ('indexChecksum' in value) continue
+      const candidate = discoveredRecordings.find((item) => JSON.stringify(item.target) === key)
+      for (const attachment of recordedResults(value)) {
+        const resource =
+          sourceResources.get(resourceIdentity(attachment.resource)) ?? attachment.resource
+        const entry: ReplayResultEntry = {
+          ...attachment,
+          resource,
+          sourceKey: key,
+          sourceLabel: candidate ? recordingLabel(candidate) : undefined
+        }
+        attachments.push(entry)
+        owners.set(entry, value)
+      }
+    }
+    const mapped = new Set(attachments.map((entry) => resourceIdentity(entry.resource)))
     const supporting = new Set(timed?.supportingResourceIds)
-    return [
+    const entries: ReplayResultEntry[] = [
       ...attachments,
       ...(document?.resources ?? [])
-        .filter((resource) => !mapped.has(resource.versionId))
+        .filter((resource) => !mapped.has(resourceIdentity(resource)))
         .map((resource) => ({
           resource,
           source: { kind: 'session-history' as const, id: document!.source.sessionId },
+          sourceLabel: t('Research source files'),
           scope: { kind: 'recording' as const },
           stage: 'unspecified' as const,
           technical: supporting.has(resource.id)
         }))
     ]
-  }, [payload, document, selected?.localHistory, timed])
-  const readResults = useMemo<RecordedResourceReader>(
-    () =>
-      payload
-        ? (resource, signal) => {
-            const sourceResource = document?.resources.find(
-              (item) =>
-                item.projectId === resource.projectId &&
-                item.sessionId === resource.sessionId &&
-                item.versionId === resource.versionId &&
-                item.checksum === resource.checksum
-            )
-            return sourceResource
-              ? readRecordedResource(sourceResource, signal)
-              : authorizedRecordedResultsReader(payload, readRecordedResource)(resource, signal)
-          }
-        : readRecordedResource,
-    [payload, document]
+    return { entries, owners }
+  }, [prepared, document, timed, discoveredRecordings, recordingLabel, t])
+  const readResults = useCallback<RecordedResourceReader>(
+    (requested, signal) => {
+      // A UI filter is not authority: only exact resources in the resolved research catalog
+      // can reach the existing immutable reader. No latest-Version or mutable path fallback.
+      const entry = resultCatalog.entries.find(
+        ({ resource }) =>
+          resource.projectId === requested.projectId &&
+          resource.sessionId === requested.sessionId &&
+          resource.artifactId === requested.artifactId &&
+          resource.fileId === requested.fileId &&
+          resource.versionId === requested.versionId &&
+          resource.checksum === requested.checksum &&
+          resource.locator === requested.locator
+      )
+      if (!entry) return Promise.reject(new Error('The recorded file is unavailable.'))
+      return readRecordedResource(entry.resource, signal)
+    },
+    [resultCatalog]
   )
-  const askFile = async (mediaKey: string): Promise<void> => {
-    if (!payload) return
+  const askFile = async (mediaKey: string, owner = payload): Promise<void> => {
+    if (!owner) return
     askRequest.current?.abort()
     const controller = new AbortController()
     askRequest.current = controller
     const revision = useNavigationStore.getState().explicitNavigationRevision
     const destination = useRunObservationQuestionStore.getState().destination
     const selection = await window.api.observations.selectRecordedFile({
-      target: payload.receiving,
+      target: owner.receiving,
       mediaKey,
-      format: 'archive' in payload ? 'run-observation' : 'project-recording'
+      format: 'archive' in owner ? 'run-observation' : 'project-recording'
     })
     if (presentationMode === 'research') {
       const exiting = exitResearchReplayFullscreen()
@@ -387,48 +438,78 @@ export function useRecordedMaterials(
   }
   const catalog = (
     <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
-      {presentationMode === 'research' && candidates.length <= 1 ? (
-        <p className="truncate text-sm text-text-200" title={selected?.resource.name}>
-          {selected?.resource.name ?? t('Project recording')}
-        </p>
-      ) : (
-        <select
-          aria-label={t('Project recording')}
-          className="w-full rounded border border-border-200 bg-bg-000 p-2 text-xs"
-          value={selected ? JSON.stringify(selected.target) : ''}
-          onChange={(event) => {
-            const next = candidates.find(
-              (candidate) => JSON.stringify(candidate.target) === event.target.value
-            )
-            if (next) choose(next, false)
-            else {
-              askRequest.current?.abort()
-              setSelectionInitialized(true)
-              setSelected(undefined)
-              setPayload(undefined)
-              setBrowserPayload(undefined)
-            }
-          }}
-        >
-          <option value="">{t('Research source files')}</option>
-          {selected &&
-          !candidates.some(
-            (candidate) => JSON.stringify(candidate.target) === JSON.stringify(selected.target)
-          ) ? (
-            // A later discovery page may replace a checkpoint in the catalog. Keep the user's
-            // explicitly opened immutable Version selected without silently switching its footage.
-            <option value={JSON.stringify(selected.target)} disabled>
-              {selected.resource.name}
-            </option>
-          ) : null}
-          {candidates.map((candidate) => (
-            <option key={JSON.stringify(candidate.target)} value={JSON.stringify(candidate.target)}>
-              {candidate.localHistory ? `${t('Local historical run')} · ` : ''}
-              {candidate.resource.name}
-            </option>
-          ))}
-        </select>
-      )}
+      <div className="flex min-w-0 items-center gap-2">
+        {presentationMode === 'research' && candidates.length <= 1 ? (
+          <p
+            className="min-w-0 flex-1 truncate text-sm text-text-200"
+            title={selected?.resource.name}
+          >
+            {selected ? recordingLabel(selected) : t('Project recording')}
+          </p>
+        ) : (
+          <select
+            aria-label={t('Project recording')}
+            className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-000 px-2 text-xs"
+            value={selected ? JSON.stringify(selected.target) : ''}
+            onChange={(event) => {
+              const next = candidates.find(
+                (candidate) => JSON.stringify(candidate.target) === event.target.value
+              )
+              if (next) choose(next, false)
+              else {
+                askRequest.current?.abort()
+                setSelectionInitialized(true)
+                setSelected(undefined)
+                setPayload(undefined)
+                setBrowserPayload(undefined)
+              }
+            }}
+          >
+            <option value="">{t('Research source files')}</option>
+            {selected &&
+            !candidates.some(
+              (candidate) => JSON.stringify(candidate.target) === JSON.stringify(selected.target)
+            ) ? (
+              // A later discovery page may replace a checkpoint in the catalog. Keep the user's
+              // explicitly opened immutable Version selected without silently switching its footage.
+              <option value={JSON.stringify(selected.target)} disabled>
+                {recordingLabel(selected)}
+              </option>
+            ) : null}
+            {candidates.map((candidate) => (
+              <option
+                key={JSON.stringify(candidate.target)}
+                value={JSON.stringify(candidate.target)}
+              >
+                {candidate.localHistory ? `${t('Local historical run')} · ` : ''}
+                {recordingLabel(candidate)}
+              </option>
+            ))}
+          </select>
+        )}
+        {selected ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                aria-label={t('Recording details')}
+              >
+                <Info className="size-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="max-w-72 space-y-1 break-all">
+              <p>{selected.resource.name}</p>
+              <p>
+                <span>{t('Version')}</span>
+                {': '}
+                <code>{selected.target.versionId}</code>
+              </p>
+            </PopoverContent>
+          </Popover>
+        ) : null}
+      </div>
       {selected?.localHistory ? (
         <p className="text-xs text-muted-foreground">
           {t('Recorded on this device. This is separate from the imported author’s evidence.')}
@@ -564,6 +645,18 @@ export function useRecordedMaterials(
                         : undefined
                     }
                     track={track}
+                    missingMediaKeys={
+                      payload
+                        ? track.media
+                            .filter(
+                              (media) =>
+                                !payload.media.some(
+                                  (resolved) => resolved.mediaKey === media.mediaKey
+                                )
+                            )
+                            .map((media) => media.mediaKey)
+                        : undefined
+                    }
                     readImage={readImage}
                     onAskFrame={(frame) => askFile(frame.mediaKey)}
                   />
@@ -586,22 +679,23 @@ export function useRecordedMaterials(
         label: t('Results'),
         content: (active, playback) => (
           <>
-            {catalog}
-            {pending ?? (
-              <ResultsPanel
-                active={active}
-                presentationMode={presentationMode}
-                entries={results}
-                recordedAt={playback?.continuous ? playback.recordedAt : undefined}
-                read={readResults}
-                onAskFile={
-                  payload || onAskSourceFile
-                    ? (entry) =>
-                        entry.mediaKey ? askFile(entry.mediaKey) : onAskSourceFile?.(entry.resource)
-                    : undefined
-                }
-              />
-            )}
+            <ResultsPanel
+              active={active}
+              presentationMode={presentationMode}
+              entries={resultCatalog.entries}
+              recordedAt={playback?.continuous ? playback.recordedAt : undefined}
+              read={readResults}
+              onAskFile={
+                resultCatalog.owners.size || onAskSourceFile
+                  ? (entry) => {
+                      const owner = resultCatalog.owners.get(entry)
+                      return entry.mediaKey && owner
+                        ? askFile(entry.mediaKey, owner)
+                        : onAskSourceFile?.(entry.resource)
+                    }
+                  : undefined
+              }
+            />
           </>
         )
       }

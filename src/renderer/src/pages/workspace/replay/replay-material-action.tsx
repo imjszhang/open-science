@@ -3,6 +3,9 @@ import { createContext, useContext, useLayoutEffect, useMemo, useRef, type React
 /** Presentation-only action. Evidence capture and delivery stay with the material owner. */
 export type ReplayMaterialAction = {
   label: string
+  /** Exact selected record timestamp; never substitute the research playhead. */
+  recordedAt?: number
+  title?: string
   disabled?: boolean
   pending?: boolean
   onAsk: () => void
@@ -62,6 +65,8 @@ export function useReplayMaterialAction(action: ReplayMaterialAction | undefined
   const label = action?.label
   const disabled = action?.disabled
   const pending = action?.pending
+  const recordedAt = action?.recordedAt
+  const title = action?.title
   useLayoutEffect(() => {
     if (!context || !present || !label) return
     const identity = owner.current
@@ -69,12 +74,14 @@ export function useReplayMaterialAction(action: ReplayMaterialAction | undefined
       label,
       disabled,
       pending,
+      recordedAt,
+      title,
       onAsk: () => {
         const current = latest.current
         if (current && !current.disabled && !current.pending) current.onAsk()
       }
     })
     return () => context.register(identity, undefined)
-  }, [context, present, label, disabled, pending])
+  }, [context, present, label, disabled, pending, recordedAt, title])
   return context !== null
 }

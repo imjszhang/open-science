@@ -267,3 +267,54 @@ describe('compact research Results', () => {
     ).toBeTruthy()
   })
 })
+
+it('filters result sources separately, preserves material time, and clears stale actions', async () => {
+  const early = {
+    ...entry('early.txt'),
+    availableAt: 100,
+    sourceKey: 'one',
+    sourceLabel: 'Source one'
+  }
+  const later = {
+    ...entry('later.txt'),
+    availableAt: 300,
+    sourceKey: 'two',
+    sourceLabel: 'Source two',
+    resource: { ...entry('later.txt').resource, id: 'later' }
+  }
+  const changed = vi.fn<(action: ReplayMaterialAction | undefined) => void>()
+  const ask = vi.fn()
+  render(
+    <ReplayMaterialActionProvider onActionChange={changed}>
+      <ResultsPanel
+        entries={[early, later]}
+        recordedAt={200}
+        read={vi.fn().mockResolvedValue({
+          content: 'Result',
+          mimeType: 'text/plain',
+          truncated: false
+        })}
+        onAskFile={ask}
+      />
+    </ReplayMaterialActionProvider>
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'early.txt' }))
+  await screen.findByText('Result')
+  const previous = changed.mock.calls.at(-1)![0]!
+  expect(previous.recordedAt).toBe(100)
+  fireEvent.change(screen.getByRole('combobox', { name: 'Result source' }), {
+    target: { value: 'two' }
+  })
+  expect(changed).toHaveBeenLastCalledWith(undefined)
+  await act(async () => previous.onAsk())
+  expect(ask).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'View all results' }))
+  expect(screen.getByRole('combobox', { name: 'Result source' })).toHaveProperty('value', 'two')
+  expect(screen.queryByRole('button', { name: 'early.txt' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'later.txt' }))
+  await screen.findByText('Result')
+  const action = changed.mock.calls.at(-1)![0]!
+  expect(action.recordedAt).toBe(300)
+  await act(async () => action.onAsk())
+  expect(ask).toHaveBeenCalledExactlyOnceWith(later)
+})

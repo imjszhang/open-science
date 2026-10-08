@@ -337,7 +337,9 @@ export const PreviewToolContent = ({
         onKeyDownCapture={retainInteractedReplay}
         onWheelCapture={retainInteractedReplay}
       >
-        <ReplaySourceBar item={item} />
+        {item.replayRecordingTarget || item.replayRunTarget ? (
+          <ReplaySourceBar item={item} />
+        ) : null}
         <div className="min-h-0 flex-1">
           <Suspense
             fallback={

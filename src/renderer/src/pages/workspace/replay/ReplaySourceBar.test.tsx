@@ -59,6 +59,16 @@ it('identifies the source independently of the selected conversation', () => {
   expect(screen.getByText('Research referenced by this discussion')).toBeTruthy()
 })
 
+it('retains relationship and exact navigation in the consolidated research details', () => {
+  const open = vi.spyOn(useNavigationStore.getState(), 'openSession').mockReturnValue(true)
+  render(<ReplaySourceBar item={item} variant="details" />)
+  expect(screen.queryByText('Research materials')).toBeNull()
+  expect(screen.getByText('Research referenced by this discussion')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Open source record' }))
+  expect(open).toHaveBeenCalledWith('p', 'source', 'user')
+  open.mockRestore()
+})
+
 it('does not infer membership merely because a normal Session reads a study', () => {
   useSessionStore.setState({ selectedSessionId: 'ordinary' })
   render(<ReplaySourceBar item={item} />)

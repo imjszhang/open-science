@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { advanceResearchReplay } from './replay-recorded-gaps'
+import { advanceResearchReplay, replayRecordedCoverage } from './replay-recorded-gaps'
 import type { ReplayStep } from '../../../../../shared/replay'
 const step = (recordedAt: number): ReplayStep => ({ recordedAt }) as ReplayStep
 const base = {
@@ -42,5 +42,48 @@ describe('optional gaps in a research clock', () => {
     expect(advanceResearchReplay({ ...base, steps: [step(1000), step(8000)] })).toEqual({
       positionMs: 3016
     })
+  })
+})
+
+describe('actual footage coverage', () => {
+  it('merges overlapping sources and retains only actual interior gaps', () => {
+    expect(
+      replayRecordedCoverage(
+        [
+          { startedAt: 7000, endedAt: 9000 },
+          { startedAt: 2000, endedAt: 4000 },
+          { startedAt: 3500, endedAt: 5000 },
+          { startedAt: 5000, endedAt: 6000 }
+        ],
+        1000,
+        10000
+      )
+    ).toEqual({
+      footage: [
+        { startMs: 1000, endMs: 5000 },
+        { startMs: 6000, endMs: 8000 }
+      ],
+      gaps: [{ startMs: 5000, endMs: 6000 }]
+    })
+  })
+
+  it('clips to the selected branch and rejects malformed or zero-length ranges', () => {
+    const ranges = [
+      { startedAt: -100, endedAt: 1500 },
+      { startedAt: 3500, endedAt: 6000 },
+      { startedAt: 0, endedAt: 500 },
+      { startedAt: 1700, endedAt: 1700 },
+      { startedAt: 3000, endedAt: 2000 },
+      { startedAt: NaN, endedAt: 2500 }
+    ]
+    expect(replayRecordedCoverage(ranges, 1000, 3000)).toEqual({
+      footage: [
+        { startMs: 0, endMs: 500 },
+        { startMs: 2500, endMs: 3000 }
+      ],
+      gaps: [{ startMs: 500, endMs: 2500 }]
+    })
+    expect(replayRecordedCoverage(ranges, undefined, 3000)).toEqual({ footage: [], gaps: [] })
+    expect(replayRecordedCoverage(ranges, 1000, NaN)).toEqual({ footage: [], gaps: [] })
   })
 })

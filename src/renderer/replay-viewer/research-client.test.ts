@@ -6,11 +6,63 @@ import {
   researchRecordingFixture,
   researchSelectionFixture
 } from './research-replay.test-support'
-import { researchResults } from './research-materials'
+import { researchResults, researchResourcePosition } from './research-materials'
 const json = (value: unknown): Response =>
   new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
 
 describe('scoped research browser reads', () => {
+  it('reports transport/authorization failures, not missing files or cancelled reads', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+    const client = new ResearchReplayClient(fetcher)
+    const listener = vi.fn()
+    const unsubscribe = client.onConnectionFailure(listener)
+    fetcher.mockResolvedValueOnce(new Response('', { status: 404 }))
+    await expect(client.context()).rejects.toMatchObject({ kind: 'unavailable' })
+    expect(listener).not.toHaveBeenCalled()
+    fetcher.mockResolvedValueOnce(new Response('', { status: 401 }))
+    await expect(client.context()).rejects.toMatchObject({ kind: 'authorization' })
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'authorization' }))
+    fetcher.mockRejectedValueOnce(new Error('offline'))
+    await expect(client.context()).rejects.toMatchObject({ kind: 'network' })
+    expect(listener).toHaveBeenCalledTimes(2)
+    const abort = new AbortController()
+    abort.abort()
+    fetcher.mockRejectedValueOnce(new Error('cancelled'))
+    await expect(client.context(abort.signal)).rejects.toThrow('cancelled')
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    fetcher.mockRejectedValueOnce(new Error('offline'))
+    await expect(client.context()).rejects.toMatchObject({ kind: 'network' })
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('anchors a file question to its saved publication while watching a different moment', () => {
+    const { document, timing } = researchFixture()
+    const resource = {
+      id: 'report',
+      name: 'report.txt',
+      projectId: 'local-project',
+      sessionId: 'local-session',
+      versionId: 'report-v1',
+      artifactId: 'report',
+      availability: 'recorded' as const,
+      createdAt: 9000
+    }
+    document.resources.push(resource)
+    document.branches[0].steps[1].resourceIds.push(resource.id)
+    const playback = {
+      branchId: 'main',
+      positionMs: 2000,
+      recordedAt: 3000,
+      playing: false,
+      speed: 1,
+      onSeekRecordedAt: vi.fn()
+    }
+    expect(
+      researchResourcePosition(document, timing.recordedTimeOrigins, resource, playback)
+    ).toMatchObject({ branchId: 'main', stepId: 'activity', timeMs: 8000, recordedAt: 9000 })
+    expect(playback.positionMs).toBe(2000)
+  })
   it('accepts only read-only research context and rejects execution capabilities', async () => {
     const context = {
       mode: 'research',

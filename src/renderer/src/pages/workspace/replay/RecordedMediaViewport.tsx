@@ -8,6 +8,7 @@ export type RecordedMediaViewportProps = {
   children?: ReactNode
   status?: ReactNode
   metadata?: ReactNode
+  compact?: boolean
   surfaceTestId?: string
 }
 
@@ -18,6 +19,7 @@ export function RecordedMediaViewport({
   children,
   status,
   metadata,
+  compact = false,
   surfaceTestId
 }: RecordedMediaViewportProps): React.JSX.Element {
   const { t } = useTranslation()
@@ -52,25 +54,39 @@ export function RecordedMediaViewport({
       data-testid="recorded-media-viewport"
     >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 flex-1 text-xs text-muted-foreground">{metadata}</div>
+        <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{metadata}</div>
         <div className="flex shrink-0 gap-1" role="group" aria-label={t('Recorded media size')}>
-          <Button
-            size="sm"
-            variant={nativeSize ? 'ghost' : 'secondary'}
-            aria-pressed={!nativeSize}
-            onClick={() => setNativeSize(false)}
-          >
-            {t('Fit to window')}
-          </Button>
-          <Button
-            size="sm"
-            variant={nativeSize ? 'secondary' : 'ghost'}
-            aria-pressed={nativeSize}
-            disabled={!hasDimensions}
-            onClick={() => setNativeSize(true)}
-          >
-            {t('Actual size (100%)')}
-          </Button>
+          {compact ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              disabled={!hasDimensions && !nativeSize}
+              onClick={() => setNativeSize((value) => !value)}
+            >
+              {nativeSize ? t('Fit to window') : t('Actual size (100%)')}
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant={nativeSize ? 'ghost' : 'secondary'}
+                aria-pressed={!nativeSize}
+                onClick={() => setNativeSize(false)}
+              >
+                {t('Fit to window')}
+              </Button>
+              <Button
+                size="sm"
+                variant={nativeSize ? 'secondary' : 'ghost'}
+                aria-pressed={nativeSize}
+                disabled={!hasDimensions}
+                onClick={() => setNativeSize(true)}
+              >
+                {t('Actual size (100%)')}
+              </Button>
+            </>
+          )}
         </div>
       </div>
       <div

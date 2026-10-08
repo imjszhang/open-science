@@ -553,3 +553,104 @@ it('dispatches repeated recorded Ask actions by server selection identity, never
   expect(live.selection).not.toHaveBeenCalled()
   expect(openRecorded).toHaveBeenCalledExactlyOnceWith({ target: receiving })
 })
+
+it('pauses a disconnected recorded viewer and reconnects the same Version without losing the playhead or draft', async () => {
+  const api = install()
+  const receiving = {
+    projectId: 'p',
+    sessionId: 'imported',
+    artifactId: 'recording',
+    versionId: 'fixed-version'
+  }
+  const openRecorded = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ...access('first'),
+      target: receiving,
+      mode: 'recorded',
+      format: 'web-recording'
+    })
+    .mockResolvedValueOnce({
+      ...access('second'),
+      target: receiving,
+      mode: 'recorded',
+      format: 'web-recording'
+    })
+  const selection = vi.fn().mockImplementation(async ({ viewerId }) => {
+    if (viewerId === 'first') throw new Error('Viewer expired')
+    return null
+  })
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: { observations: { ...api, openRecorded }, projectRecordings: { selection } }
+  })
+  const onSeek = vi.fn(),
+    onAsk = vi.fn()
+  function Harness(): React.JSX.Element {
+    const [playing, setPlaying] = useState(true)
+    const [position, setPosition] = useState(12875)
+    const [draft, setDraft] = useState('Keep this question in my draft')
+    return (
+      <>
+        <input
+          aria-label="Draft"
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+        />
+        <output data-testid="playback-state">
+          {JSON.stringify({ playing, position, speed: 2 })}
+        </output>
+        <RunObservationPreview
+          title="Saved project footage"
+          mode="recorded"
+          format="web-recording"
+          target={receiving}
+          isActive
+          onAskBrowserMoment={onAsk}
+          playback={{
+            recordedAt: position,
+            playing,
+            speed: 2,
+            onSeekRecordedAt: (value) => {
+              onSeek(value)
+              setPosition(value)
+              setPlaying(false)
+            }
+          }}
+        />
+      </>
+    )
+  }
+  render(<Harness />)
+  await screen.findByText('Replay connection interrupted')
+  expect(onSeek).toHaveBeenCalledExactlyOnceWith(12875)
+  expect(JSON.parse(screen.getByTestId('playback-state').textContent!)).toEqual({
+    playing: false,
+    position: 12875,
+    speed: 2
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+  await waitFor(() =>
+    expect(screen.getByTitle('Saved project footage').getAttribute('src')).toContain(
+      'viewer-second.localhost'
+    )
+  )
+  expect(openRecorded).toHaveBeenCalledTimes(2)
+  expect(openRecorded.mock.calls.map(([request]) => request)).toEqual([
+    { target: receiving, format: 'web-recording' },
+    { target: receiving, format: 'web-recording' }
+  ])
+  expect(api.revoke).toHaveBeenCalledWith({ viewerId: 'first' })
+  expect(screen.queryByText('Replay connection interrupted')).toBeNull()
+  expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveProperty(
+    'value',
+    'Keep this question in my draft'
+  )
+  expect(JSON.parse(screen.getByTestId('playback-state').textContent!)).toEqual({
+    playing: false,
+    position: 12875,
+    speed: 2
+  })
+  expect(onAsk).not.toHaveBeenCalled()
+  expect(api.open).not.toHaveBeenCalled()
+})

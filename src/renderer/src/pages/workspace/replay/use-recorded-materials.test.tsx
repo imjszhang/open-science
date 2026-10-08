@@ -23,6 +23,8 @@ import type { RecordingCandidate } from './recording-discovery'
 import { useRecordingDiscovery, type RecordingDiscovery } from './use-recording-discovery'
 import { useRecordedMaterials } from './use-recorded-materials'
 import { browserPayloadFixture } from './BrowserRecording.test-support'
+import { recordedMediaResource } from '@/lib/replay/recorded-results'
+import { ReplayMaterialActionProvider, type ReplayMaterialAction } from './replay-material-action'
 
 const recovery = vi.hoisted(() => ({ onClick: vi.fn() }))
 vi.mock('./use-observation-question-recovery', () => ({
@@ -530,7 +532,7 @@ describe('useRecordedMaterials read-only ownership', () => {
     api.observations.readProjectRecording.mockResolvedValue({ ...projectPayload(), media: [] })
     render(<Harness document={documentFixture()} discovery={discovery([candidate()])} />)
     select()
-    await screen.findByText('Could not read the recorded material.')
+    await screen.findByText('This recorded media file is not included.')
     expect(screen.queryByRole('img')).toBeNull()
     expect(api.artifacts.readPreview).not.toHaveBeenCalled()
     expectNoExecution()
@@ -622,8 +624,13 @@ it('keeps an explicitly opened checkpoint on its exact receiving version when di
     (screen.getByRole('combobox', { name: 'Project recording' }) as HTMLSelectElement).value
   ).toBe(JSON.stringify(checkpoint.target))
   expect(
-    (screen.getByRole('option', { name: checkpoint.resource.name }) as HTMLOptionElement).disabled
-  ).toBe(true)
+    [...screen.getAllByRole('option')].find(
+      (option) => (option as HTMLOptionElement).value === JSON.stringify(checkpoint.target)
+    )
+  ).toHaveProperty('disabled', true)
+  fireEvent.click(screen.getByRole('button', { name: 'Recording details' }))
+  expect(screen.getByText(checkpoint.resource.name)).toBeTruthy()
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
   expect(screen.getByTitle(checkpoint.resource.name)).toBeTruthy()
   expect(api.observations.openRecorded).toHaveBeenCalledTimes(1)
   select(final.target)
@@ -727,5 +734,90 @@ it('freezes captured image support IDs before playback without hiding scientific
   const frozen = result.current.playbackDocument
   act(() => result.current.choose(candidate()))
   expect(result.current.playbackDocument).toBe(frozen)
+  expectNoExecution()
+})
+
+it('keeps research results independent of project selection and asks the exact result owner', async () => {
+  const one = projectPayload(),
+    two = projectPayload()
+  const secondTarget = { ...receiving, artifactId: 'second-index', versionId: 'second-version' }
+  const attach = (value: RecordedProjectPayload, suffix: string): void => {
+    value.recording.recordingId = `recording-${suffix}`
+    value.recording.title = `Saved source ${suffix}`
+    value.recording.media.push({
+      mediaKey: 'report',
+      name: `${suffix}-report.txt`,
+      mimeType: 'text/plain',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 6,
+      sourceVersionId: `author-${suffix}`
+    })
+    ;(value.media as Array<RecordedProjectPayload['media'][number]>).push({
+      mediaKey: 'report',
+      artifactId: `report-${suffix}`,
+      versionId: `report-${suffix}-v1`,
+      checksum: 'b'.repeat(64),
+      sizeBytes: 6
+    })
+  }
+  attach(one, 'one')
+  attach(two, 'two')
+  const second = { ...two, receiving: secondTarget }
+  api.observations.readProjectRecording.mockImplementation(async ({ target }) =>
+    target.versionId === secondTarget.versionId ? second : one
+  )
+  api.observations.selectRecordedFile.mockImplementation(async ({ target, mediaKey }) =>
+    recordedFileSelectionForPayload(
+      target.versionId === secondTarget.versionId ? second : one,
+      mediaKey
+    )
+  )
+  api.artifacts.readPreview.mockResolvedValue({
+    content: 'Report',
+    encoding: 'utf8',
+    truncated: false
+  })
+  const doc = documentFixture()
+  doc.resources = [
+    { ...recordedMediaResource(one, 'report'), createdAt: 10 },
+    { ...recordedMediaResource(second, 'report'), createdAt: 50 }
+  ]
+  const candidates = discovery([candidate(), candidate(secondTarget)])
+  const changed = vi.fn<(action: ReplayMaterialAction | undefined) => void>()
+  function ResultsHarness(): React.JSX.Element {
+    const materials = useRecordedMaterials(doc, candidates)
+    const view = materials.views.find((item) => item.id === 'results')!
+    return (
+      <ReplayMaterialActionProvider onActionChange={changed}>
+        <button onClick={() => materials.choose(candidate(secondTarget))}>Change footage</button>
+        {typeof view.content === 'function' ? view.content(true) : view.content}
+      </ReplayMaterialActionProvider>
+    )
+  }
+  render(<ResultsHarness />)
+  await screen.findByRole('option', { name: 'Saved source one' })
+  fireEvent.click(await screen.findByRole('button', { name: 'one-report.txt' }))
+  await screen.findByText('Report')
+  expect(screen.queryByRole('combobox', { name: 'Project recording' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'two-report.txt' })).toBeTruthy()
+  expect(changed.mock.calls.at(-1)?.[0]?.recordedAt).toBe(10)
+  fireEvent.click(screen.getByRole('button', { name: 'Change footage' }))
+  expect(screen.getByRole('button', { name: 'one-report.txt' })).toHaveProperty(
+    'ariaPressed',
+    'true'
+  )
+  const action = changed.mock.calls.at(-1)![0]!
+  await act(async () => action.onAsk())
+  await waitFor(() =>
+    expect(api.observations.selectRecordedFile).toHaveBeenCalledWith({
+      target: receiving,
+      mediaKey: 'report',
+      format: 'project-recording'
+    })
+  )
+  expect(recovery.onClick).toHaveBeenCalledWith(
+    recordedFileSelectionForPayload(one, 'report'),
+    expect.any(AbortSignal)
+  )
   expectNoExecution()
 })

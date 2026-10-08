@@ -26,6 +26,12 @@ const closePort = (port: MessagePort | undefined): void => {
   port.onmessage = null
   port.close()
 }
+type RecordedMaterialAction = {
+  disabled: boolean
+  pending: boolean
+  recordedAt?: number
+  title?: string
+}
 
 /** The caller admits only the exact current recorded viewer, never a live project frame.
  * A fresh channel is offered after each iframe load. Offers are retried because the load event
@@ -42,10 +48,10 @@ export const useBrowserRecordingTransportHost = ({
   playback?: EmbeddedBrowserRecordingPlayback
 }): {
   onLoad: () => void
-  action?: { disabled: boolean; pending: boolean }
+  action?: RecordedMaterialAction
   ask: () => void
 } => {
-  const [action, setAction] = useState<{ disabled: boolean; pending: boolean }>()
+  const [action, setAction] = useState<RecordedMaterialAction>()
   const ask = useRef<() => void>(() => undefined)
   const latest = useRef(playback)
   useLayoutEffect(() => {
@@ -116,11 +122,19 @@ export const useBrowserRecordingTransportHost = ({
           event.data.revision <= revision &&
           latest.current?.presentation === 'research'
         ) {
-          const { disabled, pending } = event.data
+          const { disabled, pending, recordedAt, title } = event.data
           setAction((previous) =>
-            previous?.disabled === disabled && previous.pending === pending
+            previous?.disabled === disabled &&
+            previous.pending === pending &&
+            previous.recordedAt === recordedAt &&
+            previous.title === title
               ? previous
-              : { disabled, pending }
+              : {
+                  disabled,
+                  pending,
+                  ...(recordedAt === undefined ? {} : { recordedAt }),
+                  ...(title === undefined ? {} : { title })
+                }
           )
         }
       }
@@ -194,7 +208,14 @@ export const useBrowserRecordingTransportReceiver = ({
         type: 'action',
         revision: connection.revision,
         disabled: !action.current || Boolean(action.current.disabled),
-        pending: Boolean(action.current?.pending)
+        pending: Boolean(action.current?.pending),
+        ...(action.current?.recordedAt !== undefined &&
+        isBrowserRecordingRecordedAt(action.current.recordedAt)
+          ? { recordedAt: action.current.recordedAt }
+          : {}),
+        ...(action.current?.title !== undefined
+          ? { title: action.current.title.slice(0, 512) }
+          : {})
       })
     )
   }, [])

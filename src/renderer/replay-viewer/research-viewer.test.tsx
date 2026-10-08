@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ResearchReplayViewerApp } from './ResearchReplayViewerApp'
 import { researchPosition } from './research-materials'
@@ -70,6 +70,7 @@ function makeClient(
 } {
   const fetcher = vi.fn<typeof fetch>(async (path, options) => {
     if (path === '/api/research/document') return json(research)
+    if (path === '/api/context') return json(context)
     if (path === '/api/research/selection') return json(null)
     if (path === '/api/research/read') return json(recording)
     if (path === '/api/research/select')
@@ -91,6 +92,121 @@ const seek = (time: number): void => {
 }
 
 describe('complete browser research Replay', () => {
+  it('refreshes the selected failed result after reconnect without changing its selection', async () => {
+    const research = researchFixture()
+    research.document.resources.push({
+      id: 'report',
+      name: 'report.txt',
+      projectId: 'local-project',
+      sessionId: 'local-session',
+      versionId: 'report-v1',
+      artifactId: 'report',
+      availability: 'recorded',
+      createdAt: 3000
+    })
+    const { client, fetcher } = makeClient(research)
+    const base = fetcher.getMockImplementation()!
+    let reads = 0
+    fetcher.mockImplementation(async (...args) => {
+      if (String(args[0]).startsWith('/api/research/resource?')) {
+        if (++reads === 1) throw new Error('offline')
+        return new Response('Saved result after reconnect', {
+          headers: { 'content-type': 'text/plain' }
+        })
+      }
+      return base(...args)
+    })
+    render(<ResearchReplayViewerApp context={context} client={client} />)
+    await screen.findByTestId('research-replay-viewer')
+    seek(4500)
+    fireEvent.click(screen.getByRole('tab', { name: 'Results' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'report.txt' }))
+    await screen.findByText('Replay connection interrupted')
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+    await screen.findByText('Saved result after reconnect')
+    expect(screen.getByRole('button', { name: 'report.txt' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe('4500')
+    expect(reads).toBe(2)
+  })
+
+  it('does not clear revoked authorization when an older media connection check succeeds', async () => {
+    const { client, fetcher } = makeClient()
+    render(<ResearchReplayViewerApp context={context} client={client} />)
+    await screen.findByTestId('research-replay-viewer')
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to recorded footage' }))
+    let resolveContext!: (value: Response) => void
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveContext = resolve
+        })
+    )
+    fireEvent.error(await screen.findByLabelText('Recorded webpage'))
+    await waitFor(() => expect(resolveContext).toBeDefined())
+    fetcher.mockResolvedValueOnce(new Response('', { status: 403 }))
+    await act(async () => {
+      await client.context().catch(() => undefined)
+    })
+    await screen.findByText('This observation link is no longer authorized.')
+    await act(async () => resolveContext(json(context)))
+    expect(screen.getByText('This observation link is no longer authorized.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+  })
+  it('pauses on a lost media connection and retries in place without recreating the research', async () => {
+    const { client, fetcher } = makeClient()
+    render(<ResearchReplayViewerApp context={context} client={client} />)
+    await screen.findByTestId('research-replay-viewer')
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to recorded footage' }))
+    const before = screen
+      .getByRole('slider', { name: 'Replay progress' })
+      .getAttribute('aria-valuenow')
+    const video = await screen.findByLabelText('Recorded webpage')
+    fetcher.mockRejectedValueOnce(new Error('offline'))
+    fireEvent.error(video)
+    await screen.findByText('Replay connection interrupted')
+    expect(
+      screen.getByRole('button', { name: 'Ask about this content' }).hasAttribute('disabled')
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+    await waitFor(() => expect(screen.queryByText('Replay connection interrupted')).toBeNull())
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe(before)
+    expect(screen.getByRole('tab', { name: 'Project replay' }).getAttribute('aria-selected')).toBe(
+      'true'
+    )
+    expect(fetcher.mock.calls.filter(([path]) => path === '/api/research/document')).toHaveLength(1)
+    expect(
+      fetcher.mock.calls
+        .map(([path]) => String(path))
+        .every((path) => path.startsWith('/api/research/') || path === '/api/context')
+    ).toBe(true)
+  })
+
+  it('retains loaded records but never renews an expired grant from the browser', async () => {
+    const { client, fetcher } = makeClient()
+    render(<ResearchReplayViewerApp context={context} client={client} />)
+    await screen.findByTestId('research-replay-viewer')
+    seek(4500)
+    fetcher.mockResolvedValueOnce(new Response('', { status: 401 }))
+    await act(async () => {
+      await client.context().catch(() => undefined)
+    })
+    await screen.findByText('This observation link is no longer authorized.')
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+    expect(
+      screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+    ).toBe('4500')
+    expect(
+      screen.getByRole('button', { name: 'Ask about this record' }).hasAttribute('disabled')
+    ).toBe(true)
+  })
   it('routes research without polling live observations or recording controls', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => json(context))
     const client = new ReplayViewerClient(fetcher)

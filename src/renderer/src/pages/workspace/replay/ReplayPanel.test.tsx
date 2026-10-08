@@ -1912,6 +1912,78 @@ describe('single-material research presentation', () => {
     expect(screen.getByRole('button', { name: 'Ask about this record' })).toBeTruthy()
   })
 
+  it('shows true footage coverage independently of progress and seeks exact gaps', () => {
+    render(
+      <ReplayPanel
+        document={makeDocument()}
+        {...callbacks()}
+        host={null}
+        presentationMode="research"
+        recordedTimeOrigins={{ main: 1000 }}
+        recordedCoverage={{
+          main: [
+            { startedAt: 1500, endedAt: 2000 },
+            { startedAt: 2500, endedAt: 4000 }
+          ]
+        }}
+      />
+    )
+    const coverage = screen.getByTestId('replay-recording-coverage')
+    const footage = within(coverage).getByRole('button', { name: 'Footage: 0:00–0:01' })
+    expect(footage.style.left).toBe(`${(500 / 3000) * 100}%`)
+    fireEvent.click(within(coverage).getByRole('button', { name: 'No footage: 0:01–0:01' }))
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1000')
+    expect(footage.style.left).toBe(`${(500 / 3000) * 100}%`)
+    fireEvent.click(within(coverage).getByRole('button', { name: 'Footage: 0:01–0:03' }))
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1500')
+  })
+
+  it('distinguishes the selected material timestamp from the research playhead and pauses on media failure', async () => {
+    let pauseMedia: (() => void) | undefined
+    function Material({ active }: { active: boolean }): React.JSX.Element {
+      useReplayMaterialAction(
+        active
+          ? {
+              label: 'Ask about this moment',
+              recordedAt: 1700,
+              title: 'Decoded frame',
+              onAsk: vi.fn()
+            }
+          : undefined
+      )
+      return <p>Recorded frame</p>
+    }
+    render(
+      <ReplayPanel
+        document={makeDocument()}
+        {...callbacks()}
+        host={null}
+        presentationMode="research"
+        recordedTimeOrigins={{ main: 1000 }}
+        materialViews={[
+          {
+            id: 'project',
+            label: 'Project replay',
+            content: (active, playback) => {
+              pauseMedia = playback?.onPause
+              return <Material active={active} />
+            }
+          }
+        ]}
+      />
+    )
+    seekProgress(2500)
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
+    expect(screen.getByText('Reference time: 0:00')).toBeTruthy()
+    expect(screen.getByText('Playback position: 0:02')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(screen.getByRole('button', { name: 'Pause replay' })).toBeTruthy()
+    act(() => pauseMedia?.())
+    expect(screen.getByRole('button', { name: 'Play replay' })).toBeTruthy()
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('2500')
+    expect(screen.getByText('Reference time: 0:00')).toBeTruthy()
+  })
+
   it('keeps browser fullscreen distinct from expanding the native preview', async () => {
     const expand = vi.fn()
     render(
@@ -1983,6 +2055,40 @@ describe('single-material research presentation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     view.rerender(<ReplayPanel {...props} active />)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('keeps navigation mounted but disables every research question when the connection is inactive', () => {
+    const cb = callbacks()
+    const replayDocument = makeDocument()
+    const view = render(
+      <ReplayPanel document={replayDocument} {...cb} host={null} presentationMode="research" />
+    )
+    seekProgress(1500)
+    view.rerender(
+      <ReplayPanel
+        document={replayDocument}
+        {...cb}
+        host={null}
+        presentationMode="research"
+        active={false}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Ask about this record' })).toHaveProperty(
+      'disabled',
+      true
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about this record' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Question options' }))
+    expect(screen.getByRole('button', { name: 'Ask about this step' })).toHaveProperty(
+      'disabled',
+      true
+    )
+    expect(screen.getByRole('button', { name: 'Discuss the entire research' })).toHaveProperty(
+      'disabled',
+      true
+    )
+    expect(screen.getByRole('slider').getAttribute('aria-valuenow')).toBe('1500')
+    expect(cb.onAskStep).not.toHaveBeenCalled()
   })
 
   it('preserves the canonical capture layout when research presentation is requested without fitContainer', () => {

@@ -87,3 +87,25 @@ it('keeps the same media element and actual pixels when sizing modes or resoluti
   expect(media.currentTime).toBe(12.34)
   expect(screen.getByTestId('surface').style.width).toBe('225px')
 })
+
+it('uses one size action in the research toolbar without remounting the media', () => {
+  render(
+    <RecordedMediaViewport
+      compact
+      width={1280}
+      height={720}
+      metadata="1280 × 720 · WebM"
+      surfaceTestId="surface"
+    >
+      <video data-testid="media" />
+    </RecordedMediaViewport>
+  )
+  const media = screen.getByTestId('media')
+  expect(screen.getAllByRole('button')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Actual size (100%)' }))
+  expect(screen.getAllByRole('button')).toHaveLength(1)
+  expect(screen.getByTestId('surface').style.width).toBe('1280px')
+  fireEvent.click(screen.getByRole('button', { name: 'Fit to window' }))
+  expect(screen.getByTestId('media')).toBe(media)
+  expect(screen.getByTestId('recorded-media-scroll').dataset.sizeMode).toBe('fit')
+})

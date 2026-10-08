@@ -142,6 +142,35 @@ const notebookSchema = z.custom<ReplayNotebookRunDetails>(
 
 /** Research-scoped, passive reads only. Viewer grants choose the source; callers never supply paths. */
 export class ResearchReplayClient extends ReplayViewerClient {
+  private readonly connectionListeners = new Set<(error: ReplayViewerRequestError) => void>()
+
+  /** Observe scoped transport failures without changing or extending the viewer's authority. */
+  onConnectionFailure(listener: (error: ReplayViewerRequestError) => void): () => void {
+    this.connectionListeners.add(listener)
+    return () => {
+      this.connectionListeners.delete(listener)
+    }
+  }
+
+  protected override async request(
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    try {
+      return await super.request(path, body, signal)
+    } catch (error) {
+      if (
+        !signal?.aborted &&
+        error instanceof ReplayViewerRequestError &&
+        (error.kind === 'authorization' || error.kind === 'network' || (error.status ?? 0) >= 500)
+      ) {
+        for (const listener of this.connectionListeners) listener(error)
+      }
+      throw error
+    }
+  }
+
   async document(
     target: ResearchReplayTarget,
     signal?: AbortSignal

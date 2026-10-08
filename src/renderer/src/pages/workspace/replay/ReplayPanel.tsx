@@ -820,6 +820,7 @@ const ReplayPanelContent = ({
   }, [active, hasStep, replayDocument, live, host])
 
   const ask = (): void => {
+    if (!active) return
     pause()
     if (live) {
       if (currentObservation) live.onAskSelection(structuredClone(currentObservation))
@@ -827,6 +828,7 @@ const ReplayPanelContent = ({
       onAskStep(captureDiscussionStep(replayDocument, scene, runDetails, resources))
   }
   const askSession = (): void => {
+    if (!active) return
     pause()
     const context = captureDiscussionSession(replayDocument)
     if (context) onAskStep({ ...context, stepTitle: t('Entire research') })
@@ -1005,6 +1007,7 @@ const ReplayPanelContent = ({
   const contentAction =
     materialViewId !== 'conversation' && materialViewId !== 'notebook' ? materialAction : undefined
   const askContent = (): void => {
+    if (!active) return
     pause()
     if (contentAction) {
       contentAction.onAsk()
@@ -1049,11 +1052,28 @@ const ReplayPanelContent = ({
         ? t('Ask about this record')
         : t('Ask about this content'))
   const contentDisabled =
+    !active ||
     discussionPending ||
     Boolean(contentAction?.disabled || contentAction?.pending) ||
     (materialViewId === 'conversation' || materialViewId === 'notebook'
       ? !contentStep
       : !contentAction)
+  const selectedRun =
+    materialViewId === 'notebook'
+      ? (contentStep?.runs.find((run) => run.runId === inspectedContent?.runId) ??
+        contentStep?.runs.at(-1))
+      : undefined
+  const referenceRecordedAt = contentAction
+    ? contentAction.recordedAt
+    : (selectedRun?.startedAt ?? contentStep?.recordedAt)
+  const referenceOrigin = recordedTimeOrigins?.[scene.branchId]
+  const referencePosition =
+    referenceRecordedAt !== undefined &&
+    Number.isFinite(referenceRecordedAt) &&
+    referenceOrigin !== undefined &&
+    Number.isFinite(referenceOrigin)
+      ? referenceRecordedAt - referenceOrigin
+      : undefined
 
   return (
     <div
@@ -1185,7 +1205,9 @@ const ReplayPanelContent = ({
                   size="icon"
                   onClick={askSession}
                   disabled={
-                    discussionPending || !replayDocument.branches.some((item) => item.steps.length)
+                    !active ||
+                    discussionPending ||
+                    !replayDocument.branches.some((item) => item.steps.length)
                   }
                   aria-label={t('Discuss the entire research')}
                 >
@@ -1210,7 +1232,7 @@ const ReplayPanelContent = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  disabled={discussionPending || !scene.step}
+                  disabled={!active || discussionPending || !scene.step}
                   aria-label={t('Add to another conversation…')}
                   onClick={() => {
                     pause()
@@ -1572,6 +1594,7 @@ const ReplayPanelContent = ({
               continuous: recordedTimeOrigins?.[scene.branchId] !== undefined,
               playing: playing && active && ready && !scene.ended,
               speed,
+              onPause: pause,
               onSeekRecordedAt: (recordedAt) => {
                 const origin = recordedTimeOrigins?.[scene.branchId]
                 if (origin !== undefined) seek(recordedAt - origin)
@@ -1704,6 +1727,8 @@ const ReplayPanelContent = ({
         ready={ready}
         positionMs={scene.positionMs}
         durationMs={scene.durationMs}
+        recordedCoverage={researchPresentation ? recordedCoverage?.[scene.branchId] : undefined}
+        recordedTimeOrigin={recordedTimeOrigins?.[scene.branchId]}
         stepIndex={scene.stepIndex}
         steps={branch?.steps ?? EMPTY_STEPS}
         resources={replayDocument.resources}
@@ -1723,20 +1748,34 @@ const ReplayPanelContent = ({
         onSeek={seek}
         onSpeed={setSpeed}
         onAsk={ask}
-        discussionPending={discussionPending}
+        discussionPending={!active || discussionPending}
       />
       {researchPresentation ? (
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border-200 bg-bg-000 px-3 py-2"
+          className="flex shrink-0 flex-col gap-1.5 border-t border-border-200 bg-bg-000 px-3 py-2"
           data-testid="replay-question-footer"
         >
-          <div className="flex min-w-0 items-center">
+          <div
+            className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[10px] text-text-300"
+            data-testid="replay-reference-time"
+          >
+            <span>
+              {referencePosition !== undefined && referencePosition >= 0 && !contentDisabled
+                ? t('Reference time: {{time}}', { time: formatReplayTime(referencePosition) })
+                : t('Reference time unavailable')}
+            </span>
+            <span>
+              {t('Playback position: {{time}}', { time: formatReplayTime(scene.positionMs) })}
+            </span>
+          </div>
+          <div className="flex w-full min-w-0 items-center">
             <Button
               size="sm"
-              variant="secondary"
+              variant="default"
               disabled={contentDisabled}
               onClick={askContent}
-              className="min-w-0 rounded-r-none"
+              className="h-8 min-w-0 flex-1 rounded-r-none"
+              title={contentAction?.title}
             >
               <MessageSquare size={14} aria-hidden="true" />
               <span className="truncate">{contentLabel}</span>
@@ -1752,8 +1791,8 @@ const ReplayPanelContent = ({
               <PopoverTrigger asChild>
                 <Button
                   size="sm"
-                  variant="secondary"
-                  className="rounded-l-none border-l border-border-200 px-2"
+                  variant="default"
+                  className="h-8 rounded-l-none border-l border-primary-foreground/20 px-2"
                   aria-label={t('Question options')}
                 >
                   <ChevronDown size={14} aria-hidden="true" />
@@ -1774,7 +1813,7 @@ const ReplayPanelContent = ({
                   <Button
                     variant="ghost"
                     className="justify-start"
-                    disabled={!scene.step || discussionPending}
+                    disabled={!active || !scene.step || discussionPending}
                     onClick={() => {
                       questionActionChosen.current = true
                       ask()
@@ -1787,7 +1826,7 @@ const ReplayPanelContent = ({
                   <Button
                     variant="ghost"
                     className="justify-start"
-                    disabled={!branch?.steps.length || discussionPending}
+                    disabled={!active || !branch?.steps.length || discussionPending}
                     onClick={() => {
                       questionActionChosen.current = true
                       askSession()
@@ -1801,7 +1840,7 @@ const ReplayPanelContent = ({
                     <Button
                       variant="ghost"
                       className="justify-start"
-                      disabled={!scene.step || discussionPending}
+                      disabled={!active || !scene.step || discussionPending}
                       onClick={() => {
                         questionActionChosen.current = true
                         pause()
@@ -1818,9 +1857,7 @@ const ReplayPanelContent = ({
               </PopoverContent>
             </Popover>
           </div>
-          {footerReference ? (
-            <div className="min-w-0 basis-64 flex-1">{footerReference}</div>
-          ) : null}
+          {footerReference ? <div className="min-w-0 w-full">{footerReference}</div> : null}
         </div>
       ) : null}
     </div>

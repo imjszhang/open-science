@@ -87,6 +87,8 @@ export type ReplayMaterialPlayback = {
   continuous?: boolean
   playing: boolean
   speed: number
+  /** Media failure pauses the owning research clock without changing its position. */
+  onPause?: () => void
   onSeekRecordedAt: (recordedAt: number) => void
 }
 

@@ -10,6 +10,9 @@ import { fixedReplayResource, type RecordedResourceReader } from './recorded-res
 export type ReplayResultEntry = Readonly<{
   resource: ReplayResource
   source: { kind: 'session-history' | 'run-observation' | 'project-recording'; id: string }
+  /** Presentation grouping only; the resource's exact receiving Version remains authority. */
+  sourceKey?: string
+  sourceLabel?: string
   scope: { kind: 'step'; stepKey: string } | { kind: 'recording' }
   /** Never inferred from the filename, latest Version, terminal status, or selected step. */
   stage: 'intermediate' | 'final' | 'unspecified'
@@ -26,10 +29,11 @@ export type ResultsPanelProps = {
   read: RecordedResourceReader
   onAskFile?: (entry: ReplayResultEntry) => Promise<void> | void
 }
+const sourceIdentity = (entry: ReplayResultEntry): string =>
+  entry.sourceKey ?? JSON.stringify([entry.source.kind, entry.source.id])
 const identity = (entry: ReplayResultEntry): string =>
   JSON.stringify([
-    entry.source.kind,
-    entry.source.id,
+    sourceIdentity(entry),
     entry.scope,
     entry.resource.projectId,
     entry.resource.sessionId,
@@ -50,6 +54,7 @@ export function ResultsPanel({
 }: ResultsPanelProps): React.JSX.Element {
   const { t } = useTranslation()
   const [scope, setScope] = useState<'current' | 'all'>('current')
+  const [source, setSource] = useState('all')
   const [showTechnical, setShowTechnical] = useState(false)
   const [selectedId, setSelectedId] = useState<string>()
   const [asking, setAsking] = useState(false)
@@ -59,8 +64,14 @@ export function ResultsPanel({
     const time = entry.availableAt ?? entry.resource.createdAt
     return time !== undefined && Number.isFinite(time) ? time : undefined
   }
-  const unknownTime = fixed.some((entry) => timestamp(entry) === undefined && !entry.technical)
-  const available = fixed.filter(
+  const sources = [...new Map(fixed.map((entry) => [sourceIdentity(entry), entry])).entries()]
+  const selectedSource =
+    source === 'all' || sources.some(([key]) => key === source) ? source : 'all'
+  const fromSource = fixed.filter(
+    (entry) => selectedSource === 'all' || sourceIdentity(entry) === selectedSource
+  )
+  const unknownTime = fromSource.some((entry) => timestamp(entry) === undefined && !entry.technical)
+  const available = fromSource.filter(
     (entry) =>
       (!entry.technical || showTechnical) &&
       (scope === 'all' ||
@@ -86,6 +97,7 @@ export function ResultsPanel({
           label: t('Ask about this file'),
           disabled: asking,
           pending: asking,
+          recordedAt: timestamp(selected),
           onAsk: () => void ask()
         }
       : undefined
@@ -102,16 +114,24 @@ export function ResultsPanel({
       ? t('Publication time not recorded')
       : t('Recorded time: {{time}}', { time: new Date(timestamp(selected)!).toLocaleString() })
     : undefined
-  const sourceLabel = selected
-    ? selected.source.kind === 'session-history'
+  const labelForSource = (entry: ReplayResultEntry): string =>
+    entry.sourceLabel ??
+    (entry.source.kind === 'session-history'
       ? t('Session history')
-      : selected.source.kind === 'project-recording'
+      : entry.source.kind === 'project-recording'
         ? t('Project recording')
-        : t('Archived observation')
+        : t('Archived observation'))
+  const sourceLabel = selected
+    ? (selected.sourceLabel ??
+      (selected.source.kind === 'session-history'
+        ? t('Session history')
+        : selected.source.kind === 'project-recording'
+          ? t('Project recording')
+          : t('Archived observation')))
     : undefined
   return (
     <section aria-label={t('Results')} className="flex h-full min-h-0 min-w-0 flex-col">
-      {recordedAt !== undefined ? (
+      {recordedAt !== undefined || sources.length > 1 ? (
         <div
           className={
             compact
@@ -119,48 +139,73 @@ export function ResultsPanel({
               : 'shrink-0 border-b border-border-200 p-2 text-xs'
           }
         >
-          {compact ? (
-            <select
-              aria-label={t('Result visibility')}
-              value={scope}
-              onChange={(event) =>
-                setScope(event.currentTarget.value === 'all' ? 'all' : 'current')
-              }
-              className="h-7 max-w-full rounded border border-border-200 bg-bg-000 px-2 text-xs"
-            >
-              <option value="current">{t('Available at this moment')}</option>
-              <option value="all">{t('All saved results')}</option>
-            </select>
-          ) : (
-            <div role="group" aria-label={t('Result visibility')} className="flex flex-wrap gap-1">
-              <Button
-                size="sm"
-                variant={scope === 'current' ? 'secondary' : 'ghost'}
-                aria-pressed={scope === 'current'}
-                onClick={() => setScope('current')}
+          <div className="flex flex-wrap items-center gap-2">
+            {sources.length > 1 ? (
+              <select
+                aria-label={t('Result source')}
+                value={selectedSource}
+                onChange={(event) => setSource(event.currentTarget.value)}
+                className="h-7 min-w-0 max-w-full flex-1 rounded border border-border-200 bg-bg-000 px-2 text-xs"
               >
-                {t('Available at this moment')}
-              </Button>
-              <Button
-                size="sm"
-                variant={scope === 'all' ? 'secondary' : 'ghost'}
-                aria-pressed={scope === 'all'}
-                onClick={() => setScope('all')}
-              >
-                {t('All saved results')}
-              </Button>
-            </div>
-          )}
-          {!compact || scope === 'all' ? (
+                <option value="all">{t('All research materials')}</option>
+                {sources.map(([key, entry]) => (
+                  <option key={key} value={key}>
+                    {labelForSource(entry)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {recordedAt !== undefined ? (
+              compact ? (
+                <select
+                  aria-label={t('Result visibility')}
+                  value={scope}
+                  onChange={(event) =>
+                    setScope(event.currentTarget.value === 'all' ? 'all' : 'current')
+                  }
+                  className="h-7 max-w-full rounded border border-border-200 bg-bg-000 px-2 text-xs"
+                >
+                  <option value="current">{t('Available at this moment')}</option>
+                  <option value="all">{t('All saved results')}</option>
+                </select>
+              ) : (
+                <div
+                  role="group"
+                  aria-label={t('Result visibility')}
+                  className="flex flex-wrap gap-1"
+                >
+                  <Button
+                    size="sm"
+                    variant={scope === 'current' ? 'secondary' : 'ghost'}
+                    aria-pressed={scope === 'current'}
+                    onClick={() => setScope('current')}
+                  >
+                    {t('Available at this moment')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={scope === 'all' ? 'secondary' : 'ghost'}
+                    aria-pressed={scope === 'all'}
+                    onClick={() => setScope('all')}
+                  >
+                    {t('All saved results')}
+                  </Button>
+                </div>
+              )
+            ) : null}
+          </div>
+          {recordedAt !== undefined && (!compact || scope === 'all') ? (
             <p className="mt-1 text-muted-foreground">
               {scope === 'all'
-                ? t('Showing results from the entire research, including later records.')
+                ? selectedSource === 'all'
+                  ? t('Showing results from the entire research, including later records.')
+                  : t('Showing all saved results from this source, including later records.')
                 : t(
                     'Only results with a known publication time at or before this moment are shown.'
                   )}
             </p>
           ) : null}
-          {scope === 'current' && unknownTime ? (
+          {recordedAt !== undefined && scope === 'current' && unknownTime ? (
             <p className="mt-1 text-muted-foreground">
               {t(
                 'Some results have no saved publication time. Use All saved results to inspect them.'
@@ -212,11 +257,22 @@ export function ResultsPanel({
             </Button>
           ))
         ) : (
-          <p className="p-2 text-sm text-muted-foreground">
-            {fixed.length && recordedAt !== undefined && scope === 'current'
-              ? t('No results have a known publication time before this moment.')
-              : t('No recorded results are available.')}
-          </p>
+          <div className="space-y-2 p-2 text-sm text-muted-foreground">
+            <p>
+              {fromSource.some((entry) => !entry.technical || showTechnical) &&
+              recordedAt !== undefined &&
+              scope === 'current'
+                ? t('No results have a known publication time before this moment.')
+                : t('No recorded results are available.')}
+            </p>
+            {scope === 'current' &&
+            recordedAt !== undefined &&
+            fromSource.some((entry) => !entry.technical || showTechnical) ? (
+              <Button size="sm" variant="outline" onClick={() => setScope('all')}>
+                {t('View all results')}
+              </Button>
+            ) : null}
+          </div>
         )}
       </div>
       {selected ? (

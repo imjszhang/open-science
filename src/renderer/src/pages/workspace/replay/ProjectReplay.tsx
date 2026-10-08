@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
@@ -12,9 +12,13 @@ export type ProjectReplayProps = {
   readImage: (mediaKey: string, signal: AbortSignal) => Promise<string | null>
   onAskFrame?: (frame: ProjectReplayTrack['frames'][number]) => void | Promise<void>
   presentationMode?: 'standalone' | 'research'
+  onPlaybackError?: () => void
+  retryRevision?: number
+  missingMediaKeys?: readonly string[]
   transport?: {
     recordedAt?: number
     onSeekRecordedAt: (recordedAt: number) => void
+    onPause?: () => void
   }
 }
 
@@ -26,11 +30,15 @@ const ProjectReplayContent = ({
   readImage,
   onAskFrame,
   presentationMode = 'standalone',
-  transport
+  transport,
+  onPlaybackError,
+  retryRevision = 0,
+  missingMediaKeys
 }: ProjectReplayProps): React.JSX.Element => {
   const { t } = useTranslation()
   const [localIndex, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [retryAttempt, setRetryAttempt] = useState(0)
   const controlled = transport !== undefined
   const aligned = !controlled || Number.isFinite(transport.recordedAt)
   const recordedAt = transport?.recordedAt ?? Number.NaN
@@ -47,6 +55,8 @@ const ProjectReplayContent = ({
     track: ProjectReplayTrack
     reader: ProjectReplayProps['readImage']
     src: string | null
+    retryAttempt: number
+    retryRevision: number
   }>()
   const [decoded, setDecoded] = useState<{
     loaded: typeof loaded
@@ -64,6 +74,11 @@ const ProjectReplayContent = ({
     }
   }, [])
   const frame = track.frames[index]
+  const missing = Boolean(
+    frame &&
+    (track.coverage.missingMediaKeys.includes(frame.mediaKey) ||
+      missingMediaKeys?.includes(frame.mediaKey))
+  )
   useEffect(() => {
     const next = track.frames[index + 1]
     if (controlled || !playing || !active || !frame || !next) return
@@ -77,28 +92,57 @@ const ProjectReplayContent = ({
     return () => clearTimeout(timer)
   }, [active, controlled, playing, frame, index, track])
   useEffect(() => {
-    if (!active || !frame) return
+    if (!active || !frame || missing) return
     const abort = new AbortController()
     void readImage(frame.mediaKey, abort.signal).then(
       (src) => {
-        if (!abort.signal.aborted) setLoaded({ id: frame.frameId, track, reader: readImage, src })
+        if (!abort.signal.aborted)
+          setLoaded({
+            id: frame.frameId,
+            track,
+            reader: readImage,
+            src,
+            retryAttempt,
+            retryRevision
+          })
       },
       () => {
         if (!abort.signal.aborted)
-          setLoaded({ id: frame.frameId, track, reader: readImage, src: null })
+          setLoaded({
+            id: frame.frameId,
+            track,
+            reader: readImage,
+            src: null,
+            retryAttempt,
+            retryRevision
+          })
       }
     )
     return () => abort.abort()
-  }, [active, frame, readImage, track])
+  }, [active, frame, readImage, track, missing, retryAttempt, retryRevision])
   const ready = Boolean(
     active &&
     frame &&
     loaded?.id === frame.frameId &&
     loaded.track === track &&
-    loaded.reader === readImage
+    loaded.reader === readImage &&
+    loaded.retryAttempt === retryAttempt &&
+    loaded.retryRevision === retryRevision
   )
   const decodedCurrent = ready && decoded?.loaded === loaded
-  const canAsk = Boolean(frame && ready && loaded?.src && decodedCurrent && !decoded?.failed)
+  const canAsk = Boolean(
+    frame && ready && loaded?.src && decodedCurrent && !decoded?.failed && !missing
+  )
+  const failed = Boolean(ready && (!loaded?.src || (decodedCurrent && decoded?.failed)))
+  if (playing && (failed || missing)) setPlaying(false)
+  const reportFailure = useEffectEvent(() => {
+    if (transport?.onPause) transport.onPause()
+    else if (transport && aligned) transport.onSeekRecordedAt(recordedAt)
+    if (!missing) onPlaybackError?.()
+  })
+  useEffect(() => {
+    if (active && frame && (missing || failed)) reportFailure()
+  }, [active, frame, missing, failed])
   const ask = (): void => {
     if (!canAsk || !frame || !onAskFrame || asking) return
     transport?.onSeekRecordedAt(frame.recordedAt)
@@ -120,6 +164,8 @@ const ProjectReplayContent = ({
           label: t('Ask about this frame'),
           disabled: !canAsk || asking,
           pending: asking,
+          recordedAt: canAsk ? frame?.recordedAt : undefined,
+          title: track.title ?? t('Project recording'),
           onAsk: ask
         }
       : undefined
@@ -149,10 +195,19 @@ const ProjectReplayContent = ({
               : t('No project image was recorded at this time.')
           : t('No project images were recorded. Other research materials remain available.')}
     </p>
+  ) : missing ? (
+    <ErrorNotice inline title={t('This recorded media file is not included.')} />
   ) : !ready || (loaded?.src && !decodedCurrent) ? (
     <p role="status">{t('Preparing recorded material…')}</p>
   ) : !loaded?.src || decoded?.failed ? (
-    <ErrorNotice inline title={t('Could not read the recorded material.')} />
+    <ErrorNotice
+      inline
+      title={t('Could not read the recorded material.')}
+      primaryButton={{
+        label: t('Retry'),
+        onClick: () => setRetryAttempt((attempt) => attempt + 1)
+      }}
+    />
   ) : null
   return (
     <section
@@ -232,16 +287,19 @@ const ProjectReplayContent = ({
         className={compact ? 'flex min-h-0 flex-1' : 'flex h-[min(65vh,480px)] min-h-48 shrink-0'}
       >
         <RecordedMediaViewport
+          compact={compact}
           width={dimensions?.width}
           height={dimensions?.height}
           status={status}
           metadata={
-            frame
-              ? t('Recorded project image {{current}} of {{total}}', {
-                  current: index + 1,
-                  total: track.frames.length
-                })
-              : undefined
+            compact && dimensions
+              ? `${dimensions.width} × ${dimensions.height}`
+              : frame
+                ? t('Recorded project image {{current}} of {{total}}', {
+                    current: index + 1,
+                    total: track.frames.length
+                  })
+                : undefined
           }
           surfaceTestId="recorded-image-surface"
         >

@@ -17,6 +17,7 @@ export type BrowserRecordingTransport = {
   speed: number
   /** Requests a seek (and pause) of the owning research clock. */
   onSeek: (offsetMs: number) => void
+  onPause?: () => void
 }
 
 export type BrowserRecordingPlayerProps = {
@@ -28,6 +29,10 @@ export type BrowserRecordingPlayerProps = {
   presentationMode?: 'standalone' | 'research'
   /** Used by the trusted recorded-viewer bridge; never a live project capability. */
   onActionChange?: (action: ReplayMaterialAction | undefined) => void
+  onPlaybackError?: () => void
+  retryRevision?: number
+  /** Only keys explicitly absent from the resolved saved-media catalog. */
+  missingMediaKeys?: readonly string[]
 }
 /** Passive media only: no project address, HTML, environment or execution capability enters here. */
 const BrowserRecordingPlayerContent = ({
@@ -37,7 +42,10 @@ const BrowserRecordingPlayerContent = ({
   onAskMoment,
   transport,
   presentationMode = 'standalone',
-  onActionChange
+  onActionChange,
+  onPlaybackError,
+  retryRevision = 0,
+  missingMediaKeys
 }: BrowserRecordingPlayerProps): React.JSX.Element => {
   const { t } = useTranslation()
   const video = useRef<HTMLVideoElement>(null)
@@ -62,8 +70,10 @@ const BrowserRecordingPlayerContent = ({
   const offsetMs = controlled ? (transport.offsetMs ?? Number.NaN) : localOffsetMs
   const playing = transport?.playing ?? localPlaying
   const speed = transport?.speed ?? localSpeed
-  const [failedSource, setFailedSource] = useState<string>()
+  const [failedSource, setFailedSource] = useState<{ identity: string; retryRevision: number }>()
+  const [, setRetryAttempt] = useState(0)
   const [decodedSource, setDecodedSource] = useState<string>()
+  const [decodedPosition, setDecodedPosition] = useState<{ source: string; offsetMs: number }>()
   const [heldOffset, setHeldOffset] = useState<number>()
   const [asking, setAsking] = useState(false)
   const [askFailed, setAskFailed] = useState(false)
@@ -75,11 +85,17 @@ const BrowserRecordingPlayerContent = ({
   const mounted = useRef(true)
   const desiredOffset = useRef(firstOffset)
   const segment = segmentAt(recording, offsetMs)
-  const source = segment && active ? mediaUrl(segment.mediaKey) : null
+  const missing = Boolean(segment && missingMediaKeys?.includes(segment.mediaKey))
+  const source = segment && active && !missing ? mediaUrl(segment.mediaKey) : null
   const sourceIdentity = source && segment ? `${segment.segmentId}:${source}` : undefined
-  const failed = Boolean(source && failedSource === source)
+  const failed = Boolean(
+    sourceIdentity &&
+    failedSource?.identity === sourceIdentity &&
+    failedSource.retryRevision === retryRevision
+  )
   const loading = Boolean(source && !failed && decodedSource !== sourceIdentity)
   const displayedOffset = loading && heldOffset !== undefined ? heldOffset : offsetMs
+  if (localPlaying && (failed || (segment && !source))) setPlaying(false)
   if (!active) {
     if (localPlaying) setPlaying(false)
     if (decodedSource !== undefined) setDecodedSource(undefined)
@@ -130,8 +146,17 @@ const BrowserRecordingPlayerContent = ({
     }
   }
   const decoded = (element: HTMLVideoElement): void => {
-    if (element !== video.current || !active || element.seeking) return
+    if (element !== video.current || !active || element.seeking || failed || element.readyState < 2)
+      return
     setDecodedSource(sourceIdentity)
+    if (segment && sourceIdentity)
+      setDecodedPosition({
+        source: sourceIdentity,
+        offsetMs: Math.min(
+          segment.endMs - 1,
+          Math.max(segment.startMs, segment.startMs + Math.round(element.currentTime * 1000))
+        )
+      })
     clearHeldFrame()
   }
   const seek = (value: number): void => {
@@ -206,6 +231,29 @@ const BrowserRecordingPlayerContent = ({
       element?.load()
     }
   }, [sourceIdentity])
+  const reportFailure = useEffectEvent(() => {
+    if (transport?.onPause) transport.onPause()
+    else if (transport && aligned) transport.onSeek(offsetMs)
+    if (!missing) onPlaybackError?.()
+  })
+  useEffect(() => {
+    if (active && segment && (failed || !source)) reportFailure()
+  }, [active, segment, failed, source, missing])
+  const retry = (): void => {
+    setRetryAttempt((attempt) => attempt + 1)
+    setFailedSource(undefined)
+    setDecodedSource(undefined)
+    setDecodedPosition(undefined)
+    clearHeldFrame()
+    video.current?.load()
+  }
+  const retryCurrent = useEffectEvent(retry)
+  const previousRetryRevision = useRef(retryRevision)
+  useEffect(() => {
+    if (previousRetryRevision.current === retryRevision) return
+    previousRetryRevision.current = retryRevision
+    retryCurrent()
+  }, [retryRevision])
   const retainAtControlledTransition = useEffectEvent(
     (
       previousElement: HTMLVideoElement | null,
@@ -261,14 +309,14 @@ const BrowserRecordingPlayerContent = ({
         if (!cancelled && mounted.current && element === video.current) {
           setPlaying(false)
           setDecodedSource(undefined)
-          setFailedSource(source ?? undefined)
+          setFailedSource(sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined)
         }
       })
     } else element.pause()
     return () => {
       cancelled = true
     }
-  }, [playing, speed, active, source, sourceIdentity, decodedSource])
+  }, [playing, speed, active, source, sourceIdentity, decodedSource, retryRevision])
   const incomplete =
     recording.coverage.droppedFrames > 0 ||
     recording.coverage.gaps.length > 0 ||
@@ -310,8 +358,20 @@ const BrowserRecordingPlayerContent = ({
       })
   }
   const actionLabel = active && onAskMoment ? t('Ask about this moment') : undefined
+  const actionRecordedAt =
+    !askDisabled && decodedPosition && decodedPosition.source === sourceIdentity
+      ? recording.startedAt + decodedPosition.offsetMs
+      : undefined
+  const actionTitle = recording.title ?? t('Project recording')
   const materialAction = actionLabel
-    ? { label: actionLabel, disabled: askDisabled, pending: asking, onAsk: ask }
+    ? {
+        label: actionLabel,
+        disabled: askDisabled,
+        pending: asking,
+        recordedAt: actionRecordedAt,
+        title: actionTitle,
+        onAsk: ask
+      }
     : undefined
   const sharedAction = useReplayMaterialAction(materialAction)
   const latestAction = useRef(materialAction)
@@ -327,31 +387,30 @@ const BrowserRecordingPlayerContent = ({
       label: actionLabel,
       disabled: askDisabled,
       pending: asking,
+      recordedAt: actionRecordedAt,
+      title: actionTitle,
       onAsk: () => {
         const action = latestAction.current
         if (action && !action.disabled && !action.pending) action.onAsk()
       }
     })
     return () => actionCallback.current?.(undefined)
-  }, [hasActionCallback, actionLabel, askDisabled, asking])
+  }, [hasActionCallback, actionLabel, askDisabled, asking, actionRecordedAt, actionTitle])
   const compact = presentationMode === 'research' || sharedAction
   const centralized = sharedAction || (presentationMode === 'research' && hasActionCallback)
   const dimensions =
     decodedSize && decodedSize.source === sourceIdentity && decodedSize.width && decodedSize.height
       ? decodedSize
       : segment
-  const status = failed ? (
+  const status = missing ? (
+    <ErrorNotice inline title={t('This recorded media file is not included.')} />
+  ) : failed ? (
     <ErrorNotice
       inline
       title={t('Could not play the recorded footage.')}
       primaryButton={{
         label: t('Retry'),
-        onClick: () => {
-          setFailedSource(undefined)
-          setDecodedSource(undefined)
-          clearHeldFrame()
-          video.current?.load()
-        }
+        onClick: retry
       }}
     />
   ) : source && segment ? (
@@ -361,7 +420,11 @@ const BrowserRecordingPlayerContent = ({
       </div>
     ) : null
   ) : segment && active ? (
-    <ErrorNotice inline title={t('Could not read the recorded material.')} />
+    <ErrorNotice
+      inline
+      title={t('Could not read the recorded material.')}
+      primaryButton={{ label: t('Retry'), onClick: retry }}
+    />
   ) : (
     <div role="status" className="max-w-prose text-center">
       <p>
@@ -459,11 +522,16 @@ const BrowserRecordingPlayerContent = ({
         className={compact ? 'flex min-h-0 flex-1' : 'flex h-[min(65vh,480px)] min-h-48 shrink-0'}
       >
         <RecordedMediaViewport
+          compact={compact}
           width={dimensions?.width}
           height={dimensions?.height}
           status={status}
           surfaceTestId="recorded-video-surface"
-          metadata={compact ? t('Recorded webpage') : undefined}
+          metadata={
+            compact && dimensions
+              ? `${dimensions.width} × ${dimensions.height}${segment ? ` · WebM · ${segment.codec.toUpperCase()}` : ''}`
+              : undefined
+          }
         >
           {source && segment ? (
             <>
@@ -508,12 +576,21 @@ const BrowserRecordingPlayerContent = ({
                   if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
                 }}
                 onTimeUpdate={(event) => {
-                  if (controlled || event.currentTarget !== video.current || !active || loading)
+                  if (
+                    event.currentTarget !== video.current ||
+                    !active ||
+                    loading ||
+                    failed ||
+                    event.currentTarget.seeking
+                  )
                     return
                   const value = Math.min(
                     segment.endMs - 1,
                     segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
                   )
+                  if (sourceIdentity)
+                    setDecodedPosition({ source: sourceIdentity, offsetMs: value })
+                  if (controlled) return
                   desiredOffset.current = value
                   setOffsetMs(value)
                 }}
@@ -547,7 +624,9 @@ const BrowserRecordingPlayerContent = ({
                   setPlaying(false)
                   clearHeldFrame()
                   setDecodedSource(undefined)
-                  setFailedSource(source ?? undefined)
+                  setFailedSource(
+                    sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined
+                  )
                 }}
               />
               <canvas

@@ -21,6 +21,7 @@ import type {
 } from '../src/pages/workspace/replay/ReplayStage'
 import { BrowserRecordingPlayer } from '../src/pages/workspace/replay/BrowserRecordingPlayer'
 import { ProjectReplay } from '../src/pages/workspace/replay/ProjectReplay'
+import { recordingSourceLabel } from '../src/pages/workspace/replay/recording-source-label'
 import { ResultsPanel } from '../src/pages/workspace/replay/results/ResultsPanel'
 import type { SessionDiscussionCapture } from '../src/pages/workspace/replay/replay-context'
 import { BrowserArtifactPreview } from './BrowserArtifactPreview'
@@ -29,6 +30,7 @@ import { ReplayViewerRequestError, type ResearchReplayViewerContext } from './cl
 import { ResearchReplayClient } from './research-client'
 import {
   researchPosition,
+  researchResourcePosition,
   researchResults,
   type ResearchRecordingMaterial
 } from './research-materials'
@@ -86,11 +88,64 @@ const ResearchReplayContent = ({
   unavailable: boolean
 }): React.JSX.Element => {
   const { t } = useTranslation()
+  const [connection, setConnection] = useState<'connected' | 'network' | 'authorization'>(
+    'connected'
+  )
+  const [reconnecting, setReconnecting] = useState(false)
+  const [readRevision, setReadRevision] = useState(0)
+  const connectionRequest = useRef<AbortController | undefined>(undefined)
+  useEffect(() => {
+    const unsubscribe = client.onConnectionFailure((error) => {
+      setConnection((previous) =>
+        previous === 'authorization' || error.kind === 'authorization' ? 'authorization' : 'network'
+      )
+    })
+    return () => {
+      unsubscribe()
+      connectionRequest.current?.abort()
+    }
+  }, [client])
+  const checkConnection = useCallback(
+    async (retryMedia = false): Promise<void> => {
+      if (connectionRequest.current) return
+      const controller = new AbortController()
+      connectionRequest.current = controller
+      setReconnecting(retryMedia)
+      try {
+        const current = await client.context(controller.signal)
+        if (
+          current.mode !== 'research' ||
+          current.viewerId !== context.viewerId ||
+          current.target.projectId !== context.target.projectId ||
+          current.target.sessionId !== context.target.sessionId
+        )
+          throw new ReplayViewerRequestError('authorization')
+        if (controller.signal.aborted) return
+        setConnection((previous) => (previous === 'authorization' ? previous : 'connected'))
+        if (retryMedia) setReadRevision((value) => value + 1)
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setConnection((previous) =>
+            previous === 'authorization' ||
+            (error instanceof ReplayViewerRequestError && error.kind === 'authorization')
+              ? 'authorization'
+              : 'network'
+          )
+      } finally {
+        if (connectionRequest.current === controller) {
+          connectionRequest.current = undefined
+          if (!controller.signal.aborted) setReconnecting(false)
+        }
+      }
+    },
+    [client, context.viewerId, context.target.projectId, context.target.sessionId]
+  )
   // Main computes timing while original publication/branch evidence still exists. Applying the
   // projection again after technical-step removal can lose attribution and trim valid coverage.
   const timed = research.timing
   const document = research.document
   const [initialView] = useState(() => restoreView(context.viewerId, document))
+  const [watchingPosition, setWatchingPosition] = useState(initialView?.timeMs ?? 0)
   const [selection, setSelection] = useState<ResearchReplaySelection>()
   const [selectionFailed, setSelectionFailed] = useState(false)
   const [selecting, setSelecting] = useState(false)
@@ -162,7 +217,9 @@ const ResearchReplayContent = ({
       if (!material) throw new ReplayViewerRequestError('unavailable')
       return client.researchMedia(material.descriptor.id, material.payload, resource, signal)
     },
-    [client, document, recordings]
+    // Reset failed file previews after a successful scoped connection check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, document, recordings, readRevision]
   )
   const readResource = useCallback(
     (resource: ReplayResource) => client.prepareResearchResource(resource, () => readRaw(resource)),
@@ -170,13 +227,51 @@ const ResearchReplayContent = ({
   )
   const readNotebookRun: ReplayNotebookRunReader = useCallback(
     (_source, run, options) => client.notebook(run.runId, options?.signal),
-    [client]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, readRevision]
   )
   const results = useMemo(
-    () => researchResults(document, recordings, research.supportingResourceIds),
-    [document, recordings, research.supportingResourceIds]
+    () =>
+      researchResults(document, recordings, research.supportingResourceIds).map((entry) => {
+        const index = recordings.findIndex(
+          ({ payload }) =>
+            !('indexChecksum' in payload) &&
+            ('archive' in payload ? payload.archive.recordingId : payload.recording.recordingId) ===
+              entry.source.id
+        )
+        const owner = recordings[index]
+        return {
+          ...entry,
+          sourceKey: owner ? JSON.stringify(owner.descriptor.target) : 'research-files',
+          sourceLabel: owner
+            ? recordingSourceLabel(
+                {
+                  format: owner.descriptor.kind,
+                  name: owner.descriptor.name,
+                  title: 'archive' in owner.payload ? undefined : owner.payload.recording.title,
+                  number: index + 1
+                },
+                t
+              )
+            : t('Research source files')
+        }
+      }),
+    [document, recordings, research.supportingResourceIds, t]
   )
   const current = recordings.find(({ descriptor }) => descriptor.id === recordingId)
+  const recordingLabel = useCallback(
+    (material: ResearchRecordingMaterial, index: number): string =>
+      recordingSourceLabel(
+        {
+          format: material.descriptor.kind,
+          name: material.descriptor.name,
+          title: 'archive' in material.payload ? undefined : material.payload.recording.title,
+          number: index + 1
+        },
+        t
+      ),
+    [t]
+  )
   const track = useMemo(
     () =>
       current && !('indexChecksum' in current.payload)
@@ -203,14 +298,24 @@ const ResearchReplayContent = ({
     [client, current]
   )
   const askResource = useCallback(
-    async (resource: ReplayResource, playback?: ReplayMaterialPlayback) => {
-      const position = researchPosition(document, timed.recordedTimeOrigins, playback)
+    async (resource: ReplayResource, playback?: ReplayMaterialPlayback, recordedAt?: number) => {
       const fixed = document.resources.find(
         (item) =>
+          item.projectId === resource.projectId &&
+          item.sessionId === resource.sessionId &&
           item.versionId === resource.versionId &&
           item.artifactId === resource.artifactId &&
           item.fileId === resource.fileId
       )
+      const position =
+        fixed &&
+        researchResourcePosition(
+          document,
+          timed.recordedTimeOrigins,
+          fixed,
+          playback,
+          recordedAt ?? fixed.createdAt
+        )
       if (!position || !fixed) throw new ReplayViewerRequestError('unavailable')
       await select({ ...position, resourceId: fixed.id })
     },
@@ -241,7 +346,9 @@ const ResearchReplayContent = ({
               <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
                 {recordings.length <= 1 ? (
                   <p className="truncate text-sm text-text-200" title={current?.descriptor.name}>
-                    {current?.descriptor.name ?? t('Project recording')}
+                    {current
+                      ? recordingLabel(current, recordings.indexOf(current))
+                      : t('Project recording')}
                   </p>
                 ) : null}
                 {recordings.length > 1 ? (
@@ -251,12 +358,21 @@ const ResearchReplayContent = ({
                     value={recordingId}
                     onChange={(event) => setRecordingId(event.target.value)}
                   >
-                    {recordings.map(({ descriptor }) => (
-                      <option key={descriptor.id} value={descriptor.id}>
-                        {descriptor.name}
+                    {recordings.map((material, index) => (
+                      <option key={material.descriptor.id} value={material.descriptor.id}>
+                        {recordingLabel(material, index)}
                       </option>
                     ))}
                   </select>
+                ) : null}
+                {current ? (
+                  <details className="text-xs text-text-300">
+                    <summary className="cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      {t('Recording details')}
+                    </summary>
+                    <p className="mt-1 break-all">{current.descriptor.name}</p>
+                    <p className="break-all">{current.descriptor.target.versionId}</p>
+                  </details>
                 ) : null}
               </div>
               {!current ? (
@@ -271,11 +387,20 @@ const ResearchReplayContent = ({
                   active={active}
                   recording={web.recording}
                   mediaUrl={mediaUrl}
+                  retryRevision={readRevision}
+                  onPlaybackError={() => void checkConnection()}
+                  missingMediaKeys={web.recording.media
+                    .filter(
+                      (declared) =>
+                        !web.media.some((resolved) => resolved.mediaKey === declared.mediaKey)
+                    )
+                    .map((media) => media.mediaKey)}
                   transport={{
                     offsetMs:
                       aligned && at !== undefined ? at - web.recording.startedAt : undefined,
                     playing: Boolean(playback?.playing && aligned),
                     speed: playback?.speed ?? 1,
+                    onPause: playback?.onPause,
                     onSeek: (offsetMs) =>
                       playback?.onSeekRecordedAt(web.recording.startedAt + offsetMs)
                   }}
@@ -298,15 +423,31 @@ const ResearchReplayContent = ({
                   track={track}
                   active={active}
                   readImage={readImage}
+                  missingMediaKeys={
+                    current && track
+                      ? track.frames
+                          .filter(
+                            (frame) =>
+                              !current.payload.media.some(
+                                (media) => media.mediaKey === frame.mediaKey
+                              )
+                          )
+                          .map((frame) => frame.mediaKey)
+                      : undefined
+                  }
+                  retryRevision={readRevision}
+                  onPlaybackError={() => void checkConnection()}
                   transport={{
                     recordedAt: playback?.recordedAt,
+                    onPause: playback?.onPause,
                     onSeekRecordedAt: (at) => playback?.onSeekRecordedAt(at)
                   }}
                   onAskFrame={async (frame) => {
                     if (!current || 'indexChecksum' in current.payload) return
                     await askResource(
                       recordedMediaResource(current.payload, frame.mediaKey),
-                      playback
+                      playback,
+                      frame.recordedAt
                     )
                   }}
                 />
@@ -325,7 +466,7 @@ const ResearchReplayContent = ({
             entries={results}
             recordedAt={playback?.recordedAt}
             read={readRaw}
-            onAskFile={(entry) => askResource(entry.resource, playback)}
+            onAskFile={(entry) => askResource(entry.resource, playback, entry.availableAt)}
           />
         )
       }
@@ -343,7 +484,10 @@ const ResearchReplayContent = ({
       readImage,
       askResource,
       results,
-      readRaw
+      readRaw,
+      readRevision,
+      checkConnection,
+      recordingLabel
     ]
   )
   const askStep = useCallback(
@@ -388,11 +532,56 @@ const ResearchReplayContent = ({
         2
       )
     : undefined
+  const referenceStep =
+    selection &&
+    document.branches
+      .find((branch) => branch.id === selection.position.branchId)
+      ?.steps.find((step) => step.id === selection.step.id)
+  const referenceAt = selection?.resource
+    ? selection.resource.createdAt
+    : selection?.moment
+      ? selection.position.recordedAt
+      : selection?.position.notebookRunId
+        ? referenceStep?.runs.find((run) => run.runId === selection.position.notebookRunId)
+            ?.startedAt
+        : referenceStep?.recordedAt
+  const referenceOrigin = selection && timed.recordedTimeOrigins[selection.position.branchId]
+  const referencePosition =
+    referenceAt !== undefined && referenceOrigin !== undefined && referenceAt >= referenceOrigin
+      ? referenceAt - referenceOrigin
+      : undefined
   return (
     <main
       className="flex h-svh min-h-0 flex-col bg-bg-000 text-text-100"
       data-testid="research-replay-viewer"
     >
+      {connection !== 'connected' ? (
+        <ErrorNotice
+          inline
+          tone="amber"
+          title={
+            connection === 'authorization'
+              ? t('This observation link is no longer authorized.')
+              : t('Replay connection interrupted')
+          }
+          description={
+            connection === 'authorization'
+              ? t(
+                  'Open a new viewer from Open Science or your agent. Existing experiments are not restarted.'
+                )
+              : t('Playback is paused. Reconnect to continue from the same position.')
+          }
+          primaryButton={
+            connection === 'network'
+              ? {
+                  label: t('Reconnect'),
+                  loading: reconnecting,
+                  onClick: () => void checkConnection(true)
+                }
+              : undefined
+          }
+        />
+      ) : null}
       {selectionFailed ? (
         <ErrorNotice inline title={t('Could not reference this research evidence.')} />
       ) : null}
@@ -417,11 +606,14 @@ const ResearchReplayContent = ({
                 reference={reference}
                 kind={selection!.moment ? 'moment' : selection!.resource ? 'file' : 'step'}
                 observedAt={selection!.position.recordedAt}
+                referencePositionMs={referencePosition}
+                watchingPositionMs={watchingPosition}
                 presentation={context.presentation}
               />
             ) : null
           }
           host={null}
+          active={connection === 'connected'}
           document={document}
           initialView={initialView}
           recordedTimeOrigins={timed.recordedTimeOrigins}
@@ -432,8 +624,13 @@ const ResearchReplayContent = ({
           readNotebookRun={readNotebookRun}
           readResource={readResource}
           discussionPending={selecting}
-          onAskStep={askStep}
-          onViewChange={(view) => saveView(context.viewerId, document, view)}
+          onAskStep={(capture) => {
+            if (connection === 'connected') askStep(capture)
+          }}
+          onViewChange={(view) => {
+            setWatchingPosition(view.timeMs)
+            saveView(context.viewerId, document, view)
+          }}
           renderResource={(resource) => (
             <BrowserArtifactPreview key={resource.id} resource={resource} read={readRaw} />
           )}

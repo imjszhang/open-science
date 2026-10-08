@@ -340,3 +340,52 @@ it('captures a decoded moment only for the current research clock revision and e
   act(() => port.receive(recordingTransportMessage({ type: 'ask', revision: 3 })))
   expect(ask).toHaveBeenCalledTimes(1)
 })
+
+it('carries decoded media context to the host and clears it with the unavailable action', () => {
+  const parent = {} as Window
+  vi.spyOn(window, 'parent', 'get').mockReturnValue(parent)
+  const { result: child } = renderHook(() =>
+    useBrowserRecordingTransportReceiver({ enabled: true })
+  )
+  const childPort = new Port()
+  act(() => offer(parent, childPort))
+  act(() =>
+    childPort.receive(
+      recordingTransportMessage({
+        type: 'state',
+        revision: 1,
+        playback: { playing: false, speed: 1, presentation: 'research' }
+      })
+    )
+  )
+  act(() =>
+    child.current.onActionChange({
+      label: 'Ask',
+      recordedAt: 2346,
+      title: 'Experiment',
+      onAsk: vi.fn()
+    })
+  )
+  const message = childPort.postMessage.mock.lastCall?.[0]
+  expect(message).toMatchObject({ type: 'action', recordedAt: 2346, title: 'Experiment' })
+  const { iframeRef } = makeFrame()
+  const { result: host } = renderHook(() =>
+    useBrowserRecordingTransportHost({
+      iframeRef,
+      origin,
+      enabled: true,
+      playback: { ...state(), presentation: 'research' }
+    })
+  )
+  act(() => channels[0].port1.receive(recordingTransportMessage({ type: 'ready' })))
+  act(() => channels[0].port1.receive(message))
+  expect(host.current.action).toEqual({
+    disabled: false,
+    pending: false,
+    recordedAt: 2346,
+    title: 'Experiment'
+  })
+  act(() => child.current.onActionChange(undefined))
+  act(() => channels[0].port1.receive(childPort.postMessage.mock.lastCall?.[0]))
+  expect(host.current.action).toEqual({ disabled: true, pending: false })
+})

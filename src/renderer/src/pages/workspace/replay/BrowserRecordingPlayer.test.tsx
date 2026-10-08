@@ -716,3 +716,153 @@ it('uses decoded native dimensions and does not reload media when changing fit m
   expect(screen.getByLabelText('Recorded webpage')).toBe(video)
   expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled()
 })
+
+it('pauses the research clock on decode failure and retries the same source, time, speed and size', () => {
+  const recording = browserRecordingFixture()
+  const onSeek = vi.fn()
+  const onPlaybackError = vi.fn()
+  const props = {
+    recording,
+    mediaUrl,
+    onPlaybackError,
+    presentationMode: 'research' as const,
+    transport: { offsetMs: 3200, playing: true, speed: 1.5, onSeek }
+  }
+  const { rerender } = render(<BrowserRecordingPlayer {...props} />)
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  fireEvent.click(screen.getByRole('button', { name: 'Actual size (100%)' }))
+  fireEvent.error(video)
+  expect(onSeek).toHaveBeenCalledExactlyOnceWith(3200)
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+  rerender(<BrowserRecordingPlayer {...props} transport={{ ...props.transport, playing: false }} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  fireEvent.loadedMetadata(video)
+  expect(screen.getByLabelText('Recorded webpage')).toBe(video)
+  expect(video.getAttribute('src')).toContain('media-1')
+  expect(video.currentTime).toBe(1.2)
+  expect(video.playbackRate).toBe(1.5)
+  expect(screen.getByTestId('recorded-media-scroll').dataset.sizeMode).toBe('actual')
+  expect(onSeek).toHaveBeenCalledTimes(1)
+})
+
+it('pauses through the transport callback when playback is rejected, then recovers in place', async () => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error('decoder unavailable'))
+  const onPause = vi.fn(),
+    onSeek = vi.fn(),
+    onPlaybackError = vi.fn()
+  const recording = browserRecordingFixture()
+  const props = {
+    recording,
+    mediaUrl,
+    onPlaybackError,
+    transport: { offsetMs: 1200, playing: true, speed: 2, onPause, onSeek }
+  }
+  const { rerender } = render(<BrowserRecordingPlayer {...props} />)
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  await act(async () => {})
+  expect(onPause).toHaveBeenCalledTimes(1)
+  expect(onSeek).not.toHaveBeenCalled()
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+  rerender(<BrowserRecordingPlayer {...props} active={false} />)
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      retryRevision={1}
+      transport={{ ...props.transport, playing: false }}
+    />
+  )
+  const recovered = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(recovered)
+  fireEvent.loadedData(recovered)
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
+  expect(recovered.currentTime).toBe(1.2)
+  expect(recovered.playbackRate).toBe(2)
+})
+
+it('distinguishes explicitly absent media from retryable access failures without changing the time', () => {
+  const onPause = vi.fn(),
+    onPlaybackError = vi.fn()
+  const recording = browserRecordingFixture()
+  const props = {
+    recording,
+    mediaUrl: () => null,
+    onPlaybackError,
+    transport: { offsetMs: 1200, playing: true, speed: 1, onPause, onSeek: vi.fn() }
+  }
+  const { rerender } = render(<BrowserRecordingPlayer {...props} missingMediaKeys={['media-0']} />)
+  expect(screen.getByText('This recorded media file is not included.')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  expect(onPause).toHaveBeenCalledTimes(1)
+  expect(onPlaybackError).not.toHaveBeenCalled()
+  rerender(<BrowserRecordingPlayer {...props} missingMediaKeys={[]} />)
+  expect(screen.getByText('Could not read the recorded material.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+})
+
+it('does not apply an old playback rejection to a new segment', async () => {
+  let reject!: (error: Error) => void
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail
+      })
+  )
+  const recording = browserRecordingFixture(),
+    onPlaybackError = vi.fn(),
+    onSeek = vi.fn()
+  const props = { recording, mediaUrl, onPlaybackError }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1200, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage')
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 3200, playing: true, speed: 1, onSeek }}
+    />
+  )
+  await act(async () => reject(new Error('old source')))
+  expect(screen.getByLabelText('Recorded webpage').getAttribute('src')).toContain('media-1')
+  expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
+  expect(onPlaybackError).not.toHaveBeenCalled()
+  expect(onSeek).not.toHaveBeenCalled()
+})
+
+it('publishes decoded media time for the footer and withdraws it while buffering', () => {
+  const onActionChange = vi.fn(),
+    recording = browserRecordingFixture()
+  recording.title = 'Recorded experiment'
+  render(
+    <BrowserRecordingPlayer
+      recording={recording}
+      mediaUrl={mediaUrl}
+      presentationMode="research"
+      onActionChange={onActionChange}
+      onAskMoment={vi.fn()}
+      transport={{ offsetMs: 1200, playing: false, speed: 1, onSeek: vi.fn() }}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(video)
+  fireEvent.loadedData(video)
+  video.currentTime = 1.346
+  fireEvent.timeUpdate(video)
+  expect(onActionChange.mock.lastCall?.[0]).toMatchObject({
+    recordedAt: 2346,
+    title: 'Recorded experiment',
+    disabled: false
+  })
+  fireEvent.waiting(video)
+  expect(onActionChange.mock.lastCall?.[0]).toMatchObject({ recordedAt: undefined, disabled: true })
+})

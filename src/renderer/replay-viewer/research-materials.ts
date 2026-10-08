@@ -92,3 +92,35 @@ export function researchPosition(
       }
     : undefined
 }
+
+/** A saved file is anchored to its publication, independently of the current watching position. */
+export function researchResourcePosition(
+  document: ReplayDocument,
+  origins: Readonly<Record<string, number>>,
+  resource: ReplayResource,
+  playback?: ReplayMaterialPlayback,
+  recordedAt = resource.createdAt
+): ResearchReplayPosition | undefined {
+  const owner = document.branches.find((branch) =>
+    branch.steps.some((step) => step.resourceIds.includes(resource.id))
+  )
+  const branch = owner ?? document.branches.find((branch) => branch.id === playback?.branchId)
+  if (!branch) return undefined
+  const origin = origins[branch.id]
+  const timeMs = recordedAt !== undefined && origin !== undefined ? recordedAt - origin : undefined
+  if (timeMs !== undefined && Number.isFinite(timeMs) && timeMs >= 0 && timeMs <= branch.durationMs)
+    return researchPosition(
+      document,
+      origins,
+      { ...playback, branchId: branch.id } as ReplayMaterialPlayback,
+      recordedAt
+    )
+  const step = branch.steps.find((step) => step.resourceIds.includes(resource.id))
+  if (step) {
+    const at = Math.max(step.startMs, step.endMs - 1)
+    const scene = projectReplayScene(document, branch.id, at)
+    if (scene.step) return { branchId: branch.id, stepId: scene.step.id, timeMs: at }
+  }
+  // Legacy files may lack publication evidence; preserve exact file identity without inventing it.
+  return researchPosition(document, origins, playback)
+}

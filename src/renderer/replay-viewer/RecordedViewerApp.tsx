@@ -193,6 +193,11 @@ const RecordedProjectViewerApp = ({
       >
         <ProjectReplay
           track={track}
+          missingMediaKeys={track.media
+            .filter(
+              (media) => !payload.media.some((resolved) => resolved.mediaKey === media.mediaKey)
+            )
+            .map((media) => media.mediaKey)}
           active={view === 'project'}
           readImage={readImage}
           onAskFrame={(frame) => askFile(frame.mediaKey)}
@@ -278,6 +283,11 @@ const RecordedBrowserViewerApp = ({
             : undefined
         }
         recording={payload.recording}
+        missingMediaKeys={payload.recording.media
+          .filter(
+            (media) => !payload.media.some((resolved) => resolved.mediaKey === media.mediaKey)
+          )
+          .map((media) => media.mediaKey)}
         mediaUrl={mediaUrl}
         onAskMoment={async (offsetMs) => {
           setSelection(await client.selectBrowserMoment(payload, offsetMs))

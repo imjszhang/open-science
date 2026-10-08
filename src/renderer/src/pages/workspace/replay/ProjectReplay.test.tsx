@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import {
   projectRecordingToTrack,
@@ -284,4 +284,83 @@ it('does not allow referencing image URLs that have not decoded or failed to dec
   expect(button.hasAttribute('disabled')).toBe(true)
   fireEvent.click(button)
   expect(ask).not.toHaveBeenCalled()
+})
+
+it('pauses the master on an image read failure and retries the same frame without losing native size', async () => {
+  const track = projectRecordingToTrack(fixture())
+  const readImage = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue('data:image/png;base64,recovered')
+  const onPause = vi.fn(),
+    onSeekRecordedAt = vi.fn(),
+    onPlaybackError = vi.fn()
+  render(
+    <ProjectReplay
+      track={track}
+      readImage={readImage}
+      presentationMode="research"
+      onPlaybackError={onPlaybackError}
+      transport={{ recordedAt: 55, onPause, onSeekRecordedAt }}
+    />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Actual size (100%)' }))
+  expect(await screen.findByText('Could not read the recorded material.')).toBeTruthy()
+  await waitFor(() => expect(onPause).toHaveBeenCalledTimes(1))
+  expect(onSeekRecordedAt).not.toHaveBeenCalled()
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  fireEvent.load(await screen.findByAltText('Recorded project image'))
+  expect(readImage.mock.calls.map(([key]) => key)).toEqual(['image-1', 'image-1'])
+  expect(screen.getByTestId('recorded-media-scroll').dataset.sizeMode).toBe('actual')
+  expect(onPause).toHaveBeenCalledTimes(1)
+})
+
+it('retries image decode failures after reconnection without replaying the stale error', async () => {
+  const track = projectRecordingToTrack(fixture()),
+    readImage = vi.fn(async () => 'data:image/png;base64,image')
+  const onPlaybackError = vi.fn(),
+    onSeekRecordedAt = vi.fn(),
+    onAskFrame = vi.fn()
+  const props = {
+    track,
+    readImage,
+    onPlaybackError,
+    onAskFrame,
+    transport: { recordedAt: 55, onSeekRecordedAt }
+  }
+  const { rerender } = render(<ProjectReplay {...props} />)
+  fireEvent.error(await screen.findByAltText('Recorded project image'))
+  expect(onSeekRecordedAt).toHaveBeenCalledExactlyOnceWith(55)
+  rerender(<ProjectReplay {...props} active={false} />)
+  rerender(<ProjectReplay {...props} retryRevision={1} />)
+  const image = await screen.findByAltText('Recorded project image')
+  expect(
+    screen.getByRole('button', { name: 'Ask about this frame' }).hasAttribute('disabled')
+  ).toBe(true)
+  fireEvent.load(image)
+  expect(onPlaybackError).toHaveBeenCalledTimes(1)
+  expect(
+    screen.getByRole('button', { name: 'Ask about this frame' }).hasAttribute('disabled')
+  ).toBe(false)
+})
+
+it('shows explicit missing-file metadata without retrying reads or claiming a transient connection error', () => {
+  const readImage = vi.fn(),
+    onPlaybackError = vi.fn(),
+    onPause = vi.fn()
+  render(
+    <ProjectReplay
+      track={projectRecordingToTrack(fixture())}
+      readImage={readImage}
+      missingMediaKeys={['image-1']}
+      onPlaybackError={onPlaybackError}
+      transport={{ recordedAt: 55, onSeekRecordedAt: vi.fn(), onPause }}
+    />
+  )
+  expect(screen.getByText('This recorded media file is not included.')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  expect(readImage).not.toHaveBeenCalled()
+  expect(onPlaybackError).not.toHaveBeenCalled()
+  expect(onPause).toHaveBeenCalledTimes(1)
 })

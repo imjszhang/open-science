@@ -6,6 +6,8 @@ type ReferencePanelProps = {
   reference: string
   kind?: 'step' | 'file' | 'moment'
   observedAt?: number
+  referencePositionMs?: number
+  watchingPositionMs?: number
   presentation?: 'desktop' | 'browser'
   compact?: boolean
 }
@@ -14,6 +16,8 @@ const ReferencePanelContent = ({
   reference,
   kind = 'step',
   observedAt,
+  referencePositionMs,
+  watchingPositionMs,
   presentation,
   compact = false
 }: ReferencePanelProps): React.JSX.Element => {
@@ -66,6 +70,27 @@ const ReferencePanelContent = ({
         })}
       </p>
     ) : null
+  const position = (value: number): string => {
+    const seconds = Math.max(0, value) / 1000
+    return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${(seconds % 60).toFixed(1).padStart(4, '0')}`
+  }
+  const positions =
+    referencePositionMs !== undefined || watchingPositionMs !== undefined ? (
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        <dt>{t('Reference time')}</dt>
+        <dd>
+          {referencePositionMs === undefined
+            ? t('Publication time not recorded')
+            : position(referencePositionMs)}
+        </dd>
+        {watchingPositionMs !== undefined ? (
+          <>
+            <dt>{t('Watching position')}</dt>
+            <dd>{position(watchingPositionMs)}</dd>
+          </>
+        ) : null}
+      </dl>
+    ) : null
   const referenceText = (
     <textarea
       ref={text}
@@ -111,6 +136,7 @@ const ReferencePanelContent = ({
             <div className="mt-2 max-h-48 space-y-2 overflow-auto break-words">
               {instructions}
               {timestamp}
+              {positions}
               {manualCopy}
               {referenceText}
             </div>
@@ -128,6 +154,7 @@ const ReferencePanelContent = ({
         </Button>
       </div>
       {timestamp}
+      {positions}
       {referenceText}
       {manualCopy}
     </section>

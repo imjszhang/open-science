@@ -10,6 +10,7 @@ import {
   replayStepFailure
 } from './replay-navigation'
 import { cn } from '@/lib/utils'
+import { replayRecordedCoverage, type ReplayRecordedRange } from './replay-recorded-gaps'
 import { matchNotebookRunTool, resolveNotebookRunToolName } from '../notebook-tool-names'
 import {
   Select,
@@ -63,6 +64,8 @@ export type ReplayControlsProps = {
   ready: boolean
   positionMs: number
   durationMs: number
+  recordedCoverage?: readonly ReplayRecordedRange[]
+  recordedTimeOrigin?: number
   stepIndex: number
   steps: readonly ReplayStep[]
   resources?: readonly ReplayResource[]
@@ -142,6 +145,15 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
   const breaks = useMemo(
     () => replayChapterBreaks(props.steps, props.durationMs, width),
     [props.steps, props.durationMs, width]
+  )
+  const coverage = useMemo(
+    () =>
+      replayRecordedCoverage(
+        props.recordedCoverage ?? [],
+        props.recordedTimeOrigin,
+        props.durationMs
+      ),
+    [props.recordedCoverage, props.recordedTimeOrigin, props.durationMs]
   )
   const typeLabel = (step: ReplayStep): string =>
     step.kind === 'review'
@@ -242,6 +254,109 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
       className={`shrink-0 border-t border-border-200 bg-bg-000 px-3 ${props.compact ? 'flex flex-wrap items-center gap-x-1 py-1' : props.recordNavigation ? 'flex items-center gap-1 py-1' : 'space-y-1 py-2'}`}
       data-testid="replay-controls"
     >
+      {!props.recordNavigation && coverage.footage.length ? (
+        <div className="order-first w-full min-w-0" data-testid="replay-recording-coverage">
+          <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-text-300">
+            <button
+              type="button"
+              className="min-w-0 truncate rounded py-0.5 text-left hover:text-text-100 focus-visible:keyboard-focus"
+              title={t('Coverage combines saved recordings in this branch.')}
+              onClick={() => props.onSeek(coverage.footage[0].startMs)}
+            >
+              {t('Recorded footage')} · {formatReplayTime(coverage.footage[0].startMs)}–
+              {formatReplayTime(coverage.footage.at(-1)!.endMs)}
+            </button>
+            {coverage.gaps.length ? (
+              <Popover
+                onOpenChange={(open) => {
+                  if (open) props.onPause()
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="h-5 shrink-0 px-1 text-[10px] text-status-warning-foreground"
+                  >
+                    {t('Recording gaps')}
+                    <ChevronDown size={10} aria-hidden="true" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  align="end"
+                  className="max-h-64 w-64 overflow-y-auto p-2"
+                >
+                  <p className="mb-1 text-xs text-text-300">
+                    {t('Coverage combines saved recordings in this branch.')}
+                  </p>
+                  {coverage.gaps.map((range) => (
+                    <PopoverClose asChild key={range.startMs}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-xs"
+                        onClick={() => props.onSeek(range.startMs)}
+                      >
+                        {t('No footage: {{from}}–{{to}}', {
+                          from: formatReplayTime(range.startMs),
+                          to: formatReplayTime(range.endMs)
+                        })}
+                      </Button>
+                    </PopoverClose>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            ) : null}
+          </div>
+          <div
+            className="relative h-2 w-full rounded bg-muted"
+            role="group"
+            aria-label={t('Recording coverage')}
+          >
+            {coverage.footage.map((range) => (
+              <button
+                key={range.startMs}
+                type="button"
+                className="absolute inset-y-0 rounded-sm bg-status-info-foreground/60 hover:bg-status-info-foreground focus-visible:keyboard-focus"
+                style={{
+                  left: `${(range.startMs / props.durationMs) * 100}%`,
+                  width: `${((range.endMs - range.startMs) / props.durationMs) * 100}%`
+                }}
+                aria-label={t('Footage: {{from}}–{{to}}', {
+                  from: formatReplayTime(range.startMs),
+                  to: formatReplayTime(range.endMs)
+                })}
+                title={t('Footage: {{from}}–{{to}}', {
+                  from: formatReplayTime(range.startMs),
+                  to: formatReplayTime(range.endMs)
+                })}
+                onClick={() => props.onSeek(range.startMs)}
+              />
+            ))}
+            {coverage.gaps.map((range) => (
+              <button
+                key={range.startMs}
+                type="button"
+                className="absolute inset-y-0 border-y border-dashed border-status-warning-foreground/70 bg-status-warning-surface dark:bg-status-warning-dark-surface focus-visible:keyboard-focus"
+                style={{
+                  left: `${(range.startMs / props.durationMs) * 100}%`,
+                  width: `${((range.endMs - range.startMs) / props.durationMs) * 100}%`
+                }}
+                aria-label={t('No footage: {{from}}–{{to}}', {
+                  from: formatReplayTime(range.startMs),
+                  to: formatReplayTime(range.endMs)
+                })}
+                title={t('No footage: {{from}}–{{to}}', {
+                  from: formatReplayTime(range.startMs),
+                  to: formatReplayTime(range.endMs)
+                })}
+                onClick={() => props.onSeek(range.startMs)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
       <Popover open={open} onOpenChange={changeOpen}>
         <div
           className={`flex min-w-0 items-center gap-1${props.compact ? ' order-3' : props.recordNavigation ? ' flex-1' : ''}`}

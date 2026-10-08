@@ -2,6 +2,45 @@ import type { ReplayStep } from '../../../../../shared/replay'
 
 export type ReplayRecordedRange = Readonly<{ startedAt: number; endedAt: number }>
 
+export type ReplayCoverageRange = Readonly<{ startMs: number; endMs: number }>
+
+/** Union actual segment coverage on the research clock, independent of playback progress.
+ * Only holes between saved segments are gaps; leading/trailing time is outside coverage. */
+export function replayRecordedCoverage(
+  ranges: readonly ReplayRecordedRange[],
+  origin: number | undefined,
+  durationMs: number
+): { footage: ReplayCoverageRange[]; gaps: ReplayCoverageRange[] } {
+  if (
+    origin === undefined ||
+    !Number.isFinite(origin) ||
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0
+  )
+    return { footage: [], gaps: [] }
+  const sorted = ranges
+    .filter((range) => Number.isFinite(range.startedAt) && Number.isFinite(range.endedAt))
+    .map((range) => ({
+      startMs: Math.max(0, range.startedAt - origin),
+      endMs: Math.min(durationMs, range.endedAt - origin)
+    }))
+    .filter((range) => range.endMs > range.startMs)
+    .sort((a, b) => a.startMs - b.startMs)
+  const footage: ReplayCoverageRange[] = []
+  for (const range of sorted) {
+    const previous = footage.at(-1)
+    if (previous && range.startMs <= previous.endMs)
+      footage[footage.length - 1] = { ...previous, endMs: Math.max(previous.endMs, range.endMs) }
+    else footage.push(range)
+  }
+  return {
+    footage,
+    gaps: footage
+      .slice(1)
+      .map((range, index) => ({ startMs: footage[index].endMs, endMs: range.startMs }))
+  }
+}
+
 /** Skipping is optional presentation, not a claim that the experiment was idle. */
 export function advanceResearchReplay(input: {
   positionMs: number

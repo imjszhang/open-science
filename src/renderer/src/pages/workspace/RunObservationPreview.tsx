@@ -169,6 +169,8 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
           label: t('Ask about this moment'),
           disabled: !recordingTransport.action || recordingTransport.action.disabled,
           pending: recordingTransport.action?.pending,
+          recordedAt: recordingTransport.action?.recordedAt,
+          title: recordingTransport.action?.title,
           onAsk: recordingTransport.ask
         }
       : undefined
@@ -421,8 +423,19 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
             if (!disposed) setSelectionFailed('ask')
           }
         }
+        if (!disposed)
+          setSelectionFailed((previous) => (previous === 'read' ? undefined : previous))
       } catch {
-        if (!disposed) setSelectionFailed('read')
+        if (!disposed) {
+          setSelectionFailed('read')
+          const playback = current.current.playback
+          if (
+            current.current.mode === 'recorded' &&
+            playback?.playing &&
+            playback.recordedAt !== undefined
+          )
+            playback.onSeekRecordedAt(playback.recordedAt)
+        }
       }
       if (!disposed)
         timer = setTimeout(() => {
@@ -490,10 +503,14 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
               {t('Selected step added to the current draft. Review it before sending.')}
             </p>
           ) : null}
-          {selectionFailed && !draftReceived ? (
+          {selectionFailed && (!draftReceived || selectionFailed === 'read') ? (
             <ErrorNotice
               inline
-              title={t('Could not reference this recorded step.')}
+              title={
+                selectionFailed === 'read' && props.mode === 'recorded'
+                  ? t('Replay connection interrupted')
+                  : t('Could not reference this recorded step.')
+              }
               description={
                 selectionFailed === 'ask'
                   ? props.mode === 'recorded'
@@ -501,7 +518,9 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
                         'Open an editable Session in this Project, or use Discuss from the imported research, to ask about this step.'
                       )
                     : t('Open the recorded Session to ask about this step.')
-                  : t('Return to this preview and select the step again.')
+                  : props.mode === 'recorded'
+                    ? t('Playback is paused. Reconnect to continue from the same position.')
+                    : t('Return to this preview and select the step again.')
               }
               primaryButton={
                 selectionFailed === 'ask' && props.questionRecovery
@@ -530,7 +549,17 @@ const RunObservationPreviewContent = (props: RunObservationPreviewProps): React.
                           })
                       }
                     }
-                  : undefined
+                  : selectionFailed === 'read' && props.mode === 'recorded'
+                    ? {
+                        label: t('Reconnect'),
+                        onClick: () => {
+                          setSelectionFailed(undefined)
+                          setOpenFailed(false)
+                          setAccess(undefined)
+                          setRetry((value) => value + 1)
+                        }
+                      }
+                    : undefined
               }
             />
           ) : null}
