@@ -564,7 +564,21 @@
       "src/renderer/replay-viewer/browser-recording.integration.test.ts",
       "src/renderer/src/pages/workspace/browser-recording-question.test.tsx",
       "src/renderer/src/pages/workspace/replay/BrowserRecordingPlayer.test.tsx",
-      "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx"
+      "src/renderer/replay-viewer/BrowserRecordingControls.test.tsx",
+      "src/renderer/replay-viewer/ReferencePanel.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/renderer/replay-viewer/research-client.test.ts",
+      "src/renderer/replay-viewer/research-viewer.test.tsx",
+      "src/renderer/src/components/ui/overlay-portal-container.test.tsx",
+      "src/renderer/src/lib/replay/transcript.test.ts",
+      "src/renderer/src/pages/workspace/replay/RecordedFootageStatus.test.tsx",
+      "src/renderer/src/pages/workspace/replay/RecordedMediaViewport.test.tsx",
+      "src/renderer/src/pages/workspace/replay/RecordingTimelineFollow.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
+      "src/renderer/src/pages/workspace/replay/ReplayResearchLayout.test.tsx",
+      "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
+      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx"
     ]
   },
   "capabilityOverlays": [],
