@@ -994,7 +994,6 @@ const ReplayPanelContent = ({
     ) : null
   const selectMaterial = (id: string): void => {
     if (id === materialViewId) return
-    pause()
     setMaterialAction(undefined)
     setSelectedResourceId(undefined)
     setInspectedContent(undefined)

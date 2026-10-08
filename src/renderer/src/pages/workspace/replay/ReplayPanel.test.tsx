@@ -1789,6 +1789,115 @@ describe('recorded clock checkpoint migration', () => {
 })
 
 describe('single-material research presentation', () => {
+  it.each([false, true])(
+    'preserves the shared clock across mouse and keyboard material tab changes (playing: %s)',
+    async (playing) => {
+      let sequence = 0
+      let timestamp = 0
+      const frames = new Map<number, FrameRequestCallback>()
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++sequence, callback)
+        return sequence
+      })
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+      const tick = async (): Promise<void> => {
+        await act(async () => {
+          timestamp += 100
+          const pending = [...frames.values()]
+          frames.clear()
+          pending.forEach((callback) => callback(timestamp))
+        })
+      }
+      let playback: import('./ReplayStage').ReplayMaterialPlayback | undefined
+      const source = makeDocument()
+      source.resources = []
+      source.branches = [
+        {
+          ...source.branches[0],
+          durationMs: 10000,
+          steps: [{ ...source.branches[0].steps[0], durationMs: 10000, endMs: 10000 }]
+        }
+      ]
+      render(
+        <ReplayPanel
+          document={source}
+          {...callbacks()}
+          host={null}
+          presentationMode="research"
+          initialView={{
+            fingerprint: 'fp',
+            generatorVersion: 3,
+            branchId: 'main',
+            timeMs: 0,
+            rate: 1
+          }}
+          recordedTimeOrigins={{ main: 10000 }}
+          materialViews={[
+            {
+              id: 'project',
+              label: 'Project replay',
+              content: (_active, value) => {
+                playback = value
+                return <p>Saved project pixels</p>
+              }
+            },
+            { id: 'results', label: 'Results', content: <p>Saved results</p> }
+          ]}
+        />
+      )
+      seekProgress(300)
+      // Settle the recorded-material paint barrier before starting the shared clock.
+      for (let frame = 0; frame < 5; frame++) await tick()
+      if (playing) fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+      await tick()
+      const position = (): number =>
+        Number(
+          screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+        )
+      const verifyClock = async (changeTab: () => void): Promise<void> => {
+        const before = position()
+        expect(screen.getByTestId('replay-stage').getAttribute('data-replay-frame-ready')).toBe(
+          'true'
+        )
+        changeTab()
+        expect(position()).toBe(before)
+        expect(
+          screen.getByRole('button', { name: playing ? 'Pause replay' : 'Play replay' })
+        ).toBeTruthy()
+        await tick()
+        await tick()
+        if (playing) {
+          expect(position()).toBeGreaterThan(before)
+          expect(position()).toBeLessThanOrEqual(before + 200)
+        } else expect(position()).toBe(before)
+      }
+      for (const name of [
+        'Project replay',
+        'Original conversation',
+        'Notebook',
+        'Results',
+        'Project replay'
+      ]) {
+        await verifyClock(() => fireEvent.click(screen.getByRole('tab', { name })))
+      }
+      const project = screen.getByRole('tab', { name: 'Project replay' })
+      project.focus()
+      await verifyClock(() => fireEvent.keyDown(project, { key: 'Home' }))
+      expect(document.activeElement).toBe(
+        screen.getByRole('tab', { name: 'Original conversation' })
+      )
+      await verifyClock(() => fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' }))
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Notebook' }))
+      await verifyClock(() => fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' }))
+      expect(playback).toMatchObject({
+        positionMs: position(),
+        recordedAt: 10000 + position(),
+        playing,
+        speed: 1
+      })
+    }
+  )
+
   it('keeps one primary pane and one clock even when the native preview is expanded', async () => {
     const cb = callbacks()
     render(

@@ -1147,8 +1147,8 @@ const ReplayStageContent = ({
         const selectingFile =
           event.target instanceof Element &&
           Boolean(event.target.closest('button[data-replay-material-item]'))
-        // Material tabs already pause and select together on click. Do not move their
-        // hit targets by inserting the inspection banner between pointerdown and pointerup.
+        // Material tabs only change the visible pane; keep the shared clock running.
+        // Do not enter inspection or move their hit targets before the click is handled.
         if (
           !selectingFile &&
           !isMaterialViewInteraction(event.target) &&
