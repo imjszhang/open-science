@@ -7,6 +7,7 @@ import {
 } from '../../renderer/src/lib/replay/inspection'
 import { projectReplayScene } from '../../renderer/src/lib/replay/scene'
 import { createHash, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { captureRecordedObservationSelection } from '../../shared/recorded-observation-selection'
 import type { CallerContext } from '../caller-context'
 import type { ReplayReaderApi } from '../../renderer/src/lib/replay/source'
@@ -16,7 +17,11 @@ import type { RecordedObservationReader } from '../run-observation/recorded-read
 import type { ImmutableInputAuthority } from '../immutable-input-authority'
 import type { NotebookRunRecord } from '../../shared/notebook'
 import type { ReplayStep, ReplayResource, ReplayScene } from '../../shared/replay'
-import type { RecordedBrowserPayload } from '../../shared/browser-recording'
+import {
+  parseBrowserRecording,
+  type BrowserRecording,
+  type RecordedBrowserPayload
+} from '../../shared/browser-recording'
 import {
   researchReplayPositionSchema,
   researchReplayReadSchema,
@@ -63,6 +68,39 @@ type Snapshot = {
 }
 const MAX_RESOURCE = 32 * 1024 * 1024
 const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value))
+
+function hasCompleteBrowserMedia(payload: RecordedBrowserPayload): boolean {
+  const resolved = new Map(payload.media.map((media) => [media.mediaKey, media]))
+  return payload.recording.media.every((media) => {
+    const receiving = resolved.get(media.mediaKey)
+    return receiving?.checksum === media.checksum && receiving.sizeBytes === media.sizeBytes
+  })
+}
+
+function isCoveredBrowserCheckpoint(
+  checkpoint: BrowserRecording,
+  final: BrowserRecording
+): boolean {
+  const prefix = <T>(part: readonly T[], whole: readonly T[]): boolean =>
+    part.length <= whole.length &&
+    part.every((item, index) => isDeepStrictEqual(item, whole[index]))
+  return (
+    checkpoint.coverage.stopReason === 'interrupted' &&
+    checkpoint.recordingId === final.recordingId &&
+    checkpoint.startedAt === final.startedAt &&
+    checkpoint.title === final.title &&
+    !!checkpoint.source?.projectId &&
+    !!checkpoint.source.sessionId &&
+    isDeepStrictEqual(checkpoint.source, final.source) &&
+    checkpoint.durationMs <= final.durationMs &&
+    checkpoint.coverage.droppedFrames <= final.coverage.droppedFrames &&
+    prefix(checkpoint.media, final.media) &&
+    prefix(checkpoint.segments, final.segments) &&
+    prefix(checkpoint.events, final.events) &&
+    prefix(checkpoint.coverage.gaps, final.coverage.gaps)
+  )
+}
+
 export class ResearchReplayService {
   private readonly snapshots = new Map<string, Snapshot>()
   private opening = 0
@@ -123,6 +161,7 @@ export class ResearchReplayService {
       const unavailableRecordingIds: string[] = []
       const payloads = new Map<string, ResearchReplayRecordingPayload>()
       const browserGroups = new Set<string>()
+      const verifiedBrowserFinals = new Map<string, BrowserRecording>()
       const supportingResourceIds = new Set<string>()
       // Candidate metadata is never authority; verify the exact saved index and all source mappings.
       for (const candidate of candidates.slice(0, 512)) {
@@ -141,6 +180,21 @@ export class ResearchReplayService {
                   ? 'run-observation'
                   : undefined
           if (!kind) continue
+          const final =
+            kind === 'web-recording' ? verifiedBrowserFinals.get(index.recordingId) : undefined
+          if (final) {
+            // Verify each immutable index and its strict schema even when its filename looks
+            // like an old checkpoint. Only reuse a fully mapped final from this same open.
+            const checkpoint = parseBrowserRecording(
+              new TextDecoder('utf-8', { fatal: true }).decode(asset.body)
+            )
+            if (isCoveredBrowserCheckpoint(checkpoint, final)) {
+              // All of its exact media declarations already belong to the selected final.
+              // Hide the redundant index without granting a new playback target or mapping.
+              supportingResourceIds.add(candidate.resource.id)
+              continue
+            }
+          }
           const payload =
             kind === 'web-recording'
               ? await this.dependencies.recordings.readBrowser(candidate.target)
@@ -170,9 +224,15 @@ export class ResearchReplayService {
             }
           }
           if (kind === 'web-recording') {
-            const group = (payload as RecordedBrowserPayload).recording.recordingId
+            const browser = payload as RecordedBrowserPayload
+            const group = browser.recording.recordingId
             if (browserGroups.has(group)) continue
             browserGroups.add(group)
+            if (
+              browser.recording.coverage.stopReason !== 'interrupted' &&
+              hasCompleteBrowserMedia(browser)
+            )
+              verifiedBrowserFinals.set(group, structuredClone(browser.recording))
           }
           payloads.set(candidate.resource.id, structuredClone(payload))
           recordings.push({
