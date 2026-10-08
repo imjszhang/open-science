@@ -59,7 +59,7 @@ const E2E_WINDOW_MODE_ENV = 'OPEN_SCIENCE_E2E_WINDOW_MODE'
 const RENDERER_RECOVERY_WINDOW_MS = 60_000
 const MAX_AUTOMATIC_RENDERER_RECOVERIES = 2
 const CHROMIUM_ERR_ABORTED = -3
-const ALLOWED_RENDERER_PERMISSIONS = new Set(['clipboard-sanitized-write'])
+const ALLOWED_RENDERER_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen'])
 const RECOVERABLE_RENDERER_EXIT_REASONS = new Set([
   'abnormal-exit',
   'crashed',
