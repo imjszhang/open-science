@@ -1,10 +1,11 @@
-import { request, type IncomingHttpHeaders } from 'node:http'
-import { afterEach, describe, it, expect } from 'vitest'
+import { request, ServerResponse, type IncomingHttpHeaders } from 'node:http'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { researchReplayHarness } from './test-support'
 import { ResearchReplayHttpHost } from './http-host'
 const hosts: ResearchReplayHttpHost[] = []
 afterEach(() => {
   for (const host of hosts.splice(0)) host.close()
+  vi.restoreAllMocks()
 })
 const call = (
   url: string,
@@ -60,6 +61,72 @@ async function setup(): Promise<{
     h
   }
 }
+
+function closedMediaResponses(): Set<ServerResponse> {
+  const closed = new Set<ServerResponse>()
+  const emit = ServerResponse.prototype.emit
+  vi.spyOn(ServerResponse.prototype, 'emit').mockImplementation(function (
+    this: ServerResponse,
+    event,
+    ...args
+  ) {
+    if (event === 'close' && this.req.url?.startsWith('/api/research/media')) closed.add(this)
+    return emit.call(this, event, ...args)
+  })
+  return closed
+}
+
+async function abortPendingMedia(
+  h: Awaited<ReturnType<typeof setup>>,
+  closed: Set<ServerResponse>
+): Promise<void> {
+  let complete!: (value: { body: Uint8Array; mimeType: string }) => void
+  const asset = new Promise<{ body: Uint8Array; mimeType: string }>((resolve) => {
+    complete = resolve
+  })
+  const media = vi.spyOn(h.host.service, 'media').mockImplementation(async () => asset)
+  media.mockClear()
+  const countBefore = closed.size
+  const requests = Array.from({ length: 16 }, () => {
+    const parsed = new URL(h.origin)
+    const pending = request(
+      {
+        hostname: '127.0.0.1',
+        port: parsed.port,
+        path: '/api/research/media?recordingId=recording&mediaKey=segment',
+        headers: { host: parsed.host, cookie: h.cookie },
+        agent: false
+      },
+      (response) => response.resume()
+    )
+    pending.on('error', () => undefined)
+    pending.end()
+    return pending
+  })
+  try {
+    await vi.waitFor(() => expect(media).toHaveBeenCalledTimes(16))
+    expect((await call(`${h.origin}/api/context`, { headers: { cookie: h.cookie } })).status).toBe(
+      429
+    )
+    for (const pending of requests) pending.destroy()
+    // Observe the server's actual close events, not a timing assumption about client aborts.
+    await vi.waitFor(() => expect(closed.size).toBe(countBefore + 16))
+    // Disconnecting must not free slots while their underlying reads still consume work.
+    expect((await call(`${h.origin}/api/context`, { headers: { cookie: h.cookie } })).status).toBe(
+      429
+    )
+    complete({ body: Buffer.from('saved media bytes'), mimeType: 'video/webm' })
+    await vi.waitFor(async () => {
+      expect(
+        (await call(`${h.origin}/api/context`, { headers: { cookie: h.cookie } })).status
+      ).toBe(200)
+    })
+  } finally {
+    complete({ body: Buffer.from('saved media bytes'), mimeType: 'video/webm' })
+    for (const pending of requests) pending.destroy()
+  }
+}
+
 describe('research Replay local HTTP boundary', () => {
   it('uses a one-time bootstrap, scoped HttpOnly cookie and readonly context', async () => {
     const h = await setup()
@@ -153,5 +220,56 @@ describe('research Replay local HTTP boundary', () => {
     )
     await h.host.service.revoke(context.viewerId, h.h.caller)
     expect((await call(url, { headers: { cookie: h.cookie } })).status).toBe(410)
+  })
+  it('releases cancelled media slots after their reads settle and retains the same concurrency bound', async () => {
+    const h = await setup()
+    const closed = closedMediaResponses()
+    await abortPendingMedia(h, closed)
+    // A second full batch also detects slots released twice (a negative active count).
+    await abortPendingMedia(h, closed)
+    expect((await call(h.origin, { headers: { cookie: h.cookie } })).status).toBe(200)
+    expect((await call(`${h.origin}/api/context`)).status).toBe(401)
+  })
+  it('cleans up a response cancelled during backpressure and admits another full batch', async () => {
+    const h = await setup()
+    const closed = closedMediaResponses()
+    vi.spyOn(h.host.service, 'media').mockResolvedValue({
+      body: Buffer.alloc(16 * 1024 * 1024),
+      mimeType: 'video/webm'
+    })
+    const write = ServerResponse.prototype.write
+    const blocked = new Set<ServerResponse>()
+    const blockedResponse = (): ServerResponse | undefined => blocked.values().next().value
+    vi.spyOn(ServerResponse.prototype, 'write').mockImplementation(function (
+      this: ServerResponse,
+      ...args
+    ) {
+      const accepted = write.apply(this, args)
+      if (!accepted && this.req.url?.startsWith('/api/research/media')) blocked.add(this)
+      return accepted
+    })
+    const parsed = new URL(h.origin)
+    const pending = request(
+      {
+        hostname: '127.0.0.1',
+        port: parsed.port,
+        path: '/api/research/media?recordingId=recording&mediaKey=segment',
+        headers: { host: parsed.host, cookie: h.cookie },
+        agent: false
+      },
+      (response) => response.pause()
+    )
+    pending.on('error', () => undefined)
+    pending.end()
+    try {
+      await vi.waitFor(() => expect(blockedResponse()?.listenerCount('drain')).toBeGreaterThan(0))
+      pending.destroy()
+      await vi.waitFor(() => expect(closed.has(blockedResponse()!)).toBe(true))
+      await vi.waitFor(() => expect(blockedResponse()?.listenerCount('drain')).toBe(0))
+      expect(blockedResponse()?.listenerCount('error')).toBe(0)
+      await abortPendingMedia(h, closed)
+    } finally {
+      pending.destroy()
+    }
   })
 })

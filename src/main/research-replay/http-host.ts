@@ -297,6 +297,9 @@ export class ResearchReplayHttpHost {
       if (asset.body.byteLength > 32 * 1024 * 1024 || /[\r\n]/.test(asset.mimeType))
         throw new ResearchReplayError('oversized', 413)
       this.current(binding)
+      // The client may have cancelled while the immutable bytes were being read. Keep its
+      // work reserved until that read settles, but never wait for events on a closed response.
+      if (response.destroyed || response.writableEnded) return
       const size = asset.body.byteLength,
         range = request.headers.range
       let start = 0,
@@ -347,6 +350,7 @@ export class ResearchReplayHttpHost {
       if (request.method !== 'HEAD')
         for (let offset = start; offset <= end; offset += 65536) {
           this.current(binding)
+          if (response.destroyed || response.writableEnded) return
           if (!response.write(asset.body.subarray(offset, Math.min(end + 1, offset + 65536))))
             await new Promise<void>((resolve, reject) => {
               const done = (): void => {
@@ -360,14 +364,18 @@ export class ResearchReplayHttpHost {
                 cleanup = (): void => {
                   response.off('drain', done)
                   response.off('close', closed)
+                  response.off('error', closed)
                 }
               response.once('drain', done)
               response.once('close', closed)
+              response.once('error', closed)
+              if (response.destroyed || response.writableEnded) closed()
             })
         }
+      if (response.destroyed || response.writableEnded) return
       response.end()
     } catch (error) {
-      if (response.headersSent) {
+      if (response.destroyed || response.writableEnded || response.headersSent) {
         response.destroy()
         return
       }
