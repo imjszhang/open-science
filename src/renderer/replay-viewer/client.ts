@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import {
+  recordedObservationSelectionSchema as recordedSelectionSchema,
+  verifyRecordedObservationSelection,
+  equalRecordedEvidence as equivalent
+} from '../../shared/recorded-observation-selection'
 import { researchReplayTargetSchema } from '../../shared/research-replay'
 import {
   browserRecordingMomentSchema,
@@ -168,60 +173,16 @@ const runtimeAccessSchema = z
   })
   .strict()
 
-const recordedSelectionSchema = z
-  .object({
-    kind: z.literal('recorded-run-observation'),
-    selectionId: id.optional(),
-    selectedAt: z.number().finite().optional(),
-    recordingId: id,
-    receiving: recordedObservationTargetSchema,
-    stepKey: id,
-    record: z.unknown(),
-    executionContext: runObservationExecutionContextSchema.optional(),
-    mediaKeys: z.array(id).max(2000)
-  })
-  .strict()
-const equivalent = (a: unknown, b: unknown): boolean => {
-  if (a === b) return true
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
-  if (Array.isArray(a) || Array.isArray(b))
-    return (
-      Array.isArray(a) &&
-      Array.isArray(b) &&
-      a.length === b.length &&
-      a.every((value, index) => equivalent(value, b[index]))
-    )
-  const left = a as Record<string, unknown>,
-    right = b as Record<string, unknown>
-  return (
-    Object.keys(left).length === Object.keys(right).length &&
-    Object.keys(left).every((key) => Object.hasOwn(right, key) && equivalent(left[key], right[key]))
-  )
-}
 const verifiedRecordedSelection = (
   raw: unknown,
   payload: RecordedObservationPayload,
   stepKey?: string
 ): RecordedRunObservationSelection => {
-  const selected = recordedSelectionSchema.parse(raw)
-  const expected = payload.archive.records.find((record) => record.stepKey === selected.stepKey)
-  const mediaKeys = payload.archive.media
-    .filter((media) => media.stepKeys.includes(selected.stepKey))
-    .map((media) => media.mediaKey)
-  if (
-    !expected ||
-    (stepKey && stepKey !== selected.stepKey) ||
-    selected.recordingId !== payload.archive.recordingId ||
-    !equivalent(selected.receiving, payload.receiving) ||
-    !equivalent(selected.record, expected) ||
-    !equivalent(selected.mediaKeys, mediaKeys) ||
-    !equivalent(
-      selected.executionContext ?? { purpose: 'unknown', conditionChanges: [] },
-      payload.executionContext ?? { purpose: 'unknown', conditionChanges: [] }
-    )
-  )
+  try {
+    return verifyRecordedObservationSelection(raw, payload, stepKey)
+  } catch {
     throw new ReplayViewerRequestError('invalid-response')
-  return { ...selected, record: structuredClone(expected) }
+  }
 }
 
 export class ReplayViewerRequestError extends Error {

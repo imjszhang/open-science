@@ -81,4 +81,19 @@ describe('compact saved Replay reference', () => {
     expect(screen.queryByText('Saved reference details')).toBeNull()
     expect(screen.getByText(/Paste this reference into your conversation/)).toBeTruthy()
   })
+  it('labels a saved state independently from the later watching position', () => {
+    render(
+      <ReferencePanel
+        kind="observation"
+        reference='{"selectionId":"state"}'
+        observedAt={1185}
+        referencePositionMs={1185}
+        watchingPositionMs={40000}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Copy state reference' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Recorded state reference' })).toBeTruthy()
+    expect(screen.getByText('00:01.2')).toBeTruthy()
+    expect(screen.getByText('00:40.0')).toBeTruthy()
+  })
 })

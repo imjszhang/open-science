@@ -4,6 +4,8 @@ import { formatByteSize } from '@/lib/utils'
 import { isReviewerCorrectionAttribution } from '../../../../../shared/session-persistence'
 import { ReplayReviewRecord } from './ReplayReviewRecord'
 import { ReplayCurrentContext } from './ReplayCurrentContext'
+import { ReplayExecutionState } from './ReplayExecutionState'
+import type { RecordedExecutionState } from '@/lib/replay/recorded-execution'
 import {
   lazy,
   Suspense,
@@ -107,6 +109,8 @@ export type ReplayStageProps = {
     savedHistory?: boolean
   }) => void
   materialPlayback?: ReplayMaterialPlayback
+  executionStates?: readonly RecordedExecutionState[]
+  executionNotice?: React.ReactNode
   materialViews?: readonly ReplayMaterialView[]
   materialsActive?: boolean
   materialViewId?: string
@@ -658,6 +662,8 @@ const ReplayStageContent = ({
   materialsId,
   materialViews,
   materialPlayback,
+  executionStates,
+  executionNotice,
   materialsActive = true,
   materialViewId = 'notebook',
   onMaterialViewChange,
@@ -830,6 +836,10 @@ const ReplayStageContent = ({
     !materialRuns.length &&
     !(fileResources?.length ?? scene.visibleResourceIds.length)
   const latestNotebookRunId = materialRuns.at(-1)?.runId
+  const contextRunId = scene.step?.runs.length === 1 ? scene.step.runs[0].runId : undefined
+  const contextExecution = contextRunId
+    ? executionStates?.find((state) => state.track.runId === contextRunId)
+    : undefined
   const resourceIds = (materialStep?.resourceIds ?? [])
     .slice(0, REPLAY_MATERIAL_RESOURCE_LIMIT)
     .filter((id) => scene.visibleResourceIds.includes(id))
@@ -1202,6 +1212,12 @@ const ReplayStageContent = ({
       {fitContainer && !primaryContent ? (
         <ReplayCurrentContext
           compact={researchPresentation}
+          executionState={contextExecution}
+          executionWaiting={Boolean(
+            contextExecution?.snapshot &&
+            materialPlayback?.recordedAt !== undefined &&
+            materialPlayback.recordedAt > contextExecution.snapshot.observedAt
+          )}
           scene={scene}
           steps={branchSteps}
           onHistory={() => {
@@ -1505,7 +1521,30 @@ const ReplayStageContent = ({
                 {fitContainer ? (
                   <div onClickCapture={rememberNotebookAnchor}>{notebookHistoryControl}</div>
                 ) : null}
+                {executionNotice ? <div className="p-3">{executionNotice}</div> : null}
                 {materialRuns.map((index, runOffset) => {
+                  const execution = executionStates?.find(
+                    (state) => state.track.runId === index.runId
+                  )
+                  const executionContent = execution ? (
+                    <ReplayExecutionState
+                      state={execution}
+                      detail
+                      waiting={Boolean(
+                        execution.snapshot &&
+                        materialPlayback?.recordedAt !== undefined &&
+                        materialPlayback.recordedAt > execution.snapshot.observedAt
+                      )}
+                    />
+                  ) : executionStates !== undefined ? (
+                    <p className="text-xs text-text-300">
+                      {t('No linked intermediate observations are available for this run.')}
+                    </p>
+                  ) : null
+                  const executionComplete =
+                    materialPlayback?.recordedAt !== undefined &&
+                    index.endedAt !== undefined &&
+                    materialPlayback.recordedAt >= index.endedAt
                   const detail = runDetails[index.runId]
                   const content =
                     detail?.status === 'ready' ? (
@@ -1564,6 +1603,20 @@ const ReplayStageContent = ({
                       }
                     >
                       {content}
+                      {executionContent ? (
+                        <div className="border-t border-border-200 px-4 py-3">
+                          {executionComplete ? (
+                            <details>
+                              <summary className="cursor-pointer text-xs text-text-300">
+                                {t('Saved execution observations')}
+                              </summary>
+                              <div className="mt-2">{executionContent}</div>
+                            </details>
+                          ) : (
+                            executionContent
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     content

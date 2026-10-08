@@ -7341,6 +7341,23 @@
     "Result source": "結果の出典",
     "All research materials": "すべての研究資料",
     "View all results": "すべての結果を表示",
-    "Showing all saved results from this source, including later records.": "後の記録を含め、この出典に保存されたすべての結果を表示しています。"
+    "Showing all saved results from this source, including later records.": "後の記録を含め、この出典に保存されたすべての結果を表示しています。",
+    "No execution status has been recorded at this point.": "この時点の実行状態はまだ記録されていません。",
+    "Recorded execution status": "記録された実行状態",
+    "Last observed at {{time}}": "最終記録: {{time}}",
+    "No newer status record at this playback position.": "この再生位置に新しい状態記録はありません。",
+    "This is the last saved observation, not a continuous activity log.": "これは最後に保存された観察記録であり、連続した活動ログではありません。",
+    "Sensitive content was removed from this observation.": "この観察記録から機密情報が削除されています。",
+    "Some observations were not saved. The recorded process may be incomplete.": "一部の観察記録が保存されていません。記録された過程は不完全な可能性があります。",
+    "No linked intermediate observations are available for this run.": "この実行に関連付けられた中間観察記録はありません。",
+    "Saved execution observations": "保存された実行観察記録",
+    "Ask about this status": "この状態について質問",
+    "Could not prepare this observation reference.": "この観察記録の参照を準備できませんでした。",
+    "Next status record": "次の状態記録",
+    "Recorded state reference": "記録された状態の参照",
+    "Copy state reference": "状態の参照をコピー",
+    "Could not link saved execution states.": "保存された実行状態を関連付けられませんでした。",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "一部の保存済み状態を Notebook の実行に関連付けられませんでした。対応する記録を個別に開いてください。",
+    "Reading saved execution states…": "保存された実行状態を読み込み中…"
   }
 }

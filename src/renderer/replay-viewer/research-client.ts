@@ -14,6 +14,11 @@ import {
   type RecordedEvidencePayload
 } from '../../shared/run-observation-recorded'
 import { ReplayViewerClient, ReplayViewerRequestError } from './client'
+import { researchReplayObservationBindingSchema } from '../../shared/research-replay-observations'
+import {
+  equalRecordedEvidence,
+  verifyRecordedObservationSelection
+} from '../../shared/recorded-observation-selection'
 import type { ReplayPreparedResource } from '../src/pages/workspace/replay/replay-resources'
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -115,6 +120,7 @@ const researchDocumentSchema: z.ZodType<ResearchReplayDocument> = z
     recordings: z.array(recordingSchema).max(64),
     recordingsTruncated: z.boolean(),
     unavailableRecordingIds: z.array(z.string().max(512)).max(512),
+    observationBindings: z.array(researchReplayObservationBindingSchema).max(64).optional(),
     supportingResourceIds: z.array(z.string().max(512)).max(20000).optional()
   })
   .strict()
@@ -142,6 +148,8 @@ const notebookSchema = z.custom<ReplayNotebookRunDetails>(
 
 /** Research-scoped, passive reads only. Viewer grants choose the source; callers never supply paths. */
 export class ResearchReplayClient extends ReplayViewerClient {
+  private research?: ResearchReplayDocument
+  private readonly recordingPayloads = new Map<string, RecordedEvidencePayload>()
   private readonly connectionListeners = new Set<(error: ReplayViewerRequestError) => void>()
 
   /** Observe scoped transport failures without changing or extending the viewer's authority. */
@@ -186,6 +194,8 @@ export class ResearchReplayClient extends ReplayViewerClient {
       )
     )
       throw new ReplayViewerRequestError('invalid-response')
+    this.research = structuredClone(result)
+    this.recordingPayloads.clear()
     return result
   }
   async notebook(runId: string, signal?: AbortSignal): Promise<ReplayNotebookRunDetails> {
@@ -218,6 +228,7 @@ export class ResearchReplayClient extends ReplayViewerClient {
       (recording.kind === 'run-observation') !== 'archive' in result
     )
       throw new ReplayViewerRequestError('invalid-response')
+    this.recordingPayloads.set(recording.id, structuredClone(result))
     return result
   }
   private verifySelection(value: ResearchReplaySelection, document: ReplayDocument): void {
@@ -235,6 +246,61 @@ export class ResearchReplayClient extends ReplayViewerClient {
     )
       throw new ReplayViewerRequestError('invalid-response')
   }
+  private async verifyObservation(
+    value: ResearchReplaySelection,
+    document: ReplayDocument,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const selector = value.position.observation
+    if (!selector && !value.observation && value.inspection !== 'recorded-observation') return
+    const research = this.research
+    const descriptor = research?.recordings.find((item) => item.id === selector?.recordingId)
+    const origin = research?.timing.recordedTimeOrigins[value.position.branchId]
+    if (
+      !selector ||
+      !value.observation ||
+      value.inspection !== 'recorded-observation' ||
+      !research ||
+      research.document.source.fingerprint !== document.source.fingerprint ||
+      !descriptor ||
+      descriptor.kind !== 'run-observation' ||
+      origin === undefined
+    )
+      throw new ReplayViewerRequestError('invalid-response')
+    const payload =
+      this.recordingPayloads.get(descriptor.id) ??
+      (await this.researchRecording(descriptor, signal))
+    if (!('archive' in payload)) throw new ReplayViewerRequestError('invalid-response')
+    try {
+      const observation = verifyRecordedObservationSelection(
+        value.observation,
+        payload,
+        selector.stepKey
+      )
+      const binding = research.observationBindings?.find(
+        (item) =>
+          equalRecordedEvidence(item.target, descriptor.target) &&
+          item.recordingId === payload.archive.recordingId &&
+          item.branchIds.includes(value.position.branchId)
+      )
+      const step = document.branches
+        .find((item) => item.id === value.position.branchId)
+        ?.steps.find((item) => item.id === value.position.stepId)
+      if (
+        !binding ||
+        !step?.runs.some((run) => run.runId === binding.runId) ||
+        research.document.resources.find((item) => item.id === descriptor.id)?.checksum !==
+          binding.archiveChecksum ||
+        observation.selectionId !== value.selectionId ||
+        observation.selectedAt !== value.selectedAt ||
+        observation.record.observedAt < origin ||
+        observation.record.observedAt > origin + value.position.timeMs
+      )
+        throw new Error('Invalid observation scope.')
+    } catch {
+      throw new ReplayViewerRequestError('invalid-response')
+    }
+  }
   async selectResearch(
     document: ReplayDocument,
     position: ResearchReplayPosition,
@@ -243,12 +309,13 @@ export class ResearchReplayClient extends ReplayViewerClient {
     const requested = researchReplayPositionSchema.parse(position)
     const result = await this.json('/api/research/select', selectionSchema, requested, signal)
     this.verifySelection(result, document)
-    if (
-      Object.entries(requested).some(
-        ([key, value]) => result.position[key as keyof ResearchReplayPosition] !== value
-      )
+    // Optional UI hints may be explicitly undefined; JSON transport omits those keys.
+    const serializedPosition = Object.fromEntries(
+      Object.entries(requested).filter(([, value]) => value !== undefined)
     )
+    if (!equalRecordedEvidence(result.position, serializedPosition))
       throw new ReplayViewerRequestError('invalid-response')
+    await this.verifyObservation(result, document, signal)
     return result
   }
   async researchSelection(
@@ -261,7 +328,10 @@ export class ResearchReplayClient extends ReplayViewerClient {
       {},
       signal
     )
-    if (result) this.verifySelection(result, document)
+    if (result) {
+      this.verifySelection(result, document)
+      await this.verifyObservation(result, document, signal)
+    }
     return result
   }
   researchMediaUrl(

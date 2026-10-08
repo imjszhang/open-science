@@ -1,3 +1,12 @@
+import {
+  createObservationAssociationReader,
+  importedObservationIdentity
+} from '../research-replay/observation-association'
+import type { ReplayReaderApi } from '../../renderer/src/lib/replay/source'
+import type {
+  ReadObservationBindingsRequest,
+  ReadObservationBindingsResult
+} from '../../shared/research-replay-observations'
 import { ResearchReplayService } from '../research-replay/service'
 import { ResearchReplayHttpHost } from '../research-replay/http-host'
 import { createResearchReplayExternalPort } from '../research-replay/external-port'
@@ -66,6 +75,9 @@ import type { composeSessionPackages } from './session-packages'
 export type ManagedExecutionComposition = {
   service: ManagedExecutionService
   researchRuns: ResearchRunInspectionPort
+  readObservationBindings(
+    request: ReadObservationBindingsRequest
+  ): Promise<ReadObservationBindingsResult>
   researchDemos: ResearchDemoOwner
   external: ManagedExecutionExternalPort
   internal: ManagedExecutionPort
@@ -786,28 +798,57 @@ export async function composeManagedExecution({
     viewers: observationViewers,
     reader: recordedObservations
   })
-  const researchReplayService = new ResearchReplayService({
-    reader: {
-      sessions: {
-        loadOne: ({ projectId, sessionId }) => sessions.readSessionSnapshot(projectId, sessionId)
-      },
-      notebook: {
-        runIndex: ({ projectId, sessionId }) =>
-          managedFiles.notebookRepository.readSessionRunIndex(projectId!, sessionId),
-        getReference: (request) => notebook.getSessionReference(request),
-        state: (request) => notebook.state(request)
-      },
-      artifacts: {
-        getLineage: (request) => managedFiles.artifactProvenanceRepository.getLineage(request)
-      },
-      reviewer: {
-        getForSession: async (request) => {
-          const owner = sessionAuthority.reviewerCommandOwnerRef.current
-          if (!owner) throw new Error('Review records are unavailable.')
-          return owner.getForSession(request)
-        }
-      }
+  const replayReader: ReplayReaderApi = {
+    sessions: {
+      loadOne: ({ projectId, sessionId }) => sessions.readSessionSnapshot(projectId, sessionId)
     },
+    notebook: {
+      runIndex: ({ projectId, sessionId }) =>
+        managedFiles.notebookRepository.readSessionRunIndex(projectId!, sessionId),
+      getReference: (request) => notebook.getSessionReference(request),
+      state: (request) => notebook.state(request)
+    },
+    artifacts: {
+      getLineage: (request) => managedFiles.artifactProvenanceRepository.getLineage(request)
+    },
+    reviewer: {
+      getForSession: async (request) => {
+        const owner = sessionAuthority.reviewerCommandOwnerRef.current
+        if (!owner) throw new Error('Review records are unavailable.')
+        return owner.getForSession(request)
+      }
+    }
+  }
+  const observationAssociations = createObservationAssociationReader({
+    reader: replayReader,
+    read: (target) => recordedObservations.read(target),
+    authorize: authorizeObservationScope,
+    importedIdentity: async (target, resource, source) => {
+      if (!source.runId || !resource.checksum || resource.size === undefined) return undefined
+      const current = await sessions.readSessionSnapshot(target.projectId, target.sessionId)
+      const currentOrigin = current?.packageOrigin ?? current?.forkOrigin
+      if (!currentOrigin) return undefined
+      // Reuse the existing exact-Version/content-bound receipt admission, not artifact names,
+      // timestamps, or caller-provided maps. The complete import map remains in Main.
+      await sessionPackages.sessionPackageService.readArtifactSourceVersionMapping(
+        { projectId: target.projectId, sessionId: target.sessionId },
+        {
+          artifactId: target.artifactId,
+          versionId: target.versionId,
+          checksum: resource.checksum,
+          sizeBytes: resource.size
+        }
+      )
+      const origin = await sessionPackages.sessionPackageService.readOrigin({
+        projectId: target.projectId,
+        sessionId: target.sessionId
+      })
+      return importedObservationIdentity(target, source, currentOrigin, origin)
+    }
+  })
+  const researchReplayService = new ResearchReplayService({
+    reader: replayReader,
+    observationBindings: observationAssociations.resolve,
     recordings: recordedObservations,
     immutable: managedFiles.immutableInputAuthority,
     authorize: authorizeObservationScope,
@@ -899,6 +940,7 @@ export async function composeManagedExecution({
   return {
     service,
     researchRuns,
+    readObservationBindings: observationAssociations.read,
     researchDemos,
     external,
     internal,

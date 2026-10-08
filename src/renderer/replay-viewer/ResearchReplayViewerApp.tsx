@@ -12,6 +12,11 @@ import {
   projectRecordingToTrack
 } from '../../shared/project-recording'
 import { recordedMediaResource } from '../src/lib/replay/recorded-results'
+import {
+  buildRecordedExecutionTracks,
+  type RecordedExecutionAskContext
+} from '../src/lib/replay/recorded-execution'
+import type { RecordedRunObservationSelection } from '../../shared/run-observation-recorded'
 import type { ReplayNotebookRunReader } from '../src/lib/replay/notebook-details'
 import { ErrorNotice } from '../src/components/error-notice'
 import { Info } from 'lucide-react'
@@ -147,6 +152,34 @@ const ResearchReplayContent = ({
   // projection again after technical-step removal can lose attribution and trim valid coverage.
   const timed = research.timing
   const document = research.document
+  const executionTracks = useMemo(
+    () =>
+      buildRecordedExecutionTracks(
+        document,
+        recordings.map((item) => item.payload),
+        research.observationBindings ?? [],
+        timed.recordedTimeOrigins
+      ),
+    [document, recordings, research.observationBindings, timed.recordedTimeOrigins]
+  )
+  const unlinkedStates = useMemo(
+    () =>
+      recordings
+        .filter((item) => 'archive' in item.payload)
+        .some(
+          (item) =>
+            !executionTracks.some((track) => {
+              const target = track.select(track.snapshots[0]).receiving
+              return (
+                target.projectId === item.descriptor.target.projectId &&
+                target.sessionId === item.descriptor.target.sessionId &&
+                target.artifactId === item.descriptor.target.artifactId &&
+                target.versionId === item.descriptor.target.versionId
+              )
+            })
+        ),
+    [recordings, executionTracks]
+  )
   const [initialView] = useState(() => restoreView(context.viewerId, document))
   const [watchingPosition, setWatchingPosition] = useState(initialView?.timeMs ?? 0)
   const [selection, setSelection] = useState<ResearchReplaySelection>()
@@ -186,6 +219,7 @@ const ResearchReplayContent = ({
     )
     return () => {
       controller.abort()
+      pending.current += 1
     }
   }, [client, document])
   const select = useCallback(
@@ -532,6 +566,41 @@ const ResearchReplayContent = ({
     },
     [document, timed.recordedTimeOrigins, select]
   )
+  const askObservation = useCallback(
+    async (
+      selection: RecordedRunObservationSelection,
+      watching: RecordedExecutionAskContext
+    ): Promise<void> => {
+      if (connection !== 'connected') throw new ReplayViewerRequestError('authorization')
+      const descriptor = recordings.find(
+        ({ payload }) =>
+          'archive' in payload &&
+          payload.archive.recordingId === selection.recordingId &&
+          payload.receiving.projectId === selection.receiving.projectId &&
+          payload.receiving.sessionId === selection.receiving.sessionId &&
+          payload.receiving.artifactId === selection.receiving.artifactId &&
+          payload.receiving.versionId === selection.receiving.versionId
+      )?.descriptor
+      const track = executionTracks.find(
+        (track) =>
+          track.branchId === watching.branchId &&
+          track.stepId === watching.stepId &&
+          track.runId === watching.runId &&
+          track.snapshots.some((snapshot) => snapshot.stepId === selection.stepKey)
+      )
+      const origin = timed.recordedTimeOrigins[watching.branchId]
+      if (!descriptor || !track || origin === undefined)
+        throw new ReplayViewerRequestError('unavailable')
+      await select({
+        branchId: watching.branchId,
+        stepId: watching.stepId,
+        timeMs: watching.timeMs,
+        recordedAt: origin + watching.timeMs,
+        observation: { recordingId: descriptor.id, stepKey: selection.stepKey }
+      })
+    },
+    [connection, recordings, executionTracks, timed.recordedTimeOrigins, select]
+  )
   const reference = selection
     ? JSON.stringify(
         {
@@ -556,14 +625,16 @@ const ResearchReplayContent = ({
     document.branches
       .find((branch) => branch.id === selection.position.branchId)
       ?.steps.find((step) => step.id === selection.step.id)
-  const referenceAt = selection?.resource
-    ? selection.resource.createdAt
-    : selection?.moment
-      ? selection.position.recordedAt
-      : selection?.position.notebookRunId
-        ? referenceStep?.runs.find((run) => run.runId === selection.position.notebookRunId)
-            ?.startedAt
-        : referenceStep?.recordedAt
+  const referenceAt = selection?.observation
+    ? selection.observation.record.observedAt
+    : selection?.resource
+      ? selection.resource.createdAt
+      : selection?.moment
+        ? selection.position.recordedAt
+        : selection?.position.notebookRunId
+          ? referenceStep?.runs.find((run) => run.runId === selection.position.notebookRunId)
+              ?.startedAt
+          : referenceStep?.recordedAt
   const referenceOrigin = selection && timed.recordedTimeOrigins[selection.position.branchId]
   const referencePosition =
     referenceAt !== undefined && referenceOrigin !== undefined && referenceAt >= referenceOrigin
@@ -617,14 +688,35 @@ const ResearchReplayContent = ({
       <div className="min-h-0 flex-1">
         <ReplayPanel
           presentationMode="research"
+          executionTracks={executionTracks}
+          executionNotice={
+            unlinkedStates ? (
+              <p className="px-3 py-2 text-xs text-text-300">
+                {t(
+                  'Some saved states could not be linked to a Notebook run. Open their recording separately.'
+                )}
+              </p>
+            ) : undefined
+          }
+          onAskObservation={askObservation}
           footerReference={
             reference ? (
               <ReferencePanel
                 compact
                 key={selection!.selectionId}
                 reference={reference}
-                kind={selection!.moment ? 'moment' : selection!.resource ? 'file' : 'step'}
-                observedAt={selection!.position.recordedAt}
+                kind={
+                  selection!.observation
+                    ? 'observation'
+                    : selection!.moment
+                      ? 'moment'
+                      : selection!.resource
+                        ? 'file'
+                        : 'step'
+                }
+                observedAt={
+                  selection!.observation?.record.observedAt ?? selection!.position.recordedAt
+                }
                 referencePositionMs={referencePosition}
                 watchingPositionMs={watchingPosition}
                 presentation={context.presentation}

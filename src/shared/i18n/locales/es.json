@@ -7669,6 +7669,23 @@
     "Result source": "Fuente de los resultados",
     "All research materials": "Todos los materiales de investigación",
     "View all results": "Ver todos los resultados",
-    "Showing all saved results from this source, including later records.": "Se muestran todos los resultados guardados de esta fuente, incluidos los registros posteriores."
+    "Showing all saved results from this source, including later records.": "Se muestran todos los resultados guardados de esta fuente, incluidos los registros posteriores.",
+    "No execution status has been recorded at this point.": "Todavía no se ha registrado ningún estado de ejecución en este punto.",
+    "Recorded execution status": "Estado de ejecución registrado",
+    "Last observed at {{time}}": "Última observación en {{time}}",
+    "No newer status record at this playback position.": "No hay un registro de estado más reciente en esta posición de reproducción.",
+    "This is the last saved observation, not a continuous activity log.": "Esta es la última observación guardada, no un registro continuo de actividad.",
+    "Sensitive content was removed from this observation.": "Se ha eliminado el contenido confidencial de esta observación.",
+    "Some observations were not saved. The recorded process may be incomplete.": "Algunas observaciones no se guardaron. El proceso registrado puede estar incompleto.",
+    "No linked intermediate observations are available for this run.": "No hay observaciones intermedias vinculadas disponibles para esta ejecución.",
+    "Saved execution observations": "Observaciones de ejecución guardadas",
+    "Ask about this status": "Preguntar sobre este estado",
+    "Could not prepare this observation reference.": "No se pudo preparar la referencia a esta observación.",
+    "Next status record": "Siguiente registro de estado",
+    "Recorded state reference": "Referencia al estado registrado",
+    "Copy state reference": "Copiar referencia al estado",
+    "Could not link saved execution states.": "No se pudieron vincular los estados de ejecución guardados.",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Algunos estados guardados no se pudieron vincular a una ejecución de Notebook. Abra su grabación por separado.",
+    "Reading saved execution states…": "Leyendo estados de ejecución guardados…"
   }
 }

@@ -1,5 +1,5 @@
 import { RunObservationPreview } from '../RunObservationPreview'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Info } from 'lucide-react'
@@ -20,7 +20,8 @@ import {
 } from '@/lib/replay/recorded-time'
 import type {
   RecordedObservationPayload,
-  RecordedProjectPayload
+  RecordedProjectPayload,
+  RecordedRunObservationSelection
 } from '../../../../../shared/run-observation-recorded'
 import type { ResearchDemoSource, ResearchDemoHistory } from '../../../../../shared/research-demo'
 import {
@@ -41,6 +42,11 @@ import type { RecordingCandidate } from './recording-discovery'
 import type { ReplayMaterialView } from './ReplayStage'
 import { showRecordedObservation } from './open-run-observation'
 import { exitResearchReplayFullscreen } from './exit-research-fullscreen'
+import { useReplayExecutions } from './use-replay-executions'
+import type {
+  RecordedExecutionTrack,
+  RecordedExecutionAskContext
+} from '@/lib/replay/recorded-execution'
 
 type Candidate = RecordingCandidate & { localHistory?: boolean }
 export function useRecordedMaterials(
@@ -58,6 +64,12 @@ export function useRecordedMaterials(
   playbackKey?: string
   timingReady: boolean
   timelineCoverage?: ResearchReplayTimeline['timelineCoverage']
+  executionTracks?: readonly RecordedExecutionTrack[]
+  executionNotice?: ReactNode
+  askObservation: (
+    selection: RecordedRunObservationSelection,
+    context: RecordedExecutionAskContext
+  ) => Promise<void>
 } {
   const { t } = useTranslation()
   const sourceKey = JSON.stringify([
@@ -251,6 +263,15 @@ export function useRecordedMaterials(
   ])
   const prepared = timing?.sourceKey === sourceKey ? timing : undefined
   const timed = prepared?.timeline
+  const executionPayloads = useMemo(
+    () => (prepared ? [...prepared.payloads.values()] : undefined),
+    [prepared]
+  )
+  const { executionTracks, executionNotice } = useReplayExecutions(
+    timed?.document,
+    executionPayloads,
+    timed?.recordedTimeOrigins
+  )
   useEffect(() => {
     if (selected?.format !== 'web-recording') return
     if (!selected.localHistory && !prepared) return
@@ -443,6 +464,55 @@ export function useRecordedMaterials(
       await recovery.onClick(selection, controller.signal)
     }
   }
+  const askObservation = async (
+    requested: RecordedRunObservationSelection,
+    context: RecordedExecutionAskContext
+  ): Promise<void> => {
+    const track = executionTracks?.find(
+      (track) =>
+        track.branchId === context.branchId &&
+        track.runId === context.runId &&
+        track.stepId === context.stepId &&
+        track.snapshots.some((snapshot) => snapshot.stepId === requested.stepKey)
+    )
+    const snapshot = track?.snapshots.find((snapshot) => snapshot.stepId === requested.stepKey)
+    if (!track || !snapshot || snapshot.observedAt > track.origin + context.timeMs)
+      throw new Error('The recorded evidence is unavailable.')
+    const captured = track.select(snapshot)
+    if (
+      (['projectId', 'sessionId', 'artifactId', 'versionId'] as const).some(
+        (key) => captured.receiving[key] !== requested.receiving[key]
+      ) ||
+      captured.recordingId !== requested.recordingId
+    )
+      throw new Error('The recorded evidence is unavailable.')
+    const selection = Object.freeze({
+      ...captured,
+      selectionId: crypto.randomUUID(),
+      selectedAt: Date.now()
+    })
+    askRequest.current?.abort()
+    const controller = new AbortController()
+    askRequest.current = controller
+    const revision = useNavigationStore.getState().explicitNavigationRevision
+    const destination = useRunObservationQuestionStore.getState().destination
+    if (presentationMode === 'research') {
+      const exiting = exitResearchReplayFullscreen()
+      if (exiting) await exiting
+    }
+    const currentDestination = useRunObservationQuestionStore.getState().destination
+    if (
+      controller.signal.aborted ||
+      revision !== useNavigationStore.getState().explicitNavigationRevision ||
+      ((destination || currentDestination) &&
+        !sameObservationQuestionDestination(destination, currentDestination))
+    )
+      return
+    if (!useRunObservationQuestionStore.getState().askRecorded(selection)) {
+      if (!recovery) throw new Error('Discussion unavailable')
+      await recovery.onClick(selection, controller.signal)
+    }
+  }
   const catalog = (
     <div className="shrink-0 space-y-2 border-b border-border-200 p-2">
       <div className="flex min-w-0 items-center gap-2">
@@ -559,6 +629,9 @@ export function useRecordedMaterials(
       )
     ) : null
   return {
+    executionTracks,
+    executionNotice,
+    askObservation,
     playbackDocument: timed?.document,
     recordedTimeOrigins: timed?.recordedTimeOrigins,
     playbackKey: sourceKey,
@@ -585,6 +658,7 @@ export function useRecordedMaterials(
               {catalog}
               {selected &&
               (selected.localHistory ||
+                (payload && 'archive' in payload) ||
                 (selected.format === 'web-recording' && browserPayload && !browserAligned)) ? (
                 <div className="shrink-0 px-3 py-2">
                   <Button

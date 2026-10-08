@@ -1440,6 +1440,8 @@ export type ResearchReplayPosition = {
   notebookRunId?: string
   /** Inspect an explicit conversation record while retaining the master clock. */
   inspectStep?: 'visible' | 'saved-history'
+  /** Exact archived state visible by timeMs; IDs are resolved within this research viewer. */
+  observation?: { recordingId: string; stepKey: string }
   scope?: 'step' | 'session'
   timeMs: number
   recordedAt?: number
@@ -1506,9 +1508,10 @@ export type ResearchReplaySelection = {
   evidence: ResearchReplayEvidence[]
   resource?: ResearchReplayResource
   moment?: BrowserRecordingMoment
+  observation?: RecordedRunObservationSelection
   truncated: boolean
   phase: 'input' | 'activity' | 'result'
-  inspection?: 'saved-resource' | 'recorded-moment'
+  inspection?: 'saved-resource' | 'recorded-moment' | 'recorded-observation'
 }
 export type ResearchReplayRecording = {
   id: string
@@ -1516,7 +1519,17 @@ export type ResearchReplayRecording = {
   target: RecordedObservationTarget
   name: string
 }
+/** Verified receiving Notebook association; source identities never authorize execution. */
+export type ResearchReplayObservationBinding = {
+  target: RecordedObservationTarget
+  recordingId: string
+  archiveChecksum: string
+  runId: string
+  branchIds: string[]
+  basis: 'native-identity' | 'import-receipt'
+}
 export type ResearchReplayOverview = {
+  observationBindings?: ResearchReplayObservationBinding[]
   source: ResearchReplaySource
   branches: Array<{
     id: string

@@ -1,9 +1,13 @@
+import type { ResearchReplayObservationBinding } from '../../shared/research-replay-observations'
+import type { RecordedObservationPayload } from '../../shared/run-observation-recorded'
+import type { ReplayDocument } from '../../shared/replay'
 import {
   projectReplayNotebookInspection,
   projectReplayStepInspection
 } from '../../renderer/src/lib/replay/inspection'
 import { projectReplayScene } from '../../renderer/src/lib/replay/scene'
 import { createHash, randomUUID } from 'node:crypto'
+import { captureRecordedObservationSelection } from '../../shared/recorded-observation-selection'
 import type { CallerContext } from '../caller-context'
 import type { ReplayReaderApi } from '../../renderer/src/lib/replay/source'
 import { loadReplayDocument } from '../../renderer/src/lib/replay/source'
@@ -11,7 +15,7 @@ import { createResearchReplayTimeline } from '../../renderer/src/lib/replay/reco
 import type { RecordedObservationReader } from '../run-observation/recorded-reader'
 import type { ImmutableInputAuthority } from '../immutable-input-authority'
 import type { NotebookRunRecord } from '../../shared/notebook'
-import type { ReplayStep, ReplayResource } from '../../shared/replay'
+import type { ReplayStep, ReplayResource, ReplayScene } from '../../shared/replay'
 import type { RecordedBrowserPayload } from '../../shared/browser-recording'
 import {
   researchReplayPositionSchema,
@@ -35,6 +39,10 @@ export class ResearchReplayError extends Error {
 }
 export type ResearchReplayDependencies = {
   reader: ReplayReaderApi
+  observationBindings?(
+    document: ReplayDocument,
+    payloads: readonly RecordedObservationPayload[]
+  ): Promise<ResearchReplayObservationBinding[]>
   recordings: RecordedObservationReader
   immutable: Pick<ImmutableInputAuthority, 'resolveVersion' | 'openContent'>
   authorize(target: ResearchReplayTarget): Promise<void>
@@ -185,6 +193,18 @@ export class ResearchReplayService {
         ),
         [...supportingResourceIds]
       )
+      let observationBindings: ResearchReplayObservationBinding[] = []
+      try {
+        observationBindings =
+          (await this.dependencies.observationBindings?.(
+            document,
+            [...payloads.values()].filter(
+              (payload): payload is RecordedObservationPayload => 'archive' in payload
+            )
+          )) ?? []
+      } catch {
+        /* Optional historical association must not prevent ordinary Replay. */
+      }
       const snapshot: Snapshot = {
         viewerId: randomUUID(),
         target,
@@ -192,6 +212,7 @@ export class ResearchReplayService {
         caller,
         data: {
           document: timeline.document,
+          observationBindings: structuredClone(observationBindings),
           timing: {
             recordedTimeOrigins: timeline.recordedTimeOrigins,
             coverage: timeline.coverage,
@@ -253,6 +274,7 @@ export class ResearchReplayService {
           stepCount: branch.steps.length
         })),
         recordings: row.data.recordings,
+        observationBindings: row.data.observationBindings,
         recordingsTruncated: row.data.recordingsTruncated,
         issues: doc.issues
       }
@@ -386,6 +408,56 @@ export class ResearchReplayService {
     if (!branch || !originalStep || position.timeMs > branch.durationMs)
       throw new ResearchReplayError('invalid')
     const origin = row.origins[position.branchId]
+    let observation: ResearchReplaySelection['observation']
+    let observationRunId: string | undefined
+    let observationTimeMs: number | undefined
+    if (position.observation) {
+      if (
+        position.scope === 'session' ||
+        position.notebookRunId ||
+        position.inspectStep ||
+        position.resourceId ||
+        position.recordingId ||
+        position.offsetMs !== undefined ||
+        origin === undefined
+      )
+        throw new ResearchReplayError('invalid')
+      const descriptor = row.data.recordings.find(
+        (item) => item.id === position.observation!.recordingId
+      )
+      const payload = descriptor && row.payloads.get(descriptor.id)
+      if (
+        !descriptor ||
+        descriptor.kind !== 'run-observation' ||
+        !payload ||
+        !('archive' in payload)
+      )
+        throw new ResearchReplayError('forbidden', 403)
+      const binding = row.data.observationBindings?.find(
+        (item) =>
+          item.recordingId === payload.archive.recordingId &&
+          item.branchIds.includes(position.branchId) &&
+          (['projectId', 'sessionId', 'artifactId', 'versionId'] as const).every(
+            (key) => item.target[key] === descriptor.target[key]
+          )
+      )
+      const record = payload.archive.records.find(
+        (item) => item.stepKey === position.observation!.stepKey
+      )
+      const resource = row.data.document.resources.find((item) => item.id === descriptor.id)
+      if (
+        !binding ||
+        !record ||
+        resource?.checksum !== binding.archiveChecksum ||
+        !originalStep.runs.some((run) => run.runId === binding.runId) ||
+        record.observedAt < origin ||
+        record.observedAt > origin + position.timeMs
+      )
+        throw new ResearchReplayError('invalid')
+      observation = captureRecordedObservationSelection(payload, record.stepKey)
+      observationRunId = binding.runId
+      observationTimeMs = record.observedAt - origin
+    }
     if (
       (position.notebookRunId || position.inspectStep) &&
       (Boolean(position.notebookRunId && position.inspectStep) ||
@@ -395,25 +467,69 @@ export class ResearchReplayService {
         position.offsetMs !== undefined)
     )
       throw new ResearchReplayError('invalid')
-    const scene = position.notebookRunId
-      ? projectReplayNotebookInspection(
-          row.data.document,
-          position.branchId,
-          position.stepId,
-          position.notebookRunId,
-          position.timeMs,
-          origin
-        )
-      : position.inspectStep
-        ? projectReplayStepInspection(
+    const observedRun = originalStep.runs.find((run) => run.runId === observationRunId)
+    // An operation may have a saved preparing state before its eventual Notebook run exists.
+    // Keep the actual evidence cutoff and only identify the owning research step; do not seek
+    // forward to the run's start or attach the code/results that became available later.
+    const beforeRun =
+      observationTimeMs !== undefined &&
+      observedRun &&
+      (observationTimeMs < originalStep.startMs ||
+        observation!.record.observedAt < observedRun.startedAt)
+    const earlyObservationScene: ReplayScene | undefined = beforeRun
+      ? {
+          ...projectReplayScene(row.data.document, position.branchId, observationTimeMs!, origin),
+          step: {
+            id: originalStep.id,
+            branchId: originalStep.branchId,
+            kind: originalStep.kind,
+            startMs: originalStep.startMs,
+            endMs: originalStep.endMs,
+            durationMs: originalStep.durationMs,
+            activities: [],
+            runs: [],
+            resourceIds: [],
+            evidence: [],
+            issues: []
+          },
+          stepIndex: branch.steps.indexOf(originalStep),
+          phase: 'activity',
+          showResults: false,
+          messageCharacters: 0,
+          visibleEvidence: [],
+          visibleResourceIds: []
+        }
+      : undefined
+    const scene =
+      earlyObservationScene ??
+      (observationRunId
+        ? projectReplayNotebookInspection(
             row.data.document,
             position.branchId,
             position.stepId,
-            position.timeMs,
-            origin,
-            position.inspectStep === 'saved-history'
+            observationRunId,
+            observationTimeMs!,
+            origin
           )
-        : projectReplayScene(row.data.document, position.branchId, position.timeMs, origin)
+        : position.notebookRunId
+          ? projectReplayNotebookInspection(
+              row.data.document,
+              position.branchId,
+              position.stepId,
+              position.notebookRunId,
+              position.timeMs,
+              origin
+            )
+          : position.inspectStep
+            ? projectReplayStepInspection(
+                row.data.document,
+                position.branchId,
+                position.stepId,
+                position.timeMs,
+                origin,
+                position.inspectStep === 'saved-history'
+              )
+            : projectReplayScene(row.data.document, position.branchId, position.timeMs, origin))
     if (!scene?.step || scene.step.id !== originalStep.id) throw new ResearchReplayError('invalid')
     const step = scene.step
     if (
@@ -491,10 +607,12 @@ export class ResearchReplayService {
     }
     const serialized = JSON.stringify(visibleStep),
       truncated = serialized.length > 12000
+    const selectionId = randomUUID()
+    const selectedAt = this.now()
     const selected: ResearchReplaySelection = {
-      selectionId: randomUUID(),
+      selectionId,
       viewerId,
-      selectedAt: this.now(),
+      selectedAt,
       source: row.data.document.source,
       position,
       step: visibleStep,
@@ -503,6 +621,12 @@ export class ResearchReplayService {
       phase: scene.phase,
       ...(resource ? { resource, inspection: 'saved-resource' as const } : {}),
       ...(moment ? { moment, inspection: 'recorded-moment' as const } : {}),
+      ...(observation
+        ? {
+            observation: { ...observation, selectionId, selectedAt },
+            inspection: 'recorded-observation' as const
+          }
+        : {}),
       truncated
     }
     if (bytes(selected) > 512 * 1024) throw new ResearchReplayError('oversized', 413)

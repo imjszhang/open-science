@@ -186,3 +186,42 @@ describe('authoritative research timing and supporting files', () => {
     }
   })
 })
+
+describe('verified observation bindings in the research read model', () => {
+  it('exposes Main-resolved bindings without changing ordinary recorded payloads', async () => {
+    const payload = recordedFixture().payload
+    const h = setup(payload)
+    const binding = {
+      target: payload.receiving,
+      recordingId: payload.archive.recordingId,
+      archiveChecksum: h.document.resources[0].checksum!,
+      runId: 'receiver-run',
+      branchIds: ['a'],
+      basis: 'import-receipt' as const
+    }
+    h.dependencies.observationBindings = vi.fn(async () => [binding])
+    vi.spyOn(replaySource, 'loadReplayDocument').mockResolvedValueOnce(h.document)
+    const view = await h.service.open(h.target, h.caller)
+    expect(h.dependencies.observationBindings).toHaveBeenCalledWith(h.document, [payload])
+    expect((await h.service.document(view.viewerId, h.caller)).observationBindings).toEqual([
+      binding
+    ])
+    expect(await h.service.read(view.viewerId, { kind: 'overview' }, h.caller)).toMatchObject({
+      observationBindings: [binding]
+    })
+    binding.runId = 'changed-outside'
+    // The bindings join the same immutable viewer snapshot as the saved source document.
+    expect((await h.service.document(view.viewerId, h.caller)).observationBindings?.[0].runId).toBe(
+      'receiver-run'
+    )
+  })
+  it('keeps the ordinary Replay readable when an optional binding cannot be established', async () => {
+    const h = setup(recordedFixture().payload)
+    h.dependencies.observationBindings = vi.fn(async () => {
+      throw new Error('receipt unavailable')
+    })
+    vi.spyOn(replaySource, 'loadReplayDocument').mockResolvedValueOnce(h.document)
+    const view = await h.service.open(h.target, h.caller)
+    expect((await h.service.document(view.viewerId, h.caller)).observationBindings).toEqual([])
+  })
+})

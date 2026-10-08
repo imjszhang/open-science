@@ -7341,6 +7341,23 @@
     "Result source": "結果來源",
     "All research materials": "所有研究資料",
     "View all results": "檢視所有結果",
-    "Showing all saved results from this source, including later records.": "顯示此來源儲存的所有結果，包括後續記錄。"
+    "Showing all saved results from this source, including later records.": "顯示此來源儲存的所有結果，包括後續記錄。",
+    "No execution status has been recorded at this point.": "此時尚未儲存執行狀態。",
+    "Recorded execution status": "已記錄的執行狀態",
+    "Last observed at {{time}}": "上次記錄於 {{time}}",
+    "No newer status record at this playback position.": "目前播放位置沒有更新的狀態記錄。",
+    "This is the last saved observation, not a continuous activity log.": "此處顯示最近一次儲存的觀察記錄，並非連續活動日誌。",
+    "Sensitive content was removed from this observation.": "這筆觀察記錄中的敏感內容已移除。",
+    "Some observations were not saved. The recorded process may be incomplete.": "部分觀察記錄未儲存，記錄的過程可能不完整。",
+    "No linked intermediate observations are available for this run.": "此次執行沒有可關聯的中間觀察記錄。",
+    "Saved execution observations": "已儲存的執行觀察記錄",
+    "Ask about this status": "詢問此狀態",
+    "Could not prepare this observation reference.": "無法準備這筆觀察記錄的引用。",
+    "Next status record": "下一筆狀態記錄",
+    "Recorded state reference": "已記錄狀態的引用",
+    "Copy state reference": "複製狀態引用",
+    "Could not link saved execution states.": "無法關聯已儲存的執行狀態。",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "部分已儲存的狀態無法關聯到 Notebook 執行，請單獨開啟對應記錄。",
+    "Reading saved execution states…": "正在讀取已儲存的執行狀態…"
   }
 }

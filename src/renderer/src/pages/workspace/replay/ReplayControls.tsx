@@ -70,6 +70,7 @@ export type ReplayControlsProps = {
   durationMs: number
   recordedCoverage?: readonly ReplayRecordedRange[]
   recordedTimeOrigin?: number
+  nextObservationPosition?: number
   stepIndex: number
   steps: readonly ReplayStep[]
   resources?: readonly ReplayResource[]
@@ -736,6 +737,16 @@ export const ReplayControls = (props: ReplayControlsProps): React.JSX.Element =>
           ) : null}
         </PopoverContent>
       </Popover>
+      {props.nextObservationPosition !== undefined ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 max-w-full px-2 text-xs"
+          onClick={() => props.onSeek(props.nextObservationPosition!)}
+        >
+          {t('Next status record')}
+        </Button>
+      ) : null}
       {props.skipNoNewRecords !== undefined && !props.compact ? (
         <label className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
           <input

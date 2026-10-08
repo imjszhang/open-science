@@ -34,6 +34,50 @@ describe('research Replay SDK', () => {
       )
     }
   })
+  it('keeps archived state selectors separate from the original research step and reads the same selection back', async () => {
+    const selected = {
+      selectionId: 'saved-state',
+      observation: {
+        recordingId: 'archive',
+        stepKey: 'observation-0',
+        record: { observedAt: 1185 }
+      }
+    }
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: selected }), {
+          headers: { 'content-type': 'application/json' }
+        })
+    )
+    const client = new OpenScienceClient({
+      baseUrl: 'http://127.0.0.1:44100',
+      token: 'test',
+      fetch
+    })
+    const request = {
+      viewerId: 'viewer',
+      position: {
+        branchId: 'branch',
+        stepId: 'original-notebook-step',
+        timeMs: 40000,
+        observation: { recordingId: 'archive-descriptor', stepKey: 'observation-0' }
+      }
+    }
+    expect(await client.replays.select(request)).toEqual(selected)
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/replays/select'),
+      expect.objectContaining({ body: JSON.stringify(request) })
+    )
+    expect(
+      await client.replays.selection({ viewerId: 'viewer', selectionId: selected.selectionId })
+    ).toEqual(selected)
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/replays/selection'),
+      expect.objectContaining({
+        body: JSON.stringify({ viewerId: 'viewer', selectionId: 'saved-state' })
+      })
+    )
+  })
   it('rejects missing receiver scope and unbound reads before transport', () => {
     const fetch = vi.fn(),
       client = new OpenScienceClient({ baseUrl: 'http://127.0.0.1:44100', token: 'test', fetch })

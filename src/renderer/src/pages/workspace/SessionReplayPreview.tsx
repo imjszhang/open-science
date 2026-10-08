@@ -423,6 +423,9 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
               </>
             }
             recordedCoverage={recordedMaterials.timelineCoverage}
+            executionTracks={recordedMaterials.executionTracks}
+            executionNotice={recordedMaterials.executionNotice}
+            onAskObservation={recordedMaterials.askObservation}
             recordedTimeOrigins={recordedMaterials.recordedTimeOrigins}
             expanded={expanded}
             onToggleExpanded={() =>

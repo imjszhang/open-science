@@ -4,7 +4,7 @@ import { Button } from '../src/components/ui/button'
 
 type ReferencePanelProps = {
   reference: string
-  kind?: 'step' | 'file' | 'moment'
+  kind?: 'step' | 'file' | 'moment' | 'observation'
   observedAt?: number
   referencePositionMs?: number
   watchingPositionMs?: number
@@ -26,19 +26,23 @@ const ReferencePanelContent = ({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const text = useRef<HTMLTextAreaElement>(null)
   const referenceLabel =
-    kind === 'moment'
-      ? t('Recorded moment reference')
-      : kind === 'file'
-        ? t('Recorded file version')
-        : t('Recorded step reference')
+    kind === 'observation'
+      ? t('Recorded state reference')
+      : kind === 'moment'
+        ? t('Recorded moment reference')
+        : kind === 'file'
+          ? t('Recorded file version')
+          : t('Recorded step reference')
   const copyLabel =
     copyState === 'copied'
       ? t('Copied')
-      : kind === 'moment'
-        ? t('Copy moment reference')
-        : kind === 'file'
-          ? t('Copy file reference')
-          : t('Copy step reference')
+      : kind === 'observation'
+        ? t('Copy state reference')
+        : kind === 'moment'
+          ? t('Copy moment reference')
+          : kind === 'file'
+            ? t('Copy file reference')
+            : t('Copy step reference')
   const copy = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(reference)

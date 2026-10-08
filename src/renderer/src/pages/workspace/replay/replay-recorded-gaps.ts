@@ -58,6 +58,8 @@ export function advanceResearchReplay(input: {
   steps: readonly ReplayStep[]
   ranges: readonly ReplayRecordedRange[]
   skip: boolean
+  /** Saved observation boundaries share the clock without becoming research steps. */
+  observationTimes?: readonly number[]
 }): { positionMs: number; skipped?: { from: number; to: number } } {
   const positionMs = Math.min(input.durationMs, input.positionMs + Math.max(0, input.elapsedMs))
   if (!input.skip || input.origin === undefined || !Number.isFinite(input.origin))
@@ -65,6 +67,9 @@ export function advanceResearchReplay(input: {
   const origin = input.origin
   // A short reading hold preserves point records. It does not extend their recorded duration.
   const ranges = [
+    ...(input.observationTimes ?? [])
+      .filter(Number.isFinite)
+      .map((time) => ({ start: time - origin, end: time - origin + 3000 })),
     ...input.steps.flatMap((step) =>
       [step.recordedAt, step.recordedEndAt].flatMap((time) =>
         time !== undefined && Number.isFinite(time)

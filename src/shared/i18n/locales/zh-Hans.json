@@ -7341,6 +7341,23 @@
     "Result source": "结果来源",
     "All research materials": "全部研究材料",
     "View all results": "查看全部结果",
-    "Showing all saved results from this source, including later records.": "显示此来源保存的全部结果，包括后续记录。"
+    "Showing all saved results from this source, including later records.": "显示此来源保存的全部结果，包括后续记录。",
+    "No execution status has been recorded at this point.": "此时尚未保存执行状态。",
+    "Recorded execution status": "已记录的执行状态",
+    "Last observed at {{time}}": "上次记录于 {{time}}",
+    "No newer status record at this playback position.": "当前播放位置没有更新的状态记录。",
+    "This is the last saved observation, not a continuous activity log.": "这里显示最近一次保存的观察记录，并非连续活动日志。",
+    "Sensitive content was removed from this observation.": "这条观察记录中的敏感内容已移除。",
+    "Some observations were not saved. The recorded process may be incomplete.": "部分观察记录未保存，记录的过程可能不完整。",
+    "No linked intermediate observations are available for this run.": "此次运行没有可关联的中间观察记录。",
+    "Saved execution observations": "已保存的执行观察记录",
+    "Ask about this status": "询问此状态",
+    "Could not prepare this observation reference.": "无法准备这条观察记录的引用。",
+    "Next status record": "下一条状态记录",
+    "Recorded state reference": "已记录状态的引用",
+    "Copy state reference": "复制状态引用",
+    "Could not link saved execution states.": "无法关联已保存的执行状态。",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "部分已保存的状态无法关联到 Notebook 运行，请单独打开对应记录。",
+    "Reading saved execution states…": "正在读取已保存的执行状态…"
   }
 }

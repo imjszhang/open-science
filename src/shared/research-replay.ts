@@ -1,6 +1,12 @@
+import type { ResearchReplayObservationBinding } from './research-replay-observations'
+export type { ResearchReplayObservationBinding } from './research-replay-observations'
 import { z } from 'zod'
 import type { ReplayDocument, ReplayStep, ReplayResource, ReplayNotebookRunDetails } from './replay'
-import type { RecordedEvidencePayload, RecordedObservationTarget } from './run-observation-recorded'
+import type {
+  RecordedEvidencePayload,
+  RecordedObservationTarget,
+  RecordedRunObservationSelection
+} from './run-observation-recorded'
 import type { BrowserRecordingMoment } from './browser-recording'
 
 // Application read model only: no change to the .science package protocol.
@@ -18,6 +24,8 @@ export const researchReplayPositionSchema = z
     recordedAt: z.number().finite().nonnegative().optional(),
     resourceId: id.optional(),
     recordingId: id.optional(),
+    /** A saved observation within a verified recording; never a new research step. */
+    observation: z.object({ recordingId: id, stepKey: id }).strict().optional(),
     offsetMs: z.number().finite().nonnegative().optional()
   })
   .strict()
@@ -74,6 +82,7 @@ export type ResearchReplayTiming = {
   unalignedBranchIds: readonly string[]
 }
 export type ResearchReplayDocument = {
+  observationBindings?: readonly ResearchReplayObservationBinding[]
   document: ReplayDocument
   /** The source owner computes this before collapsing technical steps; consumers must not derive it again. */
   timing: ResearchReplayTiming
@@ -93,9 +102,10 @@ export type ResearchReplaySelection = {
   evidence: ReplayStep['evidence']
   resource?: ReplayResource
   moment?: BrowserRecordingMoment
+  observation?: RecordedRunObservationSelection
   truncated: boolean
   phase: 'input' | 'activity' | 'result'
-  inspection?: 'saved-resource' | 'recorded-moment'
+  inspection?: 'saved-resource' | 'recorded-moment' | 'recorded-observation'
 }
 export type ResearchReplayAccess = {
   mode: 'research'

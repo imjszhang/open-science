@@ -80,6 +80,40 @@ The results view distinguishes files known by the selected time from all saved f
 publication time explicitly, and keeps technical attachments collapsed by default. Final/intermediate
 labels come from explicit source metadata rather than file names or the viewer's selected step.
 
+## Saved intermediate execution states
+
+Optional execution tracks enrich the existing research clock. They do not add Replay steps,
+change step IDs, extend the timeline, or mount a second player. Notebook, conversation, footage,
+and results remain separate material adapters; ordinary Notebook cells and live observation are
+unchanged. Native binding reads are independent of playback readiness and have local retry.
+
+Main associates an exact observation Artifact Version with an existing Notebook Run. Native
+identity must match the receiving project/session; imports use the package owner's validated
+receipt mapping after exact-Version/checksum admission. Run invocation, kernel and recorded
+start/end/status must agree. Synthetic standalone-viewer IDs, proximity in time, file names and
+the presence of only one Run are never association evidence. The full import identity map stays
+in Main. Conflicting archives are not arbitrarily combined. Old packages and re-exported working
+copies without a valid mapping retain separate recorded-material browsing and final Notebook
+output, with an explanation of the missing association.
+
+`recorded-execution` projects only the last saved observation at or before the master clock.
+Whole saved log snapshots replace one another; cumulative, truncated and rotated tails are never
+concatenated. Reverse seeking retracts later observations. Notebook shows the intermediate state
+before the existing final-output gate, then keeps it in a collapsed history section. The context
+bar names the last observation time and makes sparse coverage explicit. Next-status navigation
+and optional gap skipping include saved observation timestamps; footage navigation remains
+independent. No missing activity is simulated.
+
+An observation Ask freezes the receiving archive Version, `recordingId`, `stepKey` and original
+record. Native Replay reuses the discussion draft/recovery flow without sending a message.
+External `replays.select` accepts an optional `observation: {recordingId, stepKey}` selector, where
+`recordingId` is the research recording descriptor ID. The original Notebook-owning `stepId`
+remains required. `timeMs`/`recordedAt` describe the viewing position; the reference's evidence
+cutoff is `observation.record.observedAt`. Main reads the authorized saved bytes and gates attached
+Notebook evidence at that earlier cutoff. Subsequent playback cannot change the captured
+selection. The browser offers a copyable state reference. These are application read-model
+additions, with no `.science` format or execution API changes.
+
 ## External reads
 
 `client.replays.open` creates a local, session-scoped, read-only viewer. Existing

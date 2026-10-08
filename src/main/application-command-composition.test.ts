@@ -232,7 +232,7 @@ const invocation = (
 }
 
 describe('application command composition', () => {
-  it('leaves the six local observation methods with their scoped IPC owner instead of installing another command router', async () => {
+  it('leaves local observation methods with their scoped IPC owner instead of installing another command router', async () => {
     const composition = createApplicationCommandComposition(dependencies())
     const observations = RENDERER_CONTRACT_CATALOG.filter(
       (contract) => contract.capability === 'run-observation'
@@ -240,10 +240,25 @@ describe('application command composition', () => {
     expect(observations.map((contract) => contract.channel)).toEqual([
       'run-observation:open',
       'run-observation:openRecorded',
+      'run-observation:readProjectRecording',
+      'run-observation:readRecorded',
+      'run-observation:recordingFileSelection',
       'run-observation:recordingSelection',
       'run-observation:recordingStatus',
       'run-observation:revoke',
-      'run-observation:selection'
+      'run-observation:selection',
+      'run-observation:selectRecordedFile',
+      'run-observation:selectRecordingFile',
+      'project-recording:inspect',
+      'project-recording:openRecorded',
+      'project-recording:pause',
+      'project-recording:read',
+      'project-recording:resume',
+      'project-recording:selection',
+      'project-recording:selectMoment',
+      'project-recording:start',
+      'project-recording:status',
+      'project-recording:stop'
     ])
     for (const contract of observations) {
       expect(contract.applicationCommand).toBeUndefined()
@@ -332,6 +347,7 @@ describe('application command composition', () => {
       'session-replay:get-selection-snapshot',
       'session-replay:list',
       'session-replay:list-selection-snapshots',
+      'session-replay:read-observation-bindings',
       'session-replay:save-selection-snapshot',
       'session-replay:save-view',
       'session-replay:set-research-membership',

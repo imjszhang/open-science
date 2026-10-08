@@ -1,3 +1,7 @@
+import {
+  readObservationBindingsRequestSchema,
+  readObservationBindingsResultSchema
+} from './research-replay-observations'
 import { persistedChatSessionCodec } from './session-persistence'
 import { z } from 'zod'
 import { defineApplicationCommandContract, validationCodec } from './application-command-contract'
@@ -212,6 +216,10 @@ export const setResearchMembershipRequestSchema = z
 export type SetResearchMembershipRequest = z.infer<typeof setResearchMembershipRequestSchema>
 
 export const sessionReplayCommandContracts = {
+  readObservationBindings: defineApplicationCommandContract(
+    validationCodec(z.tuple([readObservationBindingsRequestSchema])),
+    validationCodec(readObservationBindingsResultSchema)
+  ),
   setResearchMembership: defineApplicationCommandContract(
     validationCodec(z.tuple([setResearchMembershipRequestSchema])),
     persistedChatSessionCodec

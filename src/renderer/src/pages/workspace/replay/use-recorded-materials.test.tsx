@@ -199,6 +199,7 @@ const preview = (
 })
 const runtime = { start: vi.fn(), stop: vi.fn(), list: vi.fn(), get: vi.fn() }
 const api = {
+  sessionReplay: { readObservationBindings: vi.fn() },
   researchDemos: { ...runtime, readHistory: vi.fn() },
   observations: {
     ...runtime,
@@ -887,3 +888,96 @@ it.each(['artifact', 'upload'] as const)(
     expectNoExecution()
   }
 )
+
+it('stages only the selected immutable intermediate observation in the existing discussion flow', async () => {
+  const document = documentFixture()
+  document.branches = [
+    {
+      id: 'main',
+      kind: 'conversation',
+      durationMs: 90,
+      steps: [
+        {
+          id: 'owner',
+          branchId: 'main',
+          kind: 'notebook',
+          recordedAt: 10,
+          recordedEndAt: 100,
+          startMs: 0,
+          endMs: 90,
+          durationMs: 90,
+          activities: [],
+          resourceIds: [],
+          evidence: [],
+          issues: [],
+          runs: [
+            {
+              runId: 'mapped-run',
+              cellId: 'cell',
+              source: 'agent',
+              kernelKind: 'bash',
+              status: 'completed',
+              startedAt: 10,
+              endedAt: 100
+            }
+          ]
+        }
+      ]
+    }
+  ]
+  const payload = legacyPayload()
+  document.resources = [
+    {
+      ...receiving,
+      id: receiving.versionId,
+      name: 'States.json',
+      availability: 'recorded',
+      checksum: 'a'.repeat(64)
+    }
+  ]
+  const discovered = discovery([{ ...candidate(), format: undefined }])
+  api.observations.readRecorded.mockResolvedValue(payload)
+  api.sessionReplay.readObservationBindings.mockResolvedValue({
+    sourceFingerprint: document.source.fingerprint,
+    bindings: [
+      {
+        target: receiving,
+        recordingId: payload.archive.recordingId,
+        archiveChecksum: 'a'.repeat(64),
+        runId: 'mapped-run',
+        branchIds: ['main'],
+        basis: 'import-receipt'
+      }
+    ],
+    unavailableTargets: []
+  })
+  const { result } = renderHook(() => useRecordedMaterials(document, discovered))
+  await waitFor(() => expect(result.current.executionTracks).toHaveLength(1))
+  const track = result.current.executionTracks![0]
+  const selected = track.select(track.snapshots[0])
+  const watching = { branchId: 'main', stepId: 'owner', runId: 'mapped-run', timeMs: 40 }
+  await act(async () => {
+    await result.current.askObservation(selected, watching)
+  })
+  const captured = recovery.onClick.mock.calls[0][0]
+  expect(captured).toMatchObject({
+    kind: 'recorded-run-observation',
+    receiving,
+    stepKey: 'legacy-step',
+    record: { observedAt: 20, run: { logs: { stdout: { text: 'Saved output' } } } }
+  })
+  expect(captured.selectionId).toBeTruthy()
+  payload.archive.records[0].run!.logs.stdout.text = 'later mutation'
+  expect(captured.record.run.logs.stdout.text).toBe('Saved output')
+  await expect(result.current.askObservation(selected, { ...watching, timeMs: 0 })).rejects.toThrow(
+    'unavailable'
+  )
+  await expect(
+    result.current.askObservation(
+      { ...selected, receiving: { ...receiving, versionId: 'forged' } },
+      watching
+    )
+  ).rejects.toThrow('unavailable')
+  expect(recovery.onClick).toHaveBeenCalledTimes(1)
+  expectNoExecution()
+})

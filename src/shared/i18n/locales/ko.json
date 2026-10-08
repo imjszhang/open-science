@@ -7339,6 +7339,23 @@
     "Result source": "결과 출처",
     "All research materials": "모든 연구 자료",
     "View all results": "모든 결과 보기",
-    "Showing all saved results from this source, including later records.": "이후 기록을 포함하여 이 출처에 저장된 모든 결과를 표시합니다."
+    "Showing all saved results from this source, including later records.": "이후 기록을 포함하여 이 출처에 저장된 모든 결과를 표시합니다.",
+    "No execution status has been recorded at this point.": "이 시점에는 기록된 실행 상태가 없습니다.",
+    "Recorded execution status": "기록된 실행 상태",
+    "Last observed at {{time}}": "마지막 기록: {{time}}",
+    "No newer status record at this playback position.": "현재 재생 위치에는 더 새로운 상태 기록이 없습니다.",
+    "This is the last saved observation, not a continuous activity log.": "마지막으로 저장된 관찰 기록이며, 연속 활동 로그가 아닙니다.",
+    "Sensitive content was removed from this observation.": "이 관찰 기록에서 민감한 내용이 제거되었습니다.",
+    "Some observations were not saved. The recorded process may be incomplete.": "일부 관찰 기록이 저장되지 않아 기록된 프로세스가 불완전할 수 있습니다.",
+    "No linked intermediate observations are available for this run.": "이 실행에 연결된 중간 관찰 기록이 없습니다.",
+    "Saved execution observations": "저장된 실행 관찰 기록",
+    "Ask about this status": "이 상태에 대해 질문",
+    "Could not prepare this observation reference.": "이 관찰 기록의 참조를 준비하지 못했습니다.",
+    "Next status record": "다음 상태 기록",
+    "Recorded state reference": "기록된 상태 참조",
+    "Copy state reference": "상태 참조 복사",
+    "Could not link saved execution states.": "저장된 실행 상태를 연결하지 못했습니다.",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "일부 저장된 상태를 Notebook 실행에 연결하지 못했습니다. 해당 기록을 별도로 여세요.",
+    "Reading saved execution states…": "저장된 실행 상태 읽는 중…"
   }
 }

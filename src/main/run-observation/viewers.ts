@@ -1,3 +1,4 @@
+import { captureRecordedObservationSelection } from '../../shared/recorded-observation-selection'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallerContext } from '../caller-context'
 import {
@@ -542,26 +543,14 @@ export class ObservationViewers {
           'unavailable',
           'A project recording has no Notebook observation step.'
         )
-      const step = payload.archive.records.find((entry) => entry.stepKey === stepKey)
-      if (!step)
+      let selection: RecordedRunObservationSelection
+      try {
+        selection = captureRecordedObservationSelection(payload, stepKey, {
+          selectionId: randomUUID(),
+          selectedAt: this.now()
+        })
+      } catch {
         throw new ObservationViewerError('unavailable', 'The recorded step is unavailable.')
-      const selection: RecordedRunObservationSelection = {
-        kind: 'recorded-run-observation',
-        selectionId: randomUUID(),
-        selectedAt: this.now(),
-        receiving: payload.receiving,
-        recordingId: payload.archive.recordingId,
-        stepKey,
-        record: step,
-        executionContext: structuredClone(
-          payload.executionContext ?? {
-            purpose: 'unknown',
-            conditionChanges: []
-          }
-        ),
-        mediaKeys: payload.archive.media
-          .filter((media) => media.stepKeys.includes(stepKey))
-          .map((media) => media.mediaKey)
       }
       // Keep an independent server-owned cutoff. Consumer mutations cannot change later readback.
       record.selection = structuredClone(selection)

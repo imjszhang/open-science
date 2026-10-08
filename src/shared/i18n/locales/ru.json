@@ -7808,6 +7808,23 @@
     "Result source": "Источник результатов",
     "All research materials": "Все материалы исследования",
     "View all results": "Показать все результаты",
-    "Showing all saved results from this source, including later records.": "Показаны все сохранённые результаты из этого источника, включая более поздние записи."
+    "Showing all saved results from this source, including later records.": "Показаны все сохранённые результаты из этого источника, включая более поздние записи.",
+    "No execution status has been recorded at this point.": "На этот момент состояние выполнения ещё не записано.",
+    "Recorded execution status": "Записанное состояние выполнения",
+    "Last observed at {{time}}": "Последнее наблюдение: {{time}}",
+    "No newer status record at this playback position.": "В этой позиции воспроизведения нет более новой записи состояния.",
+    "This is the last saved observation, not a continuous activity log.": "Это последнее сохранённое наблюдение, а не непрерывный журнал действий.",
+    "Sensitive content was removed from this observation.": "Из этого наблюдения удалены конфиденциальные данные.",
+    "Some observations were not saved. The recorded process may be incomplete.": "Некоторые наблюдения не сохранены. Запись процесса может быть неполной.",
+    "No linked intermediate observations are available for this run.": "Для этого запуска нет связанных промежуточных наблюдений.",
+    "Saved execution observations": "Сохранённые наблюдения выполнения",
+    "Ask about this status": "Спросить об этом состоянии",
+    "Could not prepare this observation reference.": "Не удалось подготовить ссылку на это наблюдение.",
+    "Next status record": "Следующая запись состояния",
+    "Recorded state reference": "Ссылка на записанное состояние",
+    "Copy state reference": "Копировать ссылку на состояние",
+    "Could not link saved execution states.": "Не удалось связать сохранённые состояния выполнения.",
+    "Some saved states could not be linked to a Notebook run. Open their recording separately.": "Некоторые сохранённые состояния не удалось связать с запуском Notebook. Откройте соответствующую запись отдельно.",
+    "Reading saved execution states…": "Чтение сохранённых состояний выполнения…"
   }
 }

@@ -1,3 +1,11 @@
+import { ErrorNotice } from '@/components/error-notice'
+import {
+  recordedExecutionAt,
+  recordedExecutionTimes,
+  type RecordedExecutionTrack,
+  type RecordedExecutionAskContext
+} from '@/lib/replay/recorded-execution'
+import type { RecordedRunObservationSelection } from '../../../../../shared/run-observation-recorded'
 import { OverlayPortalContainer } from '@/components/ui/overlay-portal-container'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { useSessionReplayStore } from '@/stores/session-replay-store'
@@ -151,6 +159,13 @@ export type ReplayPanelProps = {
   /** Opt in only for the read-only original research surface. */
   presentationMode?: 'research'
   footerReference?: React.ReactNode
+  /** Undefined opts out; an empty list enables the legacy missing-observation explanation. */
+  executionTracks?: readonly RecordedExecutionTrack[]
+  executionNotice?: React.ReactNode
+  onAskObservation?: (
+    selection: RecordedRunObservationSelection,
+    context: RecordedExecutionAskContext
+  ) => Promise<void> | void
   info?: React.ReactNode
   host?: ReplayPanelHost | null
   /** Actual recording coverage; timestamps are absolute, never inferred activity durations. */
@@ -238,6 +253,9 @@ const ReplayPanelContent = ({
   document: incomingDocument,
   presentationMode,
   footerReference,
+  executionTracks,
+  executionNotice,
+  onAskObservation,
   info,
   host = nativeReplayHost,
   recordedCoverage,
@@ -353,6 +371,9 @@ const ReplayPanelContent = ({
   const [positionMs, setPositionMs] = useState(initial.positionMs)
   const [speed, setSpeed] = useState<ReplaySpeed>(initial.speed)
   const [playing, setPlaying] = useState(false)
+  const [observationPending, setObservationPending] = useState(false)
+  const [observationError, setObservationError] = useState<string>()
+  const observationPendingRef = useRef(false)
   const [skipNoNewRecords, setSkipNoNewRecords] = useState(false)
   const [skipped, setSkipped] = useState<{ from: number; to: number }>()
   const skippedFrame = useRef<{ from: number; to: number } | undefined>(undefined)
@@ -440,6 +461,21 @@ const ReplayPanelContent = ({
       : result
   }, [replayDocument, branchId, positionMs, live, inspection, recordedTimeOrigins])
   const branch = replayDocument.branches.find((item) => item.id === scene.branchId)
+  const executionStates = useMemo(() => {
+    const origin = recordedTimeOrigins?.[scene.branchId]
+    return !live && origin !== undefined
+      ? executionTracks
+          ?.filter((track) => track.branchId === scene.branchId)
+          .map((track) => recordedExecutionAt(track, origin + scene.positionMs))
+      : undefined
+  }, [executionTracks, recordedTimeOrigins, scene.branchId, scene.positionMs, live])
+  const observationTimes = useMemo(
+    () => recordedExecutionTimes(executionTracks ?? [], scene.branchId),
+    [executionTracks, scene.branchId]
+  )
+  const nextObservationTime = observationTimes.find(
+    (time) => time > (recordedTimeOrigins?.[scene.branchId] ?? Infinity) + scene.positionMs
+  )
   const currentObservation = live
     ? observationHistory.find((snapshot) => observationRecordId(snapshot) === scene.step?.id)
     : undefined
@@ -602,7 +638,8 @@ const ReplayPanelContent = ({
             origin: recordedTimeOrigins?.[scene.branchId],
             steps: branch?.steps ?? [],
             ranges: recordedCoverage?.[scene.branchId] ?? [],
-            skip: skipNoNewRecords
+            skip: skipNoNewRecords,
+            observationTimes
           })
           if (next.skipped) skippedFrame.current = next.skipped
           return next.positionMs
@@ -624,7 +661,8 @@ const ReplayPanelContent = ({
     recordedTimeOrigins,
     recordedCoverage,
     branch,
-    skipNoNewRecords
+    skipNoNewRecords,
+    observationTimes
   ])
 
   useEffect(() => {
@@ -1009,9 +1047,56 @@ const ReplayPanelContent = ({
   const contentStep = materialViewId === 'notebook' ? notebookStep : (inspectedStep ?? scene.step)
   const contentAction =
     materialViewId !== 'conversation' && materialViewId !== 'notebook' ? materialAction : undefined
-  const askContent = (): void => {
+  const selectedExecution =
+    materialViewId === 'notebook'
+      ? executionStates?.find(
+          (state) =>
+            state.track.runId ===
+            (inspectedContent?.runId ??
+              (contentStep?.runs.length === 1 ? contentStep.runs[0].runId : undefined))
+        )
+      : undefined
+  const observationAction =
+    onAskObservation && selectedExecution?.snapshot ? selectedExecution : undefined
+  const observationActionKey = JSON.stringify([
+    scene.branchId,
+    observationAction?.track.id,
+    observationAction?.snapshot?.stepId
+  ])
+  const askObservation = async (): Promise<void> => {
+    if (
+      !active ||
+      !observationAction?.snapshot ||
+      !onAskObservation ||
+      observationPendingRef.current ||
+      discussionPending
+    )
+      return
+    pause()
+    observationPendingRef.current = true
+    setObservationPending(true)
+    setObservationError(undefined)
+    try {
+      await onAskObservation(observationAction.track.select(observationAction.snapshot), {
+        branchId: scene.branchId,
+        stepId: observationAction.track.stepId,
+        runId: observationAction.track.runId,
+        timeMs: scene.positionMs
+      })
+    } catch {
+      setObservationError(observationActionKey)
+    } finally {
+      observationPendingRef.current = false
+      setObservationPending(false)
+    }
+  }
+  const askContent = (runOnly = false): void => {
     if (!active) return
     pause()
+    if (!runOnly && observationAction) {
+      void askObservation()
+      return
+    }
     if (contentAction) {
       contentAction.onAsk()
       return
@@ -1048,6 +1133,7 @@ const ReplayPanelContent = ({
     if (captured) onAskStep(captured)
   }
   const contentLabel =
+    (observationAction ? t('Ask about this status') : undefined) ??
     contentAction?.label ??
     (materialViewId === 'notebook'
       ? t('Ask about this run')
@@ -1055,6 +1141,7 @@ const ReplayPanelContent = ({
         ? t('Ask about this record')
         : t('Ask about this content'))
   const contentDisabled =
+    observationPending ||
     !active ||
     discussionPending ||
     Boolean(contentAction?.disabled || contentAction?.pending) ||
@@ -1066,9 +1153,11 @@ const ReplayPanelContent = ({
       ? (contentStep?.runs.find((run) => run.runId === inspectedContent?.runId) ??
         contentStep?.runs.at(-1))
       : undefined
-  const referenceRecordedAt = contentAction
-    ? contentAction.recordedAt
-    : (selectedRun?.startedAt ?? contentStep?.recordedAt)
+  const referenceRecordedAt = observationAction?.snapshot
+    ? observationAction.snapshot.observedAt
+    : contentAction
+      ? contentAction.recordedAt
+      : (selectedRun?.startedAt ?? contentStep?.recordedAt)
   const referenceOrigin = recordedTimeOrigins?.[scene.branchId]
   const referencePosition =
     referenceRecordedAt !== undefined &&
@@ -1587,6 +1676,8 @@ const ReplayPanelContent = ({
             materialsOpen={materialsOpen}
             materialsId={materialsId}
             materialViews={materialViews}
+            executionStates={executionStates}
+            executionNotice={executionNotice}
             materialPlayback={{
               branchId: scene.branchId,
               positionMs: scene.positionMs,
@@ -1724,6 +1815,11 @@ const ReplayPanelContent = ({
             : undefined
         }
         onSkipNoNewRecords={setSkipNoNewRecords}
+        nextObservationPosition={
+          nextObservationTime !== undefined
+            ? nextObservationTime - recordedTimeOrigins![scene.branchId]
+            : undefined
+        }
         key={scene.branchId}
         playing={playing}
         recordNavigation={Boolean(live)}
@@ -1780,7 +1876,7 @@ const ReplayPanelContent = ({
               size="sm"
               variant="default"
               disabled={contentDisabled}
-              onClick={askContent}
+              onClick={() => askContent()}
               className="h-8 min-w-0 flex-1 rounded-r-none"
               title={contentAction?.title}
             >
@@ -1816,6 +1912,21 @@ const ReplayPanelContent = ({
                   questionActionChosen.current = false
                 }}
               >
+                {observationAction ? (
+                  <PopoverClose asChild>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      disabled={!active || discussionPending || observationPending}
+                      onClick={() => {
+                        questionActionChosen.current = true
+                        askContent(true)
+                      }}
+                    >
+                      {t('Ask about this run')}
+                    </Button>
+                  </PopoverClose>
+                ) : null}
                 <PopoverClose asChild>
                   <Button
                     variant="ghost"
@@ -1864,6 +1975,18 @@ const ReplayPanelContent = ({
               </PopoverContent>
             </Popover>
           </div>
+          {active && observationError === observationActionKey ? (
+            <ErrorNotice
+              inline
+              title={t('Could not prepare this observation reference.')}
+              primaryButton={{
+                label: t('Try again'),
+                onClick: () => void askObservation(),
+                disabled: !active || !observationAction,
+                loading: observationPending
+              }}
+            />
+          ) : null}
           {footerReference ? <div className="min-w-0 w-full">{footerReference}</div> : null}
         </div>
       ) : null}

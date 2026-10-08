@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import type { ReplayScene, ReplayStep } from '../../../../../shared/replay'
 import { useReplayTranslation } from './replay-presentation'
 import { replayExcerpt } from './replay-content'
+import type { RecordedExecutionState } from '@/lib/replay/recorded-execution'
+import { ReplayExecutionState } from './ReplayExecutionState'
 
 /** Compact historical context survives narrow layouts and material changes. */
 export function ReplayCurrentContext({
@@ -12,13 +14,17 @@ export function ReplayCurrentContext({
   scene,
   steps,
   onHistory,
-  onNotebook
+  onNotebook,
+  executionState,
+  executionWaiting
 }: {
   compact?: boolean
   scene: ReplayScene
   steps: readonly ReplayStep[]
   onHistory: () => void
   onNotebook?: () => void
+  executionState?: RecordedExecutionState
+  executionWaiting?: boolean
 }): React.JSX.Element {
   const { t } = useReplayTranslation()
   const [expanded, setExpanded] = useState(false)
@@ -75,6 +81,11 @@ export function ReplayCurrentContext({
                 ? replayExcerpt(message.content, 6000)
                 : t('No original conversation is saved for this step.')}
             </p>
+            {executionState ? (
+              <div className="mt-3 border-t border-border-200 pt-3">
+                <ReplayExecutionState state={executionState} detail waiting={executionWaiting} />
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-1">
               <PopoverClose asChild>
                 <Button variant="outline" size="sm" onClick={onHistory}>
@@ -91,6 +102,11 @@ export function ReplayCurrentContext({
             </div>
           </PopoverContent>
         </Popover>
+        {executionState ? (
+          <div className="pb-1">
+            <ReplayExecutionState state={executionState} waiting={executionWaiting} />
+          </div>
+        ) : null}
       </section>
     )
   return (
@@ -128,6 +144,9 @@ export function ReplayCurrentContext({
           {t('No original conversation is saved for this step.')}
         </p>
       )}
+      {executionState ? (
+        <ReplayExecutionState state={executionState} detail={expanded} waiting={executionWaiting} />
+      ) : null}
       {expanded ? (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-text-300">
           <span>{t('Only saved research records are shown.')}</span>

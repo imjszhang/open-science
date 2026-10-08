@@ -749,6 +749,7 @@ export const createApplicationModules = async (
   sessionAuthority.reviewerCommandOwnerRef.current = reviewerCommandOwner
   const commandDependencies = composeCommandDependencies({
     applicationEvents,
+    readObservationBindings: managedExecution.readObservationBindings,
     settingsBootstrap,
     storageStartup,
     ...uploadStorage,

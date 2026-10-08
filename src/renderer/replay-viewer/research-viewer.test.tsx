@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ResearchReplayViewerApp } from './ResearchReplayViewerApp'
+import { recordedFixture } from '../../main/run-observation/recorded-viewer.test-support'
+import { captureRecordedObservationSelection } from '../../shared/recorded-observation-selection'
 import { researchPosition } from './research-materials'
 import { ResearchReplayClient } from './research-client'
 import type { ResearchReplayViewerContext } from './client'
@@ -478,4 +480,141 @@ it('sends the inspected Notebook run and actual master clock after an overlappin
     timeMs: 8000,
     recordedAt: 9000
   })
+})
+
+it('shows imported intermediate states on the master clock and references the exact earlier sample', async () => {
+  const research = researchFixture()
+  const payload = {
+    ...recordedFixture().payload,
+    receiving: { ...context.target, artifactId: 'states', versionId: 'states-v1' }
+  }
+  const sample = payload.archive.records[0]
+  payload.archive.records = [3000, 7000].map((observedAt, index) => ({
+    ...structuredClone(sample),
+    stepKey: `observation-${index}`,
+    sourceEvidence: {
+      ...sample.sourceEvidence,
+      cursor: { ...sample.sourceEvidence.cursor, sequence: index }
+    },
+    observedAt,
+    phase: 'running',
+    run: {
+      ...sample.run!,
+      status: 'running',
+      startedAt: 2500,
+      endedAt: undefined,
+      logs: {
+        ...sample.run!.logs,
+        stdout: {
+          text: index ? 'LATER SAVED STATE' : 'EARLY SAVED STATE',
+          truncated: false,
+          redacted: false
+        }
+      }
+    }
+  }))
+  Object.assign(payload.archive.coverage, {
+    firstObservedAt: 3000,
+    lastObservedAt: 7000,
+    terminalRunObserved: false,
+    stopReason: 'manual'
+  })
+  payload.archive.capturedAt = 7500
+  const run = {
+    runId: 'mapped-run',
+    cellId: 'cell',
+    source: 'agent' as const,
+    kernelKind: 'bash' as const,
+    status: 'completed' as const,
+    startedAt: 2500,
+    endedAt: 10000
+  }
+  const owner = research.document.branches[0].steps[1]
+  Object.assign(owner, {
+    kind: 'notebook',
+    message: undefined,
+    runs: [run],
+    recordedEndAt: 10000,
+    endMs: 9000,
+    durationMs: 7500
+  })
+  const descriptor = {
+    id: 'states-v1',
+    kind: 'run-observation' as const,
+    target: payload.receiving,
+    name: 'Saved states'
+  }
+  research.recordings.push(descriptor)
+  research.document.resources.push({
+    id: descriptor.id,
+    ...payload.receiving,
+    name: 'States.json',
+    availability: 'recorded',
+    checksum: 'a'.repeat(64)
+  })
+  research.observationBindings = [
+    {
+      target: payload.receiving,
+      recordingId: payload.archive.recordingId,
+      archiveChecksum: 'a'.repeat(64),
+      runId: run.runId,
+      branchIds: ['main'],
+      basis: 'import-receipt'
+    }
+  ]
+  const { client, fetcher } = makeClient(research)
+  const base = fetcher.getMockImplementation()!
+  fetcher.mockImplementation(async (...args) => {
+    const [path, options] = args
+    const body = options?.body ? JSON.parse(String(options.body)) : undefined
+    if (path === '/api/research/read' && body?.recordingId === descriptor.id) return json(payload)
+    if (path === '/api/research/select' && body?.observation) {
+      const selected = researchSelectionFixture(research.document, body)
+      return json({
+        ...selected,
+        inspection: 'recorded-observation',
+        observation: captureRecordedObservationSelection(payload, body.observation.stepKey, {
+          selectionId: selected.selectionId,
+          selectedAt: selected.selectedAt
+        })
+      })
+    }
+    return base(...args)
+  })
+  vi.spyOn(client, 'notebook').mockResolvedValue({
+    status: 'ready',
+    bytes: 100,
+    run: {
+      ...run,
+      script: 'record()',
+      outputs: [],
+      text: { stdout: 'FUTURE FINAL OUTPUT', stderr: '', traceback: '', plain: [] },
+      workingFiles: []
+    }
+  })
+  render(<ResearchReplayViewerApp context={context} client={client} />)
+  await screen.findByTestId('research-replay-viewer')
+  fireEvent.click(screen.getByRole('tab', { name: 'Notebook' }))
+  seek(4000)
+  await screen.findByText('EARLY SAVED STATE')
+  expect(screen.queryByText('LATER SAVED STATE')).toBeNull()
+  expect(screen.queryByText('FUTURE FINAL OUTPUT')).toBeNull()
+  seek(7500)
+  await screen.findByText('LATER SAVED STATE')
+  expect(screen.queryByText('EARLY SAVED STATE')).toBeNull()
+  seek(4000)
+  await screen.findByText('EARLY SAVED STATE')
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this status' }))
+  await screen.findByText('Recorded state reference')
+  const request = fetcher.mock.calls.find(([path]) => path === '/api/research/select')!
+  expect(JSON.parse(String(request[1]?.body))).toMatchObject({
+    stepId: owner.id,
+    timeMs: 4000,
+    recordedAt: 5000,
+    observation: { recordingId: 'states-v1', stepKey: 'observation-0' }
+  })
+  expect(
+    screen.getByRole('slider', { name: 'Replay progress' }).getAttribute('aria-valuenow')
+  ).toBe('4000')
+  expect(fetcher.mock.calls.every(([path]) => !String(path).includes('/execute'))).toBe(true)
 })
