@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type VideoHTMLAttributes,
+  type RefObject
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/error-notice'
@@ -33,6 +42,72 @@ export type BrowserRecordingPlayerProps = {
   retryRevision?: number
   /** Only keys explicitly absent from the resolved saved-media catalog. */
   missingMediaKeys?: readonly string[]
+}
+/** Keep the preloaded node itself when it becomes current: media responses are no-store. */
+const RecordedSegmentVideo = ({
+  current,
+  currentVideoRef,
+  onActivate,
+  onLoadedData,
+  onCanPlay,
+  onError,
+  src,
+  ...props
+}: VideoHTMLAttributes<HTMLVideoElement> & {
+  current: boolean
+  currentVideoRef: RefObject<HTMLVideoElement | null>
+  onActivate: (element: HTMLVideoElement, failed: boolean) => void
+}): React.JSX.Element => {
+  const node = useRef<HTMLVideoElement>(null)
+  const loaded = useRef(false)
+  const failed = useRef(false)
+  const bind = useCallback(
+    (element: HTMLVideoElement | null) => {
+      if (currentVideoRef.current === node.current) currentVideoRef.current = null
+      node.current = element
+      if (current) currentVideoRef.current = element
+    },
+    [current, currentVideoRef]
+  )
+  const activate = useEffectEvent(onActivate)
+  useLayoutEffect(() => {
+    if (!current) node.current?.pause()
+    else if (node.current && (loaded.current || failed.current))
+      activate(node.current, failed.current)
+  }, [current])
+  useEffect(() => {
+    const element = node.current
+    // React's development StrictMode replays effect cleanup without removing the DOM.
+    if (element && src && !element.hasAttribute('src')) element.setAttribute('src', src)
+    return () => {
+      // A source leaving the two-slot window (including hidden/unmounted players) releases
+      // its decoder and request. Promotion alone must not call load or remove the source.
+      element?.pause()
+      element?.removeAttribute('src')
+      element?.load()
+    }
+  }, [src])
+  return (
+    <video
+      {...props}
+      src={src}
+      ref={bind}
+      onLoadedData={(event) => {
+        loaded.current = true
+        failed.current = false
+        onLoadedData?.(event)
+      }}
+      onCanPlay={(event) => {
+        loaded.current = true
+        failed.current = false
+        onCanPlay?.(event)
+      }}
+      onError={(event) => {
+        failed.current = true
+        onError?.(event)
+      }}
+    />
+  )
 }
 /** Passive media only: no project address, HTML, environment or execution capability enters here. */
 const BrowserRecordingPlayerContent = ({
@@ -73,6 +148,9 @@ const BrowserRecordingPlayerContent = ({
   const [failedSource, setFailedSource] = useState<{ identity: string; retryRevision: number }>()
   const [, setRetryAttempt] = useState(0)
   const [decodedSource, setDecodedSource] = useState<string>()
+  const [playableSource, setPlayableSource] = useState<string>()
+  const [waitingSource, setWaitingSource] = useState<string>()
+  const [loadingNotice, setLoadingNotice] = useState<string>()
   const [decodedPosition, setDecodedPosition] = useState<{ source: string; offsetMs: number }>()
   const [heldOffset, setHeldOffset] = useState<number>()
   const [asking, setAsking] = useState(false)
@@ -99,12 +177,32 @@ const BrowserRecordingPlayerContent = ({
   if (!active) {
     if (localPlaying) setPlaying(false)
     if (decodedSource !== undefined) setDecodedSource(undefined)
+    if (playableSource !== undefined) setPlayableSource(undefined)
+    if (waitingSource !== undefined) setWaitingSource(undefined)
     if (heldOffset !== undefined) setHeldOffset(undefined)
   }
   const gap = recording.coverage.gaps.find(
     (item) => offsetMs >= item.startMs && offsetMs < item.endMs
   )
   const next = recording.segments.find((item) => item.startMs > offsetMs)
+  // At most the current and immediately following segment; a gap may preload its successor
+  // but cannot display or cite it until the research clock actually reaches that segment.
+  const slots =
+    active && aligned
+      ? [segment, next].flatMap((item) => {
+          if (!item || missingMediaKeys?.includes(item.mediaKey)) return []
+          const url = item === segment ? source : mediaUrl(item.mediaKey)
+          return url ? [{ segment: item, url, identity: `${item.segmentId}:${url}` }] : []
+        })
+      : []
+  const bufferedFrame = waitingSource === sourceIdentity && sourceIdentity !== undefined
+  const retainedFrame = heldOffset !== undefined || bufferedFrame
+  if (!loading && loadingNotice !== undefined) setLoadingNotice(undefined)
+  useEffect(() => {
+    if (!loading || !sourceIdentity) return
+    const timer = window.setTimeout(() => setLoadingNotice(sourceIdentity), 180)
+    return () => window.clearTimeout(timer)
+  }, [loading, sourceIdentity])
   const clearHeldFrame = (): void => {
     setHeldOffset(undefined)
     if (heldFrame.current) {
@@ -149,6 +247,8 @@ const BrowserRecordingPlayerContent = ({
     if (element !== video.current || !active || element.seeking || failed || element.readyState < 2)
       return
     setDecodedSource(sourceIdentity)
+    setPlayableSource(sourceIdentity)
+    setWaitingSource(undefined)
     if (segment && sourceIdentity)
       setDecodedPosition({
         source: sourceIdentity,
@@ -167,6 +267,7 @@ const BrowserRecordingPlayerContent = ({
     }
     setPlaying(false)
     setFailedSource(undefined)
+    setWaitingSource(undefined)
     clearHeldFrame()
     setDecodedSource(undefined)
     desiredOffset.current = bounded
@@ -199,13 +300,9 @@ const BrowserRecordingPlayerContent = ({
   }, [])
   useEffect(() => {
     mounted.current = true
-    const element = video.current
     const canvas = heldFrame.current
     return () => {
       mounted.current = false
-      element?.pause()
-      element?.removeAttribute('src')
-      element?.load()
       if (canvas) {
         canvas.width = 0
         canvas.height = 0
@@ -214,23 +311,12 @@ const BrowserRecordingPlayerContent = ({
   }, [])
   useEffect(() => {
     if (!active) {
-      video.current?.pause()
-      video.current?.removeAttribute('src')
-      video.current?.load()
       if (heldFrame.current) {
         heldFrame.current.width = 0
         heldFrame.current.height = 0
       }
     }
   }, [active])
-  useEffect(() => {
-    const element = video.current
-    return () => {
-      element?.pause()
-      element?.removeAttribute('src')
-      element?.load()
-    }
-  }, [sourceIdentity])
   const reportFailure = useEffectEvent(() => {
     if (transport?.onPause) transport.onPause()
     else if (transport && aligned) transport.onSeek(offsetMs)
@@ -244,6 +330,8 @@ const BrowserRecordingPlayerContent = ({
     setFailedSource(undefined)
     setDecodedSource(undefined)
     setDecodedPosition(undefined)
+    setPlayableSource(undefined)
+    setWaitingSource(undefined)
     clearHeldFrame()
     video.current?.load()
   }
@@ -290,21 +378,25 @@ const BrowserRecordingPlayerContent = ({
   useEffect(() => {
     if (!controlled || !active || !segment || !source) return
     const element = video.current
-    if (!element || element.readyState < 1) return
+    if (!element || element.readyState < 1 || element.seeking) return
+    // A loading/seeking decoder must finish before correcting drift again. Chasing the
+    // continuously advancing master clock during buffering repeatedly restarts decoding.
+    if (playing && decodedSource !== sourceIdentity) return
     const targetSeconds = Math.max(0, (offsetMs - segment.startMs) / 1000)
     // Let the media decoder advance between research-clock updates; continuously resetting
     // currentTime causes seek storms. Pauses and explicit jumps still settle at the exact time.
     if (Math.abs(element.currentTime - targetSeconds) > (playing ? 0.15 : 0.001)) {
       setDecodedSource(undefined)
+      setWaitingSource(undefined)
       element.currentTime = targetSeconds
     }
-  }, [controlled, active, sourceIdentity, offsetMs, playing, segment, source])
+  }, [controlled, active, sourceIdentity, offsetMs, playing, segment, source, decodedSource])
   useEffect(() => {
     const element = video.current
     if (!element) return
     let cancelled = false
     element.playbackRate = speed
-    if (active && playing && source && decodedSource === sourceIdentity) {
+    if (active && playing && source && playableSource === sourceIdentity && !failed) {
       void element.play().catch(() => {
         if (!cancelled && mounted.current && element === video.current) {
           setPlaying(false)
@@ -312,11 +404,11 @@ const BrowserRecordingPlayerContent = ({
           setFailedSource(sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined)
         }
       })
-    } else element.pause()
+    } else if (!active || !playing || !source || failed) element.pause()
     return () => {
       cancelled = true
     }
-  }, [playing, speed, active, source, sourceIdentity, decodedSource, retryRevision])
+  }, [playing, speed, active, source, sourceIdentity, playableSource, failed, retryRevision])
   const incomplete =
     recording.coverage.droppedFrames > 0 ||
     recording.coverage.gaps.length > 0 ||
@@ -413,13 +505,7 @@ const BrowserRecordingPlayerContent = ({
         onClick: retry
       }}
     />
-  ) : source && segment ? (
-    loading ? (
-      <div role="status" data-testid="recorded-segment-loading">
-        {t('Loading…')}
-      </div>
-    ) : null
-  ) : segment && active ? (
+  ) : source && segment ? null : segment && active ? (
     <ErrorNotice
       inline
       title={t('Could not read the recorded material.')}
@@ -533,110 +619,167 @@ const BrowserRecordingPlayerContent = ({
               : undefined
           }
         >
-          {source && segment ? (
-            <>
-              <video
-                key={segment.segmentId}
-                ref={video}
-                src={source}
-                muted
-                playsInline
-                preload="auto"
-                aria-label={t('Recorded webpage')}
-                className="absolute inset-0 h-full w-full object-contain"
-                style={{ visibility: loading || failed ? 'hidden' : 'visible' }}
-                onLoadedMetadata={(event) => {
-                  if (event.currentTarget !== video.current || !active) return
+          {slots.map((slot) => (
+            <RecordedSegmentVideo
+              key={slot.identity}
+              current={slot.identity === sourceIdentity}
+              currentVideoRef={video}
+              src={slot.url}
+              onActivate={(element, loadFailed) => {
+                if (element !== video.current || !active || !segment) return
+                if (loadFailed) {
+                  setFailedSource(
+                    sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined
+                  )
+                  return
+                }
+                setDecodedSize({
+                  source: sourceIdentity,
+                  width: element.videoWidth,
+                  height: element.videoHeight
+                })
+                element.playbackRate = speed
+                const target = Math.max(
+                  0,
+                  ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
+                )
+                if (Math.abs(element.currentTime - target) > 0.001) {
+                  setDecodedSource(undefined)
+                  setWaitingSource(undefined)
+                  element.currentTime = target
+                } else decoded(element)
+              }}
+              muted
+              playsInline
+              preload="auto"
+              aria-label={slot.identity === sourceIdentity ? t('Recorded webpage') : undefined}
+              aria-hidden={slot.identity !== sourceIdentity || undefined}
+              data-testid={
+                slot.identity !== sourceIdentity ? 'preloaded-recorded-segment' : undefined
+              }
+              className="absolute inset-0 h-full w-full object-contain"
+              style={{
+                visibility:
+                  slot.identity !== sourceIdentity || failed || (loading && !bufferedFrame)
+                    ? 'hidden'
+                    : 'visible'
+              }}
+              onLoadedMetadata={(event) => {
+                if (event.currentTarget !== video.current || !active || !segment) return
+                setDecodedSize({
+                  source: sourceIdentity,
+                  width: event.currentTarget.videoWidth,
+                  height: event.currentTarget.videoHeight
+                })
+                const target = Math.max(
+                  0,
+                  ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
+                )
+                if (Math.abs(event.currentTarget.currentTime - target) > 0.001)
+                  event.currentTarget.currentTime = target
+                event.currentTarget.playbackRate = speed
+              }}
+              onResize={(event) => {
+                if (event.currentTarget === video.current)
                   setDecodedSize({
                     source: sourceIdentity,
                     width: event.currentTarget.videoWidth,
                     height: event.currentTarget.videoHeight
                   })
-                  event.currentTarget.currentTime = Math.max(
-                    0,
-                    ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
+              }}
+              onLoadedData={(event) => decoded(event.currentTarget)}
+              onCanPlay={(event) => {
+                if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
+              }}
+              onWaiting={(event) => {
+                if (event.currentTarget !== video.current || !active) return
+                if (decodedSource === sourceIdentity) setWaitingSource(sourceIdentity)
+                setDecodedSource(undefined)
+              }}
+              onSeeking={(event) => {
+                if (event.currentTarget !== video.current || !active) return
+                setWaitingSource(undefined)
+                setDecodedSource(undefined)
+              }}
+              onSeeked={(event) => {
+                if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
+              }}
+              onTimeUpdate={(event) => {
+                if (
+                  event.currentTarget !== video.current ||
+                  !active ||
+                  !segment ||
+                  loading ||
+                  failed ||
+                  event.currentTarget.seeking
+                )
+                  return
+                const value = Math.min(
+                  segment.endMs - 1,
+                  segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
+                )
+                if (sourceIdentity) setDecodedPosition({ source: sourceIdentity, offsetMs: value })
+                if (controlled) return
+                desiredOffset.current = value
+                setOffsetMs(value)
+              }}
+              onEnded={(event) => {
+                if (event.currentTarget !== video.current || !active || !segment) return
+                if (controlled) {
+                  event.currentTarget.pause()
+                  return
+                }
+                const following = recording.segments.find((item) => item.startMs >= segment.endMs)
+                if (
+                  following &&
+                  following.startMs - segment.endMs <= 250 &&
+                  !recording.coverage.gaps.some(
+                    (item) => item.startMs < following.startMs && item.endMs > segment.endMs
                   )
-                  event.currentTarget.playbackRate = speed
-                }}
-                onResize={(event) => {
-                  if (event.currentTarget === video.current)
-                    setDecodedSize({
-                      source: sourceIdentity,
-                      width: event.currentTarget.videoWidth,
-                      height: event.currentTarget.videoHeight
-                    })
-                }}
-                onLoadedData={(event) => decoded(event.currentTarget)}
-                onCanPlay={(event) => {
-                  if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
-                }}
-                onWaiting={() => setDecodedSource(undefined)}
-                onSeeking={() => setDecodedSource(undefined)}
-                onSeeked={(event) => {
-                  if (event.currentTarget.readyState >= 2) decoded(event.currentTarget)
-                }}
-                onTimeUpdate={(event) => {
-                  if (
-                    event.currentTarget !== video.current ||
-                    !active ||
-                    loading ||
-                    failed ||
-                    event.currentTarget.seeking
-                  )
-                    return
-                  const value = Math.min(
-                    segment.endMs - 1,
-                    segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
-                  )
-                  if (sourceIdentity)
-                    setDecodedPosition({ source: sourceIdentity, offsetMs: value })
-                  if (controlled) return
-                  desiredOffset.current = value
-                  setOffsetMs(value)
-                }}
-                onEnded={(event) => {
-                  if (event.currentTarget !== video.current || !active) return
-                  if (controlled) {
-                    event.currentTarget.pause()
-                    return
-                  }
-                  const following = recording.segments.find((item) => item.startMs >= segment.endMs)
-                  if (
-                    following &&
-                    following.startMs - segment.endMs <= 250 &&
-                    !recording.coverage.gaps.some(
-                      (item) => item.startMs < following.startMs && item.endMs > segment.endMs
-                    )
-                  ) {
-                    retainDecodedFrame()
-                    setDecodedSource(undefined)
-                    desiredOffset.current = following.startMs
-                    setOffsetMs(following.startMs)
-                  } else {
-                    clearHeldFrame()
-                    setPlaying(false)
-                    desiredOffset.current = Math.min(recording.durationMs - 1, segment.endMs)
-                    setOffsetMs(desiredOffset.current)
-                  }
-                }}
-                onError={(event) => {
-                  if (event.currentTarget !== video.current || !active) return
-                  setPlaying(false)
-                  clearHeldFrame()
+                ) {
+                  retainDecodedFrame()
                   setDecodedSource(undefined)
-                  setFailedSource(
-                    sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined
-                  )
-                }}
-              />
-              <canvas
-                ref={setHeldFrameNode}
-                aria-hidden="true"
-                hidden={!loading || heldOffset === undefined}
-                className="absolute inset-0 h-full w-full object-contain"
-                data-testid="held-recorded-frame"
-              />
-            </>
+                  desiredOffset.current = following.startMs
+                  setOffsetMs(following.startMs)
+                } else {
+                  clearHeldFrame()
+                  setPlaying(false)
+                  desiredOffset.current = Math.min(recording.durationMs - 1, segment.endMs)
+                  setOffsetMs(desiredOffset.current)
+                }
+              }}
+              onError={(event) => {
+                if (event.currentTarget !== video.current || !active || !segment) return
+                setPlaying(false)
+                clearHeldFrame()
+                setDecodedSource(undefined)
+                setFailedSource(
+                  sourceIdentity ? { identity: sourceIdentity, retryRevision } : undefined
+                )
+              }}
+            />
+          ))}
+          {source && segment ? (
+            <canvas
+              ref={setHeldFrameNode}
+              aria-hidden="true"
+              hidden={!loading || heldOffset === undefined}
+              className="absolute inset-0 h-full w-full object-contain"
+              data-testid="held-recorded-frame"
+            />
+          ) : null}
+          {loading && loadingNotice === sourceIdentity ? (
+            <div
+              role="status"
+              data-testid="recorded-segment-loading"
+              className={
+                retainedFrame
+                  ? 'pointer-events-none absolute bottom-3 right-3 rounded bg-bg-100/90 px-2 py-1 text-xs text-muted-foreground'
+                  : 'pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-muted-foreground'
+              }
+            >
+              {t('Loading…')}
+            </div>
           ) : null}
         </RecordedMediaViewport>
       </div>

@@ -119,6 +119,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       let liveCalls = 0,
         selections = 0,
         mediaReads = 0
+      const mediaReadsByKey = new Map<string, number>()
       const forbidden = async (): Promise<never> => {
         liveCalls++
         throw new Error('Historical footage has no runtime')
@@ -170,6 +171,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         readRecordingMedia: async (_, mediaKey) => {
           expect(payload.media.some((item) => item.mediaKey === mediaKey)).toBe(true)
           mediaReads++
+          mediaReadsByKey.set(mediaKey, (mediaReadsByKey.get(mediaKey) ?? 0) + 1)
           return { body: bytes, mimeType: 'video/webm' }
         }
       })
@@ -200,7 +202,18 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         await page.getByRole('slider').fill(String(value))
         await expect(page.getByRole('slider')).toHaveValue(String(value))
       }
+      const initiallyPreloaded = await page
+        .getByTestId('preloaded-recorded-segment')
+        .elementHandle()
+      await expect
+        .poll(() => initiallyPreloaded!.evaluate((element: HTMLVideoElement) => element.readyState))
+        .toBeGreaterThanOrEqual(2)
+      const initialNextReads = mediaReadsByKey.get('clip-1')
       await seek(2400)
+      expect(
+        await video.evaluate((element, preloaded) => element === preloaded, initiallyPreloaded)
+      ).toBe(true)
+      expect(mediaReadsByKey.get('clip-1')).toBe(initialNextReads)
       await expect(video).toHaveAttribute('src', '/api/recording/media?mediaKey=clip-1')
       await expect
         .poll(() =>
@@ -236,10 +249,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       await expect(video).toHaveCount(0)
       await page.getByRole('button', { name: 'Go to next recorded moment' }).click()
       await expect(page.getByRole('slider')).toHaveValue('4200')
-      await seek(0)
-      await expect(video).toBeVisible()
-      const surface = page.getByTestId('recorded-video-surface')
-      const viewportBeforeTransition = await surface.boundingBox()
+      // Intercept before seeking back: even paused players preload the next segment.
+      const nextReadsBeforeTransition = mediaReadsByKey.get('clip-1') ?? 0
       let releaseNext: (() => void) | undefined
       let delayNext = true
       await page.route('**/api/recording/media?mediaKey=clip-1', async (route) => {
@@ -251,6 +262,11 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         }
         await route.continue()
       })
+      await seek(0)
+      await expect(video).toBeVisible()
+      const preloadedNext = await page.getByTestId('preloaded-recorded-segment').elementHandle()
+      const surface = page.getByTestId('recorded-video-surface')
+      const viewportBeforeTransition = await surface.boundingBox()
       await page.getByRole('button', { name: 'Play replay', exact: true }).click()
       await expect.poll(() => Boolean(releaseNext)).toBe(true)
       await expect(page.getByTestId('recorded-segment-loading')).toBeVisible()
@@ -282,6 +298,10 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         timeout: 12000
       })
       await expect(video).toBeVisible()
+      expect(
+        await video.evaluate((element, preloaded) => element === preloaded, preloadedNext)
+      ).toBe(true)
+      expect(mediaReadsByKey.get('clip-1')).toBe(nextReadsBeforeTransition + 1)
       await expect(page.getByTestId('recorded-segment-loading')).toHaveCount(0)
       expect(await surface.boundingBox()).toEqual(viewportBeforeTransition)
       await expect(
@@ -309,6 +329,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
               heldTime,
               viewportBeforeTransition,
               stableSegmentLoading: true,
+              preloadedNodeReused: true,
+              nextSegmentReadOnce: true,
               seekMs: 2400,
               segmentOffsetMs: 500,
               speed: 2,

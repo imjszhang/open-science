@@ -61,9 +61,11 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
       if (!artifact?.path?.startsWith('$DATA/') || !input)
         throw new Error('Saved fixture version unavailable')
       const bytes = await readFile(join(dataRoot, artifact.path.slice(6)))
+      expect(bytes.byteLength).toBe(input.sizeBytes)
       expect(createHash('sha256').update(bytes).digest('hex')).toBe(input.checksum)
       return bytes
     }
+    const mediaVersions = new Set(payload.media.map((item) => item.versionId))
     let mediaReads = 0
     const unsupported = async (): Promise<never> => {
       throw new Error('Unsupported fixture recording')
@@ -105,12 +107,7 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
         readMedia: unsupported,
         readProjectMedia: unsupported,
         readBrowser: async () => payload,
-        readBrowserMedia: async (_target, mediaKey) => {
-          const media = payload.media.find((item) => item.mediaKey === mediaKey)
-          if (!media) throw new Error('Unknown media')
-          mediaReads++
-          return { body: await savedBytes(media.versionId), mimeType: 'video/webm' }
-        },
+        readBrowserMedia: unsupported,
         selectBrowserMoment: async (_target, offsetMs) => {
           const segment = payload.recording.segments.find(
               (item) => offsetMs >= item.startMs && offsetMs < item.endMs
@@ -146,6 +143,9 @@ it.skipIf(process.env.RUN_RESEARCH_REPLAY_BROWSER !== '1')(
         resolveVersion: async (request) => inputs.get(request.inputFileVersionId),
         openContent: async (input) => {
           const bytes = await savedBytes(input.inputFileVersionId)
+          // The research viewer reads the selected immutable Version directly from its
+          // verified snapshot; the full-recording reader must not run for each video segment.
+          if (mediaVersions.has(input.inputFileVersionId)) mediaReads++
           return {
             readRange: async (offset: number, length: number) =>
               bytes.subarray(offset, offset + length),

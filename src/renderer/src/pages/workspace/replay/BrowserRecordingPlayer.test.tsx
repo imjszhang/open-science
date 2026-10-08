@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useLayoutEffect } from 'react'
+import { StrictMode, useLayoutEffect } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { browserRecordingFixture } from './BrowserRecording.test-support'
@@ -14,6 +14,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -215,6 +216,7 @@ it('distinguishes host observations, browser interactions and author declaration
 })
 
 it('reserves the viewport and holds one bounded decoded frame only while the next segment loads', () => {
+  vi.useFakeTimers()
   const drawImage = vi.fn()
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     drawImage
@@ -239,7 +241,9 @@ it('reserves the viewport and holds one bounded decoded frame only while the nex
   expect(drawImage).toHaveBeenCalledWith(first, 0, 0, 1280, 720)
   expect(canvas.hidden).toBe(false)
   expect(screen.getByTestId('recorded-video-surface').style.aspectRatio).toBe('1280 / 720')
-  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  act(() => vi.advanceTimersByTime(180))
+  expect(screen.getByTestId('recorded-segment-loading').className).toContain('bottom-3')
   expect(screen.getByRole('slider').getAttribute('value')).toBe('1999')
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
@@ -280,7 +284,7 @@ it('waits for the remounted video to decode even if two segments resolve to the 
   fireEvent.ended(first)
   const second = screen.getByLabelText('Recorded webpage')
   expect(second).not.toBe(first)
-  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
   ).toBe(true)
@@ -361,7 +365,7 @@ it('settles controlled seeks and pauses exactly without seeking on every playbac
     />
   )
   expect(video.currentTime).toBe(1.7)
-  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
   ).toBe(true)
@@ -612,7 +616,7 @@ it('keeps a failed or retried recording moment unavailable until a fresh frame d
   expect(ask.hasAttribute('disabled')).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
-  expect(screen.getByTestId('recorded-segment-loading')).toBeTruthy()
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
   expect(ask.hasAttribute('disabled')).toBe(true)
   fireEvent.click(ask)
   expect(onAskMoment).not.toHaveBeenCalled()
@@ -865,4 +869,214 @@ it('publishes decoded media time for the footer and withdraws it while buffering
   })
   fireEvent.waiting(video)
   expect(onActionChange.mock.lastCall?.[0]).toMatchObject({ recordedAt: undefined, disabled: true })
+})
+
+it('promotes the already decoded next node without reloading it and keeps only two decoders', async () => {
+  const { rerender, unmount } = render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={vi.fn()}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  const next = screen.getByTestId('preloaded-recorded-segment') as HTMLVideoElement
+  expect(document.querySelectorAll('video')).toHaveLength(2)
+  expect(next.style.visibility).toBe('hidden')
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  fireEvent.loadedMetadata(next)
+  fireEvent.loadedData(next)
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+  await act(async () => {})
+  const load = vi.mocked(HTMLMediaElement.prototype.load)
+  const play = vi.mocked(HTMLMediaElement.prototype.play)
+  load.mockClear()
+  play.mockClear()
+  fireEvent.ended(first)
+  await act(async () => {})
+  expect(screen.getByLabelText('Recorded webpage')).toBe(next)
+  expect(next.style.visibility).toBe('visible')
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  expect(load.mock.contexts).not.toContain(next)
+  expect(load.mock.contexts).toContain(first)
+  expect(first.hasAttribute('src')).toBe(false)
+  expect(play.mock.contexts).toContain(next)
+  expect(document.querySelectorAll('video')).toHaveLength(2)
+  const following = screen.getByTestId('preloaded-recorded-segment')
+  rerender(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      active={false}
+    />
+  )
+  expect(document.querySelectorAll('video')).toHaveLength(0)
+  expect(next.hasAttribute('src')).toBe(false)
+  expect(following.hasAttribute('src')).toBe(false)
+  expect(load.mock.contexts.filter((element) => element === next)).toHaveLength(1)
+  expect(load.mock.contexts.filter((element) => element === following)).toHaveLength(1)
+  unmount()
+})
+
+it('evicts distant seek sources, preloads across gaps without showing or citing them, and releases on unmount', () => {
+  const { unmount } = render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={vi.fn()}
+    />
+  )
+  const initial = Array.from(document.querySelectorAll('video'))
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '4500' } })
+  expect(document.querySelectorAll('video')).toHaveLength(1)
+  expect(initial.every((element) => !element.hasAttribute('src'))).toBe(true)
+  const future = screen.getByTestId('preloaded-recorded-segment') as HTMLVideoElement
+  fireEvent.loadedMetadata(future)
+  fireEvent.loadedData(future)
+  expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+  expect(future.style.visibility).toBe('hidden')
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Go to next recorded moment' }))
+  expect(screen.getByLabelText('Recorded webpage')).toBe(future)
+  expect(future.style.visibility).toBe('visible')
+  unmount()
+  expect(future.hasAttribute('src')).toBe(false)
+})
+
+it('ignores next-node waiting/seeking/errors until promotion and surfaces a failed preload only then', () => {
+  render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onAskMoment={vi.fn()}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage')
+  const next = screen.getByTestId('preloaded-recorded-segment')
+  fireEvent.loadedMetadata(first)
+  fireEvent.loadedData(first)
+  fireEvent.waiting(next)
+  fireEvent.seeking(next)
+  fireEvent.error(next)
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(false)
+  expect(screen.queryByText('Could not play the recorded footage.')).toBeNull()
+  fireEvent.ended(first)
+  expect(screen.getByText('Could not play the recorded footage.')).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+})
+
+it('does not pause or repeatedly seek a buffering decoder while the research clock advances', async () => {
+  vi.useFakeTimers()
+  const recording = browserRecordingFixture()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const onSeek = vi.fn()
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 500, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const element = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedMetadata(element)
+  fireEvent.loadedData(element)
+  await act(async () => {})
+  const pause = vi.mocked(HTMLMediaElement.prototype.pause)
+  pause.mockClear()
+  fireEvent.waiting(element)
+  expect(element.style.visibility).toBe('visible')
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 900, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(element.currentTime).toBe(0.5)
+  expect(pause).not.toHaveBeenCalled()
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  act(() => vi.advanceTimersByTime(180))
+  expect(screen.getByTestId('recorded-segment-loading').className).toContain('bottom-3')
+  Object.defineProperty(element, 'seeking', { configurable: true, value: true })
+  fireEvent.seeking(element)
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1100, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(element.currentTime).toBe(0.5)
+  expect(pause).not.toHaveBeenCalled()
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1100, playing: false, speed: 1, onSeek }}
+    />
+  )
+  expect(pause).toHaveBeenCalled()
+  Object.defineProperty(element, 'seeking', { configurable: true, value: false })
+  fireEvent.seeked(element)
+  expect(element.currentTime).toBe(1.1)
+})
+
+it('does not flash a loading message for a quickly decoded source, including without a retained frame', () => {
+  vi.useFakeTimers()
+  render(<BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={mediaUrl} />)
+  const element = screen.getByLabelText('Recorded webpage')
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  act(() => vi.advanceTimersByTime(100))
+  fireEvent.loadedMetadata(element)
+  fireEvent.loadedData(element)
+  act(() => vi.advanceTimersByTime(200))
+  expect(screen.queryByTestId('recorded-segment-loading')).toBeNull()
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '3200' } })
+  act(() => vi.advanceTimersByTime(180))
+  expect(screen.getByTestId('recorded-segment-loading').className).toContain('inset-0')
+})
+
+it('restores both media sources after development StrictMode replays effect cleanup', () => {
+  const { unmount } = render(
+    <StrictMode>
+      <BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={mediaUrl} />
+    </StrictMode>
+  )
+  const videos = Array.from(document.querySelectorAll('video'))
+  expect(videos).toHaveLength(2)
+  expect(videos.every((element) => element.hasAttribute('src'))).toBe(true)
+  unmount()
+  expect(videos.every((element) => !element.hasAttribute('src'))).toBe(true)
+})
+
+it('pauses a current node demoted by a backward seek while keeping its buffer for reuse', async () => {
+  render(<BrowserRecordingPlayer recording={browserRecordingFixture()} mediaUrl={mediaUrl} />)
+  const next = screen.getByTestId('preloaded-recorded-segment') as HTMLVideoElement
+  fireEvent.loadedMetadata(next)
+  fireEvent.loadedData(next)
+  fireEvent.ended(screen.getByLabelText('Recorded webpage'))
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+  await act(async () => {})
+  expect(screen.getByLabelText('Recorded webpage')).toBe(next)
+  const pause = vi.mocked(HTMLMediaElement.prototype.pause)
+  const load = vi.mocked(HTMLMediaElement.prototype.load)
+  pause.mockClear()
+  load.mockClear()
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '500' } })
+  expect(screen.getByTestId('preloaded-recorded-segment')).toBe(next)
+  expect(pause.mock.contexts).toContain(next)
+  expect(load.mock.contexts).not.toContain(next)
+  expect(next.hasAttribute('src')).toBe(true)
+  expect(next.style.visibility).toBe('hidden')
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '2000' } })
+  expect(screen.getByLabelText('Recorded webpage')).toBe(next)
+  expect(next.style.visibility).toBe('visible')
+  expect(load.mock.contexts).not.toContain(next)
 })

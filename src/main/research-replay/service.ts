@@ -18,6 +18,8 @@ import type { ImmutableInputAuthority } from '../immutable-input-authority'
 import type { NotebookRunRecord } from '../../shared/notebook'
 import type { ReplayStep, ReplayResource, ReplayScene } from '../../shared/replay'
 import {
+  MAX_BROWSER_RECORDING_INDEX_BYTES,
+  MAX_BROWSER_RECORDING_SEGMENT_BYTES,
   parseBrowserRecording,
   type BrowserRecording,
   type RecordedBrowserPayload
@@ -724,7 +726,9 @@ export class ResearchReplayService {
     return asset
   }
   private async resourceBytes(
-    resource: ReplayResource
+    resource: ReplayResource,
+    maxBytes = MAX_RESOURCE,
+    expectedSize?: number
   ): Promise<{ body: Uint8Array; mimeType: string }> {
     if (!resource.versionId || resource.availability !== 'recorded')
       throw new ResearchReplayError('not-found', 404)
@@ -736,12 +740,16 @@ export class ResearchReplayService {
     })
     if (
       !input ||
+      input.sourceKind !== (resource.source === 'upload' ? 'upload-version' : 'artifact-version') ||
       input.inputFileVersionId !== resource.versionId ||
       input.sourceFileId !==
         (resource.source === 'upload' ? resource.fileId : resource.artifactId) ||
       input.sourceSessionId !== resource.sessionId ||
       input.sourceProjectId !== resource.projectId ||
-      input.sizeBytes > MAX_RESOURCE ||
+      !Number.isSafeInteger(input.sizeBytes) ||
+      input.sizeBytes < 0 ||
+      input.sizeBytes > maxBytes ||
+      (expectedSize !== undefined && input.sizeBytes !== expectedSize) ||
       (resource.checksum && resource.checksum !== input.checksum)
     )
       throw new ResearchReplayError('not-found', 404)
@@ -762,9 +770,13 @@ export class ResearchReplayService {
       })
       if (
         !current ||
+        current.sourceKind !== input.sourceKind ||
         current.inputFileVersionId !== input.inputFileVersionId ||
         current.sourceFileId !== input.sourceFileId ||
         current.sourceSessionId !== input.sourceSessionId ||
+        current.sourceProjectId !== input.sourceProjectId ||
+        current.sizeBytes !== input.sizeBytes ||
+        current.storageKey !== input.storageKey ||
         current.checksum !== input.checksum
       )
         throw new ResearchReplayError('unavailable', 410)
@@ -785,12 +797,59 @@ export class ResearchReplayService {
     const row = await this.get(viewerId, caller),
       recording = row.data.recordings.find((item) => item.id === recordingId)
     if (!recording) throw new ResearchReplayError('forbidden', 403)
-    const asset =
-      recording.kind === 'web-recording'
-        ? await this.dependencies.recordings.readBrowserMedia(recording.target, mediaKey)
-        : recording.kind === 'project-recording'
+    let asset: { body: Uint8Array; mimeType: string }
+    if (recording.kind === 'web-recording') {
+      // The private viewer snapshot owns this mapping, verified by readBrowser during open.
+      // Requests can select a key but cannot supply a payload, Version, checksum or path.
+      const payload = row.payloads.get(recordingId)
+      if (
+        !payload ||
+        !('indexChecksum' in payload) ||
+        !(['projectId', 'sessionId', 'artifactId', 'versionId'] as const).every(
+          (key) => payload.receiving[key] === recording.target[key]
+        )
+      )
+        throw new ResearchReplayError('unavailable', 410)
+      const declared = payload.recording.media.find((item) => item.mediaKey === mediaKey)
+      const resolved = payload.media.find((item) => item.mediaKey === mediaKey)
+      if (
+        !declared ||
+        !resolved ||
+        resolved.checksum !== declared.checksum ||
+        resolved.sizeBytes !== declared.sizeBytes
+      )
+        throw new ResearchReplayError('not-found', 404)
+      const indexResource: ReplayResource = {
+        id: recordingId,
+        name: recording.name,
+        ...recording.target,
+        source: 'artifact',
+        checksum: payload.indexChecksum,
+        availability: 'recorded'
+      }
+      // Recheck the exact saved index on both sides of the selected media read. Reusing its
+      // mapping never keeps an unpublished, rebound, changed or revoked resource readable.
+      await this.resourceBytes(indexResource, MAX_BROWSER_RECORDING_INDEX_BYTES)
+      const media = await this.resourceBytes(
+        {
+          ...indexResource,
+          artifactId: resolved.artifactId,
+          versionId: resolved.versionId,
+          checksum: declared.checksum,
+          name: declared.name,
+          mimeType: declared.mimeType
+        },
+        MAX_BROWSER_RECORDING_SEGMENT_BYTES,
+        declared.sizeBytes
+      )
+      await this.resourceBytes(indexResource, MAX_BROWSER_RECORDING_INDEX_BYTES)
+      asset = { body: media.body, mimeType: declared.mimeType }
+    } else {
+      asset =
+        recording.kind === 'project-recording'
           ? await this.dependencies.recordings.readProjectMedia(recording.target, mediaKey)
           : await this.dependencies.recordings.readMedia(recording.target, mediaKey)
+    }
     await this.get(viewerId, caller)
     return asset
   }

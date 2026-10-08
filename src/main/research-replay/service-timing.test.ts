@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReplayDocument, ReplayResource, ReplayStep } from '../../shared/replay'
 import type { RecordedEvidencePayload } from '../../shared/run-observation-recorded'
+import type { NotebookRunInputFile } from '../../shared/notebook'
 import {
   validateBrowserRecording,
   type BrowserRecording,
@@ -631,5 +632,258 @@ describe('verified browser checkpoint deduplication', () => {
       (await h.service.document(reopened.viewerId, h.caller)).supportingResourceIds
     ).not.toContain('artifact-version:checkpoint-a-1')
     expect(h.dependencies.recordings.readBrowser).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('browser media reads from the private research snapshot', () => {
+  it('reads only the requested media and exact index regardless of the recording length', async () => {
+    const h = browserCheckpointHarness([finalIndex(120)])
+    const view = await h.service.open(h.target, h.caller)
+    vi.mocked(h.dependencies.immutable.openContent).mockClear()
+    vi.mocked(h.dependencies.immutable.resolveVersion).mockClear()
+    for (const mediaKey of ['segment-0', 'segment-119']) {
+      expect(
+        await h.service.media(view.viewerId, 'artifact-version:final-a', mediaKey, h.caller)
+      ).toEqual({
+        body: Buffer.from('video'),
+        mimeType: 'video/webm'
+      })
+    }
+    expect(h.dependencies.recordings.readBrowser).toHaveBeenCalledTimes(1)
+    expect(h.dependencies.recordings.readBrowserMedia).not.toHaveBeenCalled()
+    expect(h.dependencies.immutable.openContent).toHaveBeenCalledTimes(6)
+    expect(h.dependencies.immutable.resolveVersion).toHaveBeenCalledTimes(12)
+    expect(
+      vi
+        .mocked(h.dependencies.immutable.openContent)
+        .mock.calls.map(([input]) => input.inputFileVersionId)
+    ).toEqual([
+      'final-a',
+      'receiving-author-a-0',
+      'final-a',
+      'final-a',
+      'receiving-author-a-119',
+      'final-a'
+    ])
+  })
+
+  it.each(['missing', 'checksum', 'size', 'artifact', 'version'] as const)(
+    'rejects %s media mapping evidence without guessing a replacement',
+    async (failure) => {
+      const index = finalIndex(1)
+      const media = index.recording.media[0]
+      index.resolvedMedia =
+        failure === 'missing'
+          ? []
+          : [
+              {
+                mediaKey: media.mediaKey,
+                checksum: failure === 'checksum' ? '0'.repeat(64) : media.checksum,
+                sizeBytes: failure === 'size' ? 1 : media.sizeBytes,
+                artifactId:
+                  failure === 'artifact' ? 'wrong-artifact' : 'artifact-receiving-author-a-0',
+                versionId: failure === 'version' ? 'wrong-version' : 'receiving-author-a-0'
+              }
+            ]
+      const h = browserCheckpointHarness([index])
+      const view = await h.service.open(h.target, h.caller)
+      await expect(
+        h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+      ).rejects.toThrow()
+      expect(h.dependencies.recordings.readBrowserMedia).not.toHaveBeenCalled()
+    }
+  )
+
+  it('rejects unknown media keys without reading arbitrary resources', async () => {
+    const h = browserCheckpointHarness([finalIndex(1)])
+    const view = await h.service.open(h.target, h.caller)
+    vi.mocked(h.dependencies.immutable.openContent).mockClear()
+    for (const mediaKey of ['unknown', '../private'])
+      await expect(
+        h.service.media(view.viewerId, 'artifact-version:final-a', mediaKey, h.caller)
+      ).rejects.toMatchObject({ code: 'not-found' })
+    expect(h.dependencies.immutable.openContent).not.toHaveBeenCalled()
+  })
+
+  it('rejects a snapshot whose receiving identity differs from its index', async () => {
+    const h = browserCheckpointHarness([finalIndex(1)])
+    const read = vi.mocked(h.dependencies.recordings.readBrowser).getMockImplementation()!
+    vi.mocked(h.dependencies.recordings.readBrowser).mockImplementation(async (...args) => ({
+      ...(await read(...args)),
+      receiving: { ...args[0], sessionId: 'foreign-session' }
+    }))
+    const view = await h.service.open(h.target, h.caller)
+    await expect(
+      h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+    ).rejects.toMatchObject({ code: 'unavailable' })
+  })
+
+  it.each(['final-a', 'receiving-author-a-0'])(
+    'rejects changed immutable %s bytes after the viewer opened',
+    async (versionId) => {
+      const h = browserCheckpointHarness([finalIndex(1)])
+      const view = await h.service.open(h.target, h.caller)
+      h.bodies.set(versionId, Buffer.from('other'))
+      await expect(
+        h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+      ).rejects.toMatchObject({ code: 'unavailable' })
+    }
+  )
+
+  it.each(['final-a', 'receiving-author-a-0'])(
+    'rejects a no-longer-published %s after the viewer opened',
+    async (versionId) => {
+      const h = browserCheckpointHarness([finalIndex(1)])
+      const view = await h.service.open(h.target, h.caller)
+      const resolve = vi.mocked(h.dependencies.immutable.resolveVersion).getMockImplementation()!
+      vi.mocked(h.dependencies.immutable.resolveVersion).mockImplementation(async (request) =>
+        request.inputFileVersionId === versionId ? undefined : resolve(request)
+      )
+      await expect(
+        h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+      ).rejects.toMatchObject({ code: 'not-found' })
+    }
+  )
+
+  it.each<[string, (input: NotebookRunInputFile) => void]>([
+    [
+      'source kind',
+      (input) => {
+        input.sourceKind = 'upload-version'
+      }
+    ],
+    [
+      'project',
+      (input) => {
+        input.sourceProjectId = 'foreign-project'
+      }
+    ],
+    [
+      'session',
+      (input) => {
+        input.sourceSessionId = 'foreign-session'
+      }
+    ],
+    [
+      'artifact',
+      (input) => {
+        input.sourceFileId = 'foreign-artifact'
+      }
+    ],
+    [
+      'version',
+      (input) => {
+        input.inputFileVersionId = 'foreign-version'
+      }
+    ],
+    [
+      'checksum',
+      (input) => {
+        input.checksum = '0'.repeat(64)
+      }
+    ],
+    [
+      'size',
+      (input) => {
+        input.sizeBytes++
+      }
+    ],
+    [
+      'storage key',
+      (input) => {
+        input.storageKey = 'other-file'
+      }
+    ]
+  ])('rejects a media %s rebound during its read', async (_label, mutate) => {
+    const h = browserCheckpointHarness([finalIndex(1)])
+    const view = await h.service.open(h.target, h.caller)
+    const resolve = vi.mocked(h.dependencies.immutable.resolveVersion).getMockImplementation()!
+    let mediaChecks = 0
+    vi.mocked(h.dependencies.immutable.resolveVersion).mockImplementation(async (request) => {
+      const input = await resolve(request)
+      if (request.inputFileVersionId === 'receiving-author-a-0' && ++mediaChecks === 2)
+        mutate(input!)
+      return input
+    })
+    await expect(
+      h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+    ).rejects.toMatchObject({ code: 'unavailable' })
+  })
+
+  it.each(['index-bytes', 'caller', 'scope', 'viewer'] as const)(
+    'rejects %s changes while the requested media is being read',
+    async (change) => {
+      const h = browserCheckpointHarness([finalIndex(1)])
+      const view = await h.service.open(h.target, h.caller)
+      const open = vi.mocked(h.dependencies.immutable.openContent).getMockImplementation()!
+      vi.mocked(h.dependencies.immutable.openContent).mockImplementation(async (input) => {
+        const lease = await open(input)
+        if (input.inputFileVersionId !== 'receiving-author-a-0') return lease
+        return {
+          ...lease,
+          readRange: async (...args) => {
+            const body = await lease.readRange(...args)
+            if (change === 'index-bytes') h.bodies.set('final-a', Buffer.from('{}'))
+            else if (change === 'caller') h.setCurrent(false)
+            else if (change === 'scope')
+              vi.mocked(h.dependencies.authorize).mockRejectedValue(new Error('Session deleted'))
+            else h.service.discard(view.viewerId)
+            return body
+          }
+        }
+      })
+      await expect(
+        h.service.media(view.viewerId, 'artifact-version:final-a', 'segment-0', h.caller)
+      ).rejects.toThrow()
+    }
+  )
+
+  it.each([16 * 1024 * 1024, 16 * 1024 * 1024 + 1])(
+    'enforces the independent segment limit for %i bytes with matching declared size and checksum',
+    async (size) => {
+      const index = finalIndex(1)
+      const body = Buffer.alloc(size, 1)
+      const checksum = createHash('sha256').update(body).digest('hex')
+      // The oversized case deliberately supplies an unexpected reader payload: the service
+      // must enforce its own limit, not just rely on the reader's ordinary schema validation.
+      index.recording.media[0].sizeBytes = size
+      index.recording.media[0].checksum = checksum
+      const h = browserCheckpointHarness([index])
+      h.bodies.set('receiving-author-a-0', body)
+      const media = h.document.resources.find((item) => item.versionId === 'receiving-author-a-0')!
+      media.size = size
+      media.checksum = checksum
+      const view = await h.service.open(h.target, h.caller)
+      vi.mocked(h.dependencies.immutable.openContent).mockClear()
+      const result = h.service.media(
+        view.viewerId,
+        'artifact-version:final-a',
+        'segment-0',
+        h.caller
+      )
+      if (size <= 16 * 1024 * 1024) {
+        expect((await result).body.byteLength).toBe(size)
+        expect(h.dependencies.immutable.openContent).toHaveBeenCalledTimes(3)
+      } else {
+        await expect(result).rejects.toMatchObject({ code: 'not-found' })
+        expect(h.dependencies.immutable.openContent).toHaveBeenCalledTimes(1)
+      }
+    }
+  )
+
+  it('keeps non-browser recording media on its existing reader', async () => {
+    const payload = recordedFixture().payload
+    const h = setup(payload)
+    vi.spyOn(replaySource, 'loadReplayDocument').mockResolvedValueOnce(h.document)
+    const expected = { body: Buffer.from('saved image'), mimeType: 'image/png' }
+    vi.mocked(h.dependencies.recordings.readMedia).mockResolvedValue(expected)
+    const view = await h.service.open(h.target, h.caller)
+    expect(
+      await h.service.media(view.viewerId, 'artifact-version:version', 'image', h.caller)
+    ).toEqual(expected)
+    expect(h.dependencies.recordings.readMedia).toHaveBeenCalledWith(
+      { ...h.target, artifactId: 'artifact', versionId: 'version' },
+      'image'
+    )
   })
 })
