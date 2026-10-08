@@ -277,7 +277,8 @@
       "src/main/run-observation/capture-package.integration.test.ts",
       "src/main/run-observation/media-collector.test.ts",
       "src/main/research-demos/owner.macos.integration.test.ts",
-      "src/main/browser-recordings/owner.test.ts"
+      "src/main/browser-recordings/owner.test.ts",
+      "src/main/database/pascalcase-table-names-migration.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

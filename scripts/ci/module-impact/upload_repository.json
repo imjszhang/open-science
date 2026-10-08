@@ -617,7 +617,8 @@
       "src/main/notebook/screened-auxiliary-output.test.ts",
       "src/main/browser-recordings/external-port.test.ts",
       "src/renderer/replay-viewer/browser-recording.integration.test.ts",
-      "src/main/browser-recordings/owner.test.ts"
+      "src/main/browser-recordings/owner.test.ts",
+      "src/main/notebook/source-file-access-analysis.storage-modes.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
