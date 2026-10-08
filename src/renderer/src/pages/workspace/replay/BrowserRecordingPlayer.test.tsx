@@ -3,7 +3,7 @@ import { StrictMode, useLayoutEffect } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { browserRecordingFixture } from './BrowserRecording.test-support'
-import { BrowserRecordingPlayer } from './BrowserRecordingPlayer'
+import { BrowserRecordingPlayer, type BrowserRecordingTransport } from './BrowserRecordingPlayer'
 import { segmentAt } from './browser-recording-playback'
 
 beforeEach(() => {
@@ -233,7 +233,9 @@ it('reserves the viewport and holds one bounded decoded frame only while the nex
   })
   fireEvent.loadedMetadata(first)
   fireEvent.loadedData(first)
+  fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
   first.currentTime = 1.999
+  fireEvent.timeUpdate(first)
   fireEvent.ended(first)
   const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
   expect(canvas.width).toBe(1280)
@@ -260,7 +262,7 @@ it('reserves the viewport and holds one bounded decoded frame only while the nex
   expect(canvas.height).toBe(0)
   expect(canvas.hidden).toBe(true)
   fireEvent.ended(second)
-  expect(screen.queryByTestId('held-recorded-frame')).toBeNull()
+  expect((screen.getByTestId('held-recorded-frame') as HTMLCanvasElement).hidden).toBe(true)
   expect(screen.getByText('Recording was paused at this time.')).toBeTruthy()
   unmount()
   expect(canvas.width).toBe(0)
@@ -1080,3 +1082,236 @@ it('pauses a current node demoted by a backward seek while keeping its buffer fo
   expect(next.style.visibility).toBe('visible')
   expect(load.mock.contexts).not.toContain(next)
 })
+
+const decodedVideo = (element: HTMLVideoElement): void => {
+  Object.defineProperties(element, {
+    videoWidth: { configurable: true, value: 1280 },
+    videoHeight: { configurable: true, value: 720 }
+  })
+  fireEvent.loadedMetadata(element)
+  fireEvent.loadedData(element)
+}
+const mockCanvas = (): ReturnType<typeof vi.fn> => {
+  const drawImage = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage
+  } as unknown as CanvasRenderingContext2D)
+  return drawImage
+}
+
+it.each([130, 480])(
+  'holds a real bounded frame through a %sms segment hole, without changing the clock or allowing references',
+  (hole) => {
+    const drawImage = mockCanvas()
+    const recording = browserRecordingFixture()
+    recording.segments[1].startMs = 2000 + hole
+    const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+    const onSeek = vi.fn()
+    const transport = (offsetMs: number, playing = true): BrowserRecordingTransport => ({
+      offsetMs,
+      playing,
+      speed: 1,
+      onSeek
+    })
+    const { rerender } = render(<BrowserRecordingPlayer {...props} transport={transport(1900)} />)
+    const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+    const next = screen.getByTestId('preloaded-recorded-segment') as HTMLVideoElement
+    decodedVideo(first)
+    decodedVideo(next)
+    first.currentTime = 1.999
+    const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+    expect(canvas.width).toBe(0) // no earlier held state: the gap-entry layout must capture it
+    const aspect = screen.getByTestId('recorded-video-surface').style.aspectRatio
+    rerender(<BrowserRecordingPlayer {...props} transport={transport(2010)} />)
+    expect(screen.getByTestId('held-recorded-frame')).toBe(canvas)
+    expect(canvas.hidden).toBe(false)
+    expect(canvas.width).toBe(1280)
+    expect(drawImage).toHaveBeenCalledWith(first, 0, 0, 1280, 720)
+    expect(screen.getByTestId('recorded-segment-gap').textContent).toBe(
+      'No footage at this time. Showing the last recorded frame.'
+    )
+    expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
+    expect(screen.getByTestId('recorded-video-surface').style.aspectRatio).toBe(aspect)
+    expect(
+      screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+    ).toBe(true)
+    // Advance through a longer hole in ordinary clock ticks, then promote the ready decoder.
+    if (hole > 250) rerender(<BrowserRecordingPlayer {...props} transport={transport(2250)} />)
+    rerender(<BrowserRecordingPlayer {...props} transport={transport(2000 + hole + 20)} />)
+    expect(screen.getByLabelText('Recorded webpage')).toBe(next)
+    expect(next.currentTime).toBe(0) // a 20ms master tick does not start a redundant seek
+    expect(next.style.visibility).toBe('visible')
+    expect(canvas.hidden).toBe(true)
+    expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+    expect(onSeek).not.toHaveBeenCalled()
+  }
+)
+
+it('clears a held hole frame when paused or seeking backwards and does not show it after jumping into a hole', () => {
+  mockCanvas()
+  const recording = browserRecordingFixture()
+  recording.segments[1].startMs = 2130
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const transport = (offsetMs: number, playing: boolean): BrowserRecordingTransport => ({
+    offsetMs,
+    playing,
+    speed: 1,
+    onSeek
+  })
+  const { rerender } = render(
+    <BrowserRecordingPlayer {...props} transport={transport(1900, true)} />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  decodedVideo(first)
+  first.currentTime = 1.99
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(2010, true)} />)
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(canvas.hidden).toBe(false)
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(2010, false)} />)
+  expect(canvas.hidden).toBe(true)
+  expect(canvas.width).toBe(0)
+  expect(screen.getByText('No webpage footage was recorded at this time.')).toBeTruthy()
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(2050, true)} />)
+  expect(canvas.hidden).toBe(true)
+  expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(1000, false)} />)
+  expect(canvas.width).toBe(0)
+})
+
+it.each(['long', 'explicit', 'resized', 'missing'] as const)('does not bridge a %s gap', (kind) => {
+  mockCanvas()
+  const recording = browserRecordingFixture()
+  recording.segments[1].startMs = kind === 'long' ? 2600 : 2130
+  if (kind === 'explicit')
+    recording.coverage.gaps.unshift({ startMs: 2000, endMs: 2130, reason: 'paused' })
+  if (kind === 'resized') recording.segments[1].width = 640
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl, missingMediaKeys: kind === 'missing' ? ['media-1'] : [] }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1900, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  decodedVideo(first)
+  first.currentTime = 1.99
+  fireEvent.timeUpdate(first)
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 2010, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(canvas.hidden).toBe(true)
+  expect(canvas.width).toBe(0)
+  expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+})
+
+it('holds the last decoded frame during internal drift correction but clears it for a paused seek', () => {
+  const drawImage = mockCanvas()
+  const recording = browserRecordingFixture()
+  const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+  const onSeek = vi.fn()
+  const transport = (offsetMs: number, playing = true): BrowserRecordingTransport => ({
+    offsetMs,
+    playing,
+    speed: 1,
+    onSeek
+  })
+  const { rerender } = render(<BrowserRecordingPlayer {...props} transport={transport(500)} />)
+  const element = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  decodedVideo(element)
+  element.currentTime = 0.4
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(700)} />)
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(element.currentTime).toBe(0.7)
+  expect(canvas.hidden).toBe(false)
+  expect(drawImage).toHaveBeenCalledWith(element, 0, 0, 1280, 720)
+  expect(
+    screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+  ).toBe(true)
+  fireEvent.seeking(element)
+  expect(canvas.hidden).toBe(false)
+  fireEvent.seeked(element)
+  expect(canvas.hidden).toBe(true)
+  expect(element.style.visibility).toBe('visible')
+  rerender(<BrowserRecordingPlayer {...props} transport={transport(1200, false)} />)
+  expect(element.currentTime).toBe(1.2)
+  expect(canvas.width).toBe(0)
+  expect(canvas.hidden).toBe(true)
+})
+
+it('uses its one cached actual frame when the departing decoder has lost readyState at the tail', () => {
+  mockCanvas()
+  const recording = browserRecordingFixture()
+  recording.segments[1].startMs = 2130
+  const onSeek = vi.fn()
+  const props = { recording, mediaUrl }
+  const { rerender } = render(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 1900, playing: true, speed: 1, onSeek }}
+    />
+  )
+  const first = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  decodedVideo(first)
+  first.currentTime = 1.95
+  fireEvent.timeUpdate(first)
+  const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+  expect(canvas.width).toBe(1280)
+  expect(canvas.hidden).toBe(true)
+  Object.defineProperty(first, 'readyState', { configurable: true, value: 1 })
+  rerender(
+    <BrowserRecordingPlayer
+      {...props}
+      transport={{ offsetMs: 2010, playing: true, speed: 1, onSeek }}
+    />
+  )
+  expect(canvas.width).toBe(1280)
+  expect(canvas.hidden).toBe(false)
+  expect(screen.getByTestId('recorded-segment-gap')).toBeTruthy()
+})
+
+it.each([1.7, Infinity])(
+  'does not seek beyond the decoder endpoint when duration is %s',
+  (duration) => {
+    const recording = browserRecordingFixture()
+    const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+    const onSeek = vi.fn()
+    const { rerender } = render(
+      <BrowserRecordingPlayer
+        {...props}
+        transport={{ offsetMs: 1600, playing: true, speed: 1, onSeek }}
+      />
+    )
+    const element = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+    Object.defineProperty(element, 'duration', { configurable: true, value: duration })
+    decodedVideo(element)
+    element.currentTime = Number.isFinite(duration) ? 1.699 : 1.7
+    Object.defineProperty(element, 'ended', {
+      configurable: true,
+      value: !Number.isFinite(duration)
+    })
+    const endedAt = element.currentTime
+    rerender(
+      <BrowserRecordingPlayer
+        {...props}
+        transport={{ offsetMs: 1800, playing: true, speed: 1, onSeek }}
+      />
+    )
+    rerender(
+      <BrowserRecordingPlayer
+        {...props}
+        transport={{ offsetMs: 1990, playing: true, speed: 1, onSeek }}
+      />
+    )
+    expect(element.currentTime).toBe(endedAt)
+    expect(element.style.visibility).toBe('visible')
+    expect(
+      screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
+    ).toBe(false)
+  }
+)

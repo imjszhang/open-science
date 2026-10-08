@@ -7328,6 +7328,7 @@
     "Coverage combines saved recordings in this branch.": "この分岐に保存された各録画の範囲をまとめて表示します。",
     "Footage: {{from}}–{{to}}": "映像あり：{{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "映像なし：{{from}}–{{to}}",
+    "No footage at this time. Showing the last recorded frame.": "この時点の録画はありません。最後に記録されたフレームを表示しています。",
     "Reference time: {{time}}": "引用時刻：{{time}}",
     "Playback position: {{time}}": "再生位置：{{time}}",
     "Reference time unavailable": "引用時刻は不明です",

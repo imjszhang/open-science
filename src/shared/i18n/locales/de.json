@@ -7488,6 +7488,7 @@
     "Coverage combines saved recordings in this branch.": "Die Zeitbereiche fassen die gespeicherten Aufzeichnungen dieses Zweigs zusammen.",
     "Footage: {{from}}–{{to}}": "Bildmaterial: {{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "Kein Bildmaterial: {{from}}–{{to}}",
+    "No footage at this time. Showing the last recorded frame.": "Zu diesem Zeitpunkt gibt es kein Bildmaterial. Das letzte aufgezeichnete Bild wird angezeigt.",
     "Reference time: {{time}}": "Referenzzeit: {{time}}",
     "Playback position: {{time}}": "Wiedergabeposition: {{time}}",
     "Reference time unavailable": "Referenzzeit nicht verfügbar",

@@ -109,6 +109,16 @@ const RecordedSegmentVideo = ({
     />
   )
 }
+const boundedMediaTime = (element: HTMLVideoElement, requested: number): number => {
+  const target = Math.max(0, requested)
+  // MediaRecorder WebM often reports Infinity. ended is then the decoder's reliable endpoint;
+  // a partial buffered range is not proof that the recording itself ends there.
+  if (element.ended && target >= element.currentTime) return element.currentTime
+  return Number.isFinite(element.duration) && element.duration > 0
+    ? Math.min(target, Math.max(0, element.duration - 0.001))
+    : target
+}
+
 /** Passive media only: no project address, HTML, environment or execution capability enters here. */
 const BrowserRecordingPlayerContent = ({
   recording,
@@ -153,6 +163,8 @@ const BrowserRecordingPlayerContent = ({
   const [loadingNotice, setLoadingNotice] = useState<string>()
   const [decodedPosition, setDecodedPosition] = useState<{ source: string; offsetMs: number }>()
   const [heldOffset, setHeldOffset] = useState<number>()
+  const heldSegment = useRef<BrowserRecordingSegment | undefined>(undefined)
+  const [heldSource, setHeldSource] = useState<BrowserRecordingSegment>()
   const [asking, setAsking] = useState(false)
   const [askFailed, setAskFailed] = useState(false)
   const [decodedSize, setDecodedSize] = useState<{
@@ -162,6 +174,8 @@ const BrowserRecordingPlayerContent = ({
   }>()
   const mounted = useRef(true)
   const desiredOffset = useRef(firstOffset)
+  const lastClock = useRef({ offsetMs, playing })
+  const forwardPlayback = useRef(false)
   const segment = segmentAt(recording, offsetMs)
   const missing = Boolean(segment && missingMediaKeys?.includes(segment.mediaKey))
   const source = segment && active && !missing ? mediaUrl(segment.mediaKey) : null
@@ -185,6 +199,30 @@ const BrowserRecordingPlayerContent = ({
     (item) => offsetMs >= item.startMs && offsetMs < item.endMs
   )
   const next = recording.segments.find((item) => item.startMs > offsetMs)
+  const shortBoundary = (
+    previous: BrowserRecordingSegment,
+    following: BrowserRecordingSegment
+  ): boolean =>
+    following.startMs >= previous.endMs &&
+    following.startMs - previous.endMs <= 500 &&
+    previous.width === following.width &&
+    previous.height === following.height &&
+    !recording.coverage.gaps.some(
+      (item) => item.startMs < following.startMs && item.endMs > previous.endMs
+    )
+  const hasShortHole = (previous: BrowserRecordingSegment | undefined): boolean =>
+    Boolean(
+      controlled &&
+      active &&
+      playing &&
+      !segment &&
+      next &&
+      previous &&
+      offsetMs >= previous.endMs &&
+      offsetMs < next.startMs &&
+      shortBoundary(previous, next)
+    )
+  const shortHole = hasShortHole(heldSource)
   // At most the current and immediately following segment; a gap may preload its successor
   // but cannot display or cite it until the research clock actually reaches that segment.
   const slots =
@@ -205,6 +243,8 @@ const BrowserRecordingPlayerContent = ({
   }, [loading, sourceIdentity])
   const clearHeldFrame = (): void => {
     setHeldOffset(undefined)
+    heldSegment.current = undefined
+    setHeldSource(undefined)
     if (heldFrame.current) {
       heldFrame.current.width = 0
       heldFrame.current.height = 0
@@ -219,6 +259,7 @@ const BrowserRecordingPlayerContent = ({
       !element ||
       !canvas ||
       !capturedSegment ||
+      element.seeking ||
       element.readyState < 2 ||
       !element.videoWidth ||
       !element.videoHeight
@@ -233,6 +274,8 @@ const BrowserRecordingPlayerContent = ({
       const context = canvas.getContext('2d')
       if (!context) return
       context.drawImage(element, 0, 0, canvas.width, canvas.height)
+      heldSegment.current = capturedSegment
+      setHeldSource(capturedSegment)
       setHeldOffset(
         Math.min(
           capturedSegment.endMs - 1,
@@ -274,7 +317,7 @@ const BrowserRecordingPlayerContent = ({
     setOffsetMs(bounded)
     const target = segmentAt(recording, bounded)
     if (video.current && target && target.segmentId === segment?.segmentId)
-      video.current.currentTime = (bounded - target.startMs) / 1000
+      video.current.currentTime = boundedMediaTime(video.current, (bounded - target.startMs) / 1000)
   }
   useEffect(() => {
     const update = (): void => setDocumentVisible(document.visibilityState !== 'hidden')
@@ -348,23 +391,27 @@ const BrowserRecordingPlayerContent = ({
       previousSegment: BrowserRecordingSegment | undefined
     ) => {
       if (!controlled) return
-      const nextSegment = segmentAt(recording, offsetMs)
-      // The master clock may cross the boundary before the video's ended event. Retain only
-      // an adjacent decoded frame while loading, never a frame across a seek or missing interval.
+      const previous = previousSegment ?? heldSegment.current
+      const following = segmentAt(recording, offsetMs) ?? next
+      const elapsed = offsetMs - lastClock.current.offsetMs
+      // Only normal forward playback may hold a historical frame. Explicit seeks, missing
+      // files, declared gaps and larger holes keep their existing unavailable presentation.
       if (
         active &&
         playing &&
-        previousSegment &&
-        nextSegment &&
-        nextSegment.segmentId !== previousSegment.segmentId &&
-        nextSegment.startMs >= previousSegment.endMs &&
-        nextSegment.startMs - previousSegment.endMs <= 250 &&
-        offsetMs - nextSegment.startMs <= 250 &&
-        !recording.coverage.gaps.some(
-          (item) => item.startMs < nextSegment.startMs && item.endMs > previousSegment.endMs
-        )
+        lastClock.current.playing &&
+        elapsed >= 0 &&
+        elapsed <= 250 * speed &&
+        previous &&
+        following &&
+        previous.segmentId !== following.segmentId &&
+        offsetMs >= previous.endMs &&
+        offsetMs - following.startMs <= 250 * speed &&
+        shortBoundary(previous, following) &&
+        !missingMediaKeys?.includes(following.mediaKey)
       ) {
-        retainDecodedFrame(previousElement, previousSegment)
+        // Gap -> next has no departing video: retain the existing canvas until decoding finishes.
+        if (previousElement && previousSegment) retainDecodedFrame(previousElement, previousSegment)
       } else clearHeldFrame()
     }
   )
@@ -375,6 +422,27 @@ const BrowserRecordingPlayerContent = ({
     // Capture the departing element before React removes it, using the latest research clock.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceIdentity])
+  const updateFrameContinuity = useEffectEvent(() => {
+    const elapsed = offsetMs - lastClock.current.offsetMs
+    forwardPlayback.current =
+      active && playing && lastClock.current.playing && elapsed >= 0 && elapsed <= 250 * speed
+    if (
+      heldSegment.current &&
+      (!active ||
+        !playing ||
+        !aligned ||
+        !forwardPlayback.current ||
+        failed ||
+        missing ||
+        (!segment && !hasShortHole(heldSegment.current)))
+    )
+      clearHeldFrame()
+    lastClock.current = { offsetMs, playing }
+  })
+  useLayoutEffect(
+    () => updateFrameContinuity(),
+    [active, playing, aligned, offsetMs, speed, failed, missing, sourceIdentity]
+  )
   useEffect(() => {
     if (!controlled || !active || !segment || !source) return
     const element = video.current
@@ -382,14 +450,19 @@ const BrowserRecordingPlayerContent = ({
     // A loading/seeking decoder must finish before correcting drift again. Chasing the
     // continuously advancing master clock during buffering repeatedly restarts decoding.
     if (playing && decodedSource !== sourceIdentity) return
-    const targetSeconds = Math.max(0, (offsetMs - segment.startMs) / 1000)
+    const targetSeconds = boundedMediaTime(element, (offsetMs - segment.startMs) / 1000)
     // Let the media decoder advance between research-clock updates; continuously resetting
     // currentTime causes seek storms. Pauses and explicit jumps still settle at the exact time.
     if (Math.abs(element.currentTime - targetSeconds) > (playing ? 0.15 : 0.001)) {
+      if (playing && forwardPlayback.current) retainDecodedFrame(element, segment)
+      else clearHeldFrame()
       setDecodedSource(undefined)
       setWaitingSource(undefined)
       element.currentTime = targetSeconds
     }
+    // Frame capture uses the current decoder without restarting synchronization when its
+    // presentation-only held-frame state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlled, active, sourceIdentity, offsetMs, playing, segment, source, decodedSource])
   useEffect(() => {
     const element = video.current
@@ -491,7 +564,10 @@ const BrowserRecordingPlayerContent = ({
   const compact = presentationMode === 'research' || sharedAction
   const centralized = sharedAction || (presentationMode === 'research' && hasActionCallback)
   const dimensions =
-    decodedSize && decodedSize.source === sourceIdentity && decodedSize.width && decodedSize.height
+    decodedSize &&
+    (!segment || decodedSize.source === sourceIdentity) &&
+    decodedSize.width &&
+    decodedSize.height
       ? decodedSize
       : segment
   const status = missing ? (
@@ -505,7 +581,7 @@ const BrowserRecordingPlayerContent = ({
         onClick: retry
       }}
     />
-  ) : source && segment ? null : segment && active ? (
+  ) : (source && segment) || (shortHole && heldOffset !== undefined) ? null : segment && active ? (
     <ErrorNotice
       inline
       title={t('Could not read the recorded material.')}
@@ -639,11 +715,11 @@ const BrowserRecordingPlayerContent = ({
                   height: element.videoHeight
                 })
                 element.playbackRate = speed
-                const target = Math.max(
-                  0,
+                const target = boundedMediaTime(
+                  element,
                   ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
                 )
-                if (Math.abs(element.currentTime - target) > 0.001) {
+                if (Math.abs(element.currentTime - target) > (playing ? 0.15 : 0.001)) {
                   setDecodedSource(undefined)
                   setWaitingSource(undefined)
                   element.currentTime = target
@@ -671,8 +747,8 @@ const BrowserRecordingPlayerContent = ({
                   width: event.currentTarget.videoWidth,
                   height: event.currentTarget.videoHeight
                 })
-                const target = Math.max(
-                  0,
+                const target = boundedMediaTime(
+                  event.currentTarget,
                   ((controlled ? offsetMs : desiredOffset.current) - segment.startMs) / 1000
                 )
                 if (Math.abs(event.currentTarget.currentTime - target) > 0.001)
@@ -718,6 +794,8 @@ const BrowserRecordingPlayerContent = ({
                   segment.endMs - 1,
                   segment.startMs + Math.round(event.currentTarget.currentTime * 1000)
                 )
+                if (playing && event.currentTarget.readyState >= 2)
+                  retainDecodedFrame(event.currentTarget, segment)
                 if (sourceIdentity) setDecodedPosition({ source: sourceIdentity, offsetMs: value })
                 if (controlled) return
                 desiredOffset.current = value
@@ -726,6 +804,7 @@ const BrowserRecordingPlayerContent = ({
               onEnded={(event) => {
                 if (event.currentTarget !== video.current || !active || !segment) return
                 if (controlled) {
+                  if (playing) retainDecodedFrame(event.currentTarget, segment)
                   event.currentTarget.pause()
                   return
                 }
@@ -759,14 +838,21 @@ const BrowserRecordingPlayerContent = ({
               }}
             />
           ))}
-          {source && segment ? (
-            <canvas
-              ref={setHeldFrameNode}
-              aria-hidden="true"
-              hidden={!loading || heldOffset === undefined}
-              className="absolute inset-0 h-full w-full object-contain"
-              data-testid="held-recorded-frame"
-            />
+          <canvas
+            ref={setHeldFrameNode}
+            aria-hidden="true"
+            hidden={!active || !playing || (!loading && !shortHole) || heldOffset === undefined}
+            className="absolute inset-0 h-full w-full object-contain"
+            data-testid="held-recorded-frame"
+          />
+          {shortHole && heldOffset !== undefined ? (
+            <div
+              role="status"
+              data-testid="recorded-segment-gap"
+              className="pointer-events-none absolute bottom-3 right-3 max-w-[80%] rounded bg-bg-100/90 px-2 py-1 text-xs text-muted-foreground"
+            >
+              {t('No footage at this time. Showing the last recorded frame.')}
+            </div>
           ) : null}
           {loading && loadingNotice === sourceIdentity ? (
             <div

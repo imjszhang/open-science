@@ -537,41 +537,45 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
       const sizes = [
         { width: 1280, height: 720 },
         { width: 540, height: 960 },
+        { width: 1920, height: 480 },
         { width: 1920, height: 480 }
       ]
       const capture = await browser.newPage()
       const clips = await Promise.all(
-        sizes.map(async (size) =>
+        sizes.map(async (size, index) =>
           Buffer.from(
-            await capture.evaluate(async ({ width, height }) => {
-              const canvas = document.createElement('canvas')
-              canvas.width = width
-              canvas.height = height
-              const context = canvas.getContext('2d')!
-              const stream = canvas.captureStream(10)
-              const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' })
-              const chunks: Blob[] = []
-              recorder.ondataavailable = (event) => chunks.push(event.data)
-              const finished = new Promise<Blob>((done) => {
-                recorder.onstop = () => done(new Blob(chunks, { type: 'video/webm' }))
-              })
-              let tick = 0
-              const paint = (): void => {
-                context.fillStyle = '#184b6b'
-                context.fillRect(0, 0, width, height)
-                context.fillStyle = '#fff'
-                context.fillRect((tick++ * 30) % (width - 50), Math.round(height / 2), 40, 40)
-              }
-              paint()
-              recorder.start()
-              const timer = setInterval(paint, 100)
-              await new Promise((done) => setTimeout(done, 1200))
-              clearInterval(timer)
-              recorder.stop()
-              const blob = await finished
-              stream.getTracks().forEach((track) => track.stop())
-              return Array.from(new Uint8Array(await blob.arrayBuffer()))
-            }, size)
+            await capture.evaluate(
+              async ({ width, height, index }) => {
+                const canvas = document.createElement('canvas')
+                canvas.width = width
+                canvas.height = height
+                const context = canvas.getContext('2d')!
+                const stream = canvas.captureStream(10)
+                const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' })
+                const chunks: Blob[] = []
+                recorder.ondataavailable = (event) => chunks.push(event.data)
+                const finished = new Promise<Blob>((done) => {
+                  recorder.onstop = () => done(new Blob(chunks, { type: 'video/webm' }))
+                })
+                let tick = 0
+                const paint = (): void => {
+                  context.fillStyle = index === 3 ? '#b02a2a' : '#184b6b'
+                  context.fillRect(0, 0, width, height)
+                  context.fillStyle = '#fff'
+                  context.fillRect((tick++ * 30) % (width - 50), Math.round(height / 2), 40, 40)
+                }
+                paint()
+                recorder.start()
+                const timer = setInterval(paint, 100)
+                await new Promise((done) => setTimeout(done, 1200))
+                clearInterval(timer)
+                recorder.stop()
+                const blob = await finished
+                stream.getTracks().forEach((track) => track.stop())
+                return Array.from(new Uint8Array(await blob.arrayBuffer()))
+              },
+              { ...size, index }
+            )
           )
         )
       )
@@ -581,7 +585,7 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
         version: 1,
         recordingId: 'viewport-e2e',
         startedAt: 100000,
-        durationMs: 3000,
+        durationMs: 4130,
         media: clips.map((bytes, index) => ({
           mediaKey: `clip-${index}`,
           name: `clip-${index}.webm`,
@@ -594,8 +598,8 @@ it.skipIf(process.env.RUN_REPLAY_VIEWER_BROWSER !== '1')(
           ...size,
           segmentId: `segment-${index}`,
           mediaKey: `clip-${index}`,
-          startMs: index * 1000,
-          endMs: (index + 1) * 1000,
+          startMs: index * 1000 + (index === 3 ? 130 : 0),
+          endMs: (index + 1) * 1000 + (index === 3 ? 130 : 0),
           codec: 'vp8',
           frameRate: 10
         })),
@@ -668,11 +672,13 @@ import {createRoot} from 'react-dom/client'
 import {useBrowserRecordingTransportHost} from './src/renderer/src/pages/workspace/replay/use-browser-recording-transport'
 const url=${JSON.stringify(access.url)}
 function App(){
- const iframeRef=useRef(null),[offset,setOffset]=useState(500)
- const playback={recordedAt:100000+offset,playing:false,speed:1,presentation:'research',onSeekRecordedAt:at=>setOffset(at-100000)}
+ const iframeRef=useRef(null),[offset,setOffset]=useState(500),[playing,setPlaying]=useState(false)
+ window.setResearchPlayback=(value,isPlaying)=>{setOffset(value);setPlaying(isPlaying)}
+ const playback={recordedAt:100000+offset,playing,speed:1,presentation:'research',onSeekRecordedAt:at=>setOffset(at-100000)}
  const bridge=useBrowserRecordingTransportHost({iframeRef,playback,enabled:true,origin:new URL(url).origin})
  return <main style={{height:'100dvh',display:'flex',flexDirection:'column'}}>
- <input aria-label="Research position" type="range" min="0" max="2999" value={offset} onChange={event=>setOffset(Number(event.target.value))} style={{flexShrink:0,height:32,margin:0}}/>
+ <input aria-label="Research position" type="range" min="0" max="4129" value={offset} onChange={event=>{setPlaying(false);setOffset(Number(event.target.value))}} style={{flexShrink:0,height:32,margin:0}}/>
+ <output aria-label="Research reference state">{!bridge.action||bridge.action.disabled?'disabled':'enabled'}</output>
  <iframe ref={iframeRef} name="open-science-research-clock" onLoad={bridge.onLoad} title="Research recording" src={url} sandbox="allow-scripts allow-same-origin allow-forms" style={{display:'block',width:'100%',flex:1,minHeight:0,border:0}}/>
  </main>
 }
@@ -705,7 +711,7 @@ createRoot(document.getElementById('root')).render(<App/> )`
       for (const [index, size] of sizes.entries()) {
         await page
           .getByRole('slider', { name: 'Research position' })
-          .fill(String(index * 1000 + 500))
+          .fill(String(recording.segments[index].startMs + 500))
         await expect(video).toHaveAttribute('src', `/api/recording/media?mediaKey=clip-${index}`)
         await expect
           .poll(() =>
@@ -795,7 +801,7 @@ createRoot(document.getElementById('root')).render(<App/> )`
             )
           ).toBe(500)
           expect(await page.getByRole('slider', { name: 'Research position' }).inputValue()).toBe(
-            String(index * 1000 + 500)
+            String(recording.segments[index].startMs + 500)
           )
         }
         expect(
@@ -806,6 +812,71 @@ createRoot(document.getElementById('root')).render(<App/> )`
         ).toBe(true)
         await decoder?.dispose()
       }
+      // A real 130ms segment hole keeps the last real pixels and the same viewport size.
+      if ((await stage.getAttribute('data-size-mode')) === 'actual')
+        await child.getByRole('button', { name: 'Fit to window', exact: true }).click()
+      const clock = async (offset: number, playing: boolean): Promise<void> => {
+        await page.evaluate(
+          ({ offset, playing }) => {
+            ;(
+              window as unknown as {
+                setResearchPlayback: (offset: number, playing: boolean) => void
+              }
+            ).setResearchPlayback(offset, playing)
+          },
+          { offset, playing }
+        )
+      }
+      await clock(2950, false)
+      await expect(video).toBeVisible()
+      await expect
+        .poll(() =>
+          video.evaluate((element: HTMLVideoElement) => Math.round(element.currentTime * 1000))
+        )
+        .toBe(950)
+      const nextDecoder = await child.getByTestId('preloaded-recorded-segment').elementHandle()
+      await expect
+        .poll(() => nextDecoder!.evaluate((element: HTMLVideoElement) => element.readyState))
+        .toBeGreaterThanOrEqual(2)
+      const beforeHole = await surface.boundingBox()
+      await clock(2950, true)
+      await expect
+        .poll(() => video.evaluate((element: HTMLVideoElement) => element.paused))
+        .toBe(false)
+      await clock(3010, true)
+      await expect(child.getByTestId('recorded-segment-gap')).toBeVisible()
+      const held = child.getByTestId('held-recorded-frame')
+      await expect(held).toBeVisible()
+      const heldPixels = await held.evaluate((canvas: HTMLCanvasElement) => ({
+        width: canvas.width,
+        height: canvas.height,
+        rgba: [...canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data]
+      }))
+      expect({ width: heldPixels.width, height: heldPixels.height }).toEqual({
+        width: 1280,
+        height: 320
+      })
+      // VP8/scaling can round opacity by one. Assert actual opaque blue prior footage,
+      // not an empty canvas or the red future segment that is already preloaded.
+      expect(heldPixels.rgba[3]).toBeGreaterThanOrEqual(250)
+      expect(heldPixels.rgba[2] - heldPixels.rgba[0]).toBeGreaterThan(40)
+      expect(await surface.boundingBox()).toEqual(beforeHole)
+      await expect(video).toHaveCount(0)
+      await expect(page.getByLabel('Research reference state')).toHaveText('disabled')
+      await clock(3130 + 20, true)
+      await expect(video).toBeVisible()
+      expect(await video.evaluate((element, preloaded) => element === preloaded, nextDecoder)).toBe(
+        true
+      )
+      expect(await surface.boundingBox()).toEqual(beforeHole)
+      await expect(child.getByTestId('recorded-segment-gap')).toHaveCount(0)
+      await expect(page.getByLabel('Research reference state')).toHaveText('enabled')
+      await clock(3010, false)
+      await expect(
+        child.getByText('No webpage footage was recorded at this time.', { exact: true })
+      ).toBeVisible()
+      await expect(held).toBeHidden()
+      expect(await held.evaluate((canvas: HTMLCanvasElement) => canvas.width)).toBe(0)
       expect(liveCalls).toBe(0)
       expect(errors).toEqual([])
     } finally {
