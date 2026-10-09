@@ -7796,7 +7796,6 @@
     "Coverage combines saved recordings in this branch.": "Периоды объединяют сохранённые записи этой ветки.",
     "Footage: {{from}}–{{to}}": "Видео: {{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "Нет видео: {{from}}–{{to}}",
-    "No footage at this time. Showing the last recorded frame.": "Для этого момента нет записи. Показан последний записанный кадр.",
     "Reference time: {{time}}": "Время ссылки: {{time}}",
     "Playback position: {{time}}": "Позиция воспроизведения: {{time}}",
     "Reference time unavailable": "Время ссылки недоступно",

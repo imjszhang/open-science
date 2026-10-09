@@ -7327,7 +7327,6 @@
     "Coverage combines saved recordings in this branch.": "이 분기에 저장된 녹화의 범위를 합쳐 표시합니다.",
     "Footage: {{from}}–{{to}}": "영상 있음: {{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "영상 없음: {{from}}–{{to}}",
-    "No footage at this time. Showing the last recorded frame.": "이 시점에는 녹화 영상이 없습니다. 마지막으로 녹화된 프레임을 표시합니다.",
     "Reference time: {{time}}": "참조 시점: {{time}}",
     "Playback position: {{time}}": "재생 위치: {{time}}",
     "Reference time unavailable": "참조 시점을 알 수 없음",

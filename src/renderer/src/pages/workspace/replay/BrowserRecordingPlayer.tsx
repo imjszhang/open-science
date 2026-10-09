@@ -563,6 +563,8 @@ const BrowserRecordingPlayerContent = ({
   }, [hasActionCallback, actionLabel, askDisabled, asking, actionRecordedAt, actionTitle])
   const compact = presentationMode === 'research' || sharedAction
   const centralized = sharedAction || (presentationMode === 'research' && hasActionCallback)
+  const displayedSegment =
+    segment ?? (shortHole && heldOffset !== undefined ? heldSource : undefined)
   const dimensions =
     decodedSize &&
     (!segment || decodedSize.source === sourceIdentity) &&
@@ -691,7 +693,7 @@ const BrowserRecordingPlayerContent = ({
           surfaceTestId="recorded-video-surface"
           metadata={
             compact && dimensions
-              ? `${dimensions.width} × ${dimensions.height}${segment ? ` · WebM · ${segment.codec.toUpperCase()}` : ''}`
+              ? `${dimensions.width} × ${dimensions.height}${displayedSegment ? ` · WebM · ${displayedSegment.codec.toUpperCase()}` : ''}`
               : undefined
           }
         >
@@ -845,15 +847,6 @@ const BrowserRecordingPlayerContent = ({
             className="absolute inset-0 h-full w-full object-contain"
             data-testid="held-recorded-frame"
           />
-          {shortHole && heldOffset !== undefined ? (
-            <div
-              role="status"
-              data-testid="recorded-segment-gap"
-              className="pointer-events-none absolute bottom-3 right-3 max-w-[80%] rounded bg-bg-100/90 px-2 py-1 text-xs text-muted-foreground"
-            >
-              {t('No footage at this time. Showing the last recorded frame.')}
-            </div>
-          ) : null}
           {loading && loadingNotice === sourceIdentity ? (
             <div
               role="status"

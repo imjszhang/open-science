@@ -7657,7 +7657,6 @@
     "Coverage combines saved recordings in this branch.": "La cobertura combina las grabaciones guardadas en esta rama.",
     "Footage: {{from}}–{{to}}": "Con grabación: {{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "Sin grabación: {{from}}–{{to}}",
-    "No footage at this time. Showing the last recorded frame.": "No hay imágenes grabadas en este momento. Se muestra el último fotograma grabado.",
     "Reference time: {{time}}": "Momento de la referencia: {{time}}",
     "Playback position: {{time}}": "Posición de reproducción: {{time}}",
     "Reference time unavailable": "Momento de la referencia no disponible",

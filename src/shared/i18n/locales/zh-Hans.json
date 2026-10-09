@@ -7329,7 +7329,6 @@
     "Coverage combines saved recordings in this branch.": "覆盖范围汇总了此分支保存的各份录制。",
     "Footage: {{from}}–{{to}}": "有画面：{{from}}–{{to}}",
     "No footage: {{from}}–{{to}}": "无画面：{{from}}–{{to}}",
-    "No footage at this time. Showing the last recorded frame.": "此时没有录像，暂时显示上一帧。",
     "Reference time: {{time}}": "引用时刻：{{time}}",
     "Playback position: {{time}}": "播放位置：{{time}}",
     "Reference time unavailable": "引用时刻不可用",

@@ -1100,12 +1100,17 @@ const mockCanvas = (): ReturnType<typeof vi.fn> => {
 }
 
 it.each([130, 480])(
-  'holds a real bounded frame through a %sms segment hole, without changing the clock or allowing references',
+  'silently holds a real bounded frame through a %sms segment hole, without changing the clock or allowing references',
   (hole) => {
     const drawImage = mockCanvas()
     const recording = browserRecordingFixture()
     recording.segments[1].startMs = 2000 + hole
-    const props = { recording, mediaUrl, onAskMoment: vi.fn() }
+    const props = {
+      recording,
+      mediaUrl,
+      onAskMoment: vi.fn(),
+      presentationMode: 'research' as const
+    }
     const onSeek = vi.fn()
     const transport = (offsetMs: number, playing = true): BrowserRecordingTransport => ({
       offsetMs,
@@ -1121,28 +1126,38 @@ it.each([130, 480])(
     first.currentTime = 1.999
     const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
     expect(canvas.width).toBe(0) // no earlier held state: the gap-entry layout must capture it
+    const viewport = screen.getByTestId('recorded-media-viewport')
+    const metadata = screen.getByText('1280 × 720 · WebM · VP8')
     const aspect = screen.getByTestId('recorded-video-surface').style.aspectRatio
     rerender(<BrowserRecordingPlayer {...props} transport={transport(2010)} />)
     expect(screen.getByTestId('held-recorded-frame')).toBe(canvas)
     expect(canvas.hidden).toBe(false)
     expect(canvas.width).toBe(1280)
     expect(drawImage).toHaveBeenCalledWith(first, 0, 0, 1280, 720)
-    expect(screen.getByTestId('recorded-segment-gap').textContent).toBe(
-      'No footage at this time. Showing the last recorded frame.'
-    )
+    expect(screen.getByText('1280 × 720 · WebM · VP8')).toBe(metadata)
+    expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+    expect(viewport.querySelector('[role="status"], [aria-live]')).toBeNull()
+    expect(viewport.textContent).not.toContain('No footage at this time.')
     expect(screen.queryByLabelText('Recorded webpage')).toBeNull()
     expect(screen.getByTestId('recorded-video-surface').style.aspectRatio).toBe(aspect)
     expect(
       screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
     ).toBe(true)
     // Advance through a longer hole in ordinary clock ticks, then promote the ready decoder.
-    if (hole > 250) rerender(<BrowserRecordingPlayer {...props} transport={transport(2250)} />)
+    if (hole > 250) {
+      rerender(<BrowserRecordingPlayer {...props} transport={transport(2250)} />)
+      expect(canvas.hidden).toBe(false)
+      expect(viewport.querySelector('[role="status"], [aria-live]')).toBeNull()
+      expect(screen.getByText('1280 × 720 · WebM · VP8')).toBe(metadata)
+    }
     rerender(<BrowserRecordingPlayer {...props} transport={transport(2000 + hole + 20)} />)
     expect(screen.getByLabelText('Recorded webpage')).toBe(next)
     expect(next.currentTime).toBe(0) // a 20ms master tick does not start a redundant seek
     expect(next.style.visibility).toBe('visible')
     expect(canvas.hidden).toBe(true)
+    expect(screen.getByText('1280 × 720 · WebM · VP8')).toBe(metadata)
     expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+    expect(viewport.querySelector('[role="status"], [aria-live]')).toBeNull()
     expect(onSeek).not.toHaveBeenCalled()
   }
 )
@@ -1208,6 +1223,14 @@ it.each(['long', 'explicit', 'resized', 'missing'] as const)('does not bridge a 
   expect(canvas.hidden).toBe(true)
   expect(canvas.width).toBe(0)
   expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+  expect(
+    screen.getByText(
+      kind === 'explicit'
+        ? 'Recording was paused at this time.'
+        : 'No webpage footage was recorded at this time.'
+    )
+  ).toBeTruthy()
+  expect(onSeek).not.toHaveBeenCalled()
 })
 
 it('holds the last decoded frame during internal drift correction but clears it for a paused seek', () => {
@@ -1272,7 +1295,10 @@ it('uses its one cached actual frame when the departing decoder has lost readySt
   )
   expect(canvas.width).toBe(1280)
   expect(canvas.hidden).toBe(false)
-  expect(screen.getByTestId('recorded-segment-gap')).toBeTruthy()
+  expect(screen.queryByTestId('recorded-segment-gap')).toBeNull()
+  expect(
+    screen.getByTestId('recorded-media-viewport').querySelector('[role="status"], [aria-live]')
+  ).toBeNull()
 })
 
 it.each([1.7, Infinity])(
