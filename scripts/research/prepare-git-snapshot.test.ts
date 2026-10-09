@@ -86,6 +86,8 @@ describe('fixed Git source publication snapshots', () => {
     const f = await fixture({
       '.env': 'FIXTURE_SECRET=not-a-real-credential',
       '.env.example': 'FIXTURE_TEMPLATE=',
+      '.envrc': 'DIR_ENV_FIXTURE=not-a-real-credential',
+      'nested/.env-production': 'HYPHEN_ENV_FIXTURE=not-a-real-credential',
       'nested/.env.local': 'nested fixture',
       'nested/.ENV.production': 'mixed-case environment fixture',
       'reports/private.json': 'private fixture',
@@ -105,7 +107,7 @@ describe('fixed Git source publication snapshots', () => {
       'project/source/main.mjs'
     ])
     expect(files.get('project/package.json')?.body.toString()).toBe('{"version":"1.0.0"}\n')
-    expect(manifest.exclusions.files).toHaveLength(6)
+    expect(manifest.exclusions.files).toHaveLength(8)
     expect(manifest.licenseEvidence).toHaveLength(1)
     for (const entry of manifest.files) {
       const content = files.get(`project/${entry.path}`)!.body

@@ -70,7 +70,7 @@ function portablePath(value) {
 }
 
 function exclusionReason(path, extra) {
-  if (path.split('/').some((part) => /^\.env(?:\.|$)/iu.test(part))) return 'environment-file'
+  if (path.split('/').some((part) => /^\.env/iu.test(part))) return 'environment-file'
   if (path.split('/').some((part) => EXCLUDED_DIRECTORIES.has(part.toLowerCase())))
     return 'generated-or-local-data'
   if (extra.some((entry) => path === entry || path.startsWith(`${entry}/`)))
