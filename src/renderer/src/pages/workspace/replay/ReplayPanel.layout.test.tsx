@@ -2,7 +2,9 @@
 import { useEffect, useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { buildObservationReplayDocument } from '@/lib/replay/live-source'
 import type { ReplayDocument, ReplayStep } from '../../../../../shared/replay'
+import type { RunObservationSnapshot } from '../../../../../shared/run-observation'
 import { ReplayPanel, type ReplayPanelProps } from './ReplayPanel'
 import type { ReplayMaterialPlayback, ReplayMaterialView } from './ReplayStage'
 import { useReplayMaterialAction } from './replay-material-action'
@@ -115,7 +117,9 @@ const Material = ({
   )
 }
 
-const harness = (props: Partial<ReplayPanelProps> = {}): MaterialProbe => {
+const harness = (
+  props: Partial<ReplayPanelProps> = {}
+): MaterialProbe & { rerender: (props: Partial<ReplayPanelProps>) => void } => {
   const probe: MaterialProbe = {
     mounts: { project: 0, results: 0 },
     unmounts: { project: 0, results: 0 },
@@ -142,29 +146,34 @@ const harness = (props: Partial<ReplayPanelProps> = {}): MaterialProbe => {
       <Material id={id} active={active} playback={playback} probe={probe} />
     )
   }))
-  render(
-    <ReplayPanel
-      host={null}
-      presentationMode="research"
-      document={makeDocument()}
-      materialViews={materialViews}
-      recordedTimeOrigins={{ main: 10_000 }}
-      initialView={{
-        fingerprint: 'layout-fingerprint',
-        generatorVersion: 3,
-        presentationVersion: 2,
-        clock: 'recorded',
-        branchId: 'main',
-        timeMs: 300,
-        rate: 1
-      }}
-      onAskStep={vi.fn()}
-      readResource={vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' })}
-      readNotebookRun={vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' })}
-      {...props}
-    />
-  )
-  return probe
+  let panelProps: ReplayPanelProps = {
+    host: null,
+    presentationMode: 'research',
+    document: makeDocument(),
+    materialViews,
+    recordedTimeOrigins: { main: 10_000 },
+    initialView: {
+      fingerprint: 'layout-fingerprint',
+      generatorVersion: 3,
+      presentationVersion: 2,
+      clock: 'recorded',
+      branchId: 'main',
+      timeMs: 300,
+      rate: 1
+    },
+    onAskStep: vi.fn(),
+    readResource: vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' }),
+    readNotebookRun: vi.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-recorded' }),
+    ...props
+  }
+  const mounted = render(<ReplayPanel {...panelProps} />)
+  return {
+    ...probe,
+    rerender: (next) => {
+      panelProps = { ...panelProps, ...next }
+      mounted.rerender(<ReplayPanel {...panelProps} />)
+    }
+  }
 }
 
 let frameSequence = 0
@@ -266,6 +275,155 @@ const showAll = (): void => {
 }
 
 describe('research replay layout', () => {
+  it('supports native expanded preview layouts without remounting materials or interrupting playback', async () => {
+    const probe = harness({ host: undefined })
+    await tick(5)
+    const panel = screen.getByTestId('replay-panel')
+    const stage = screen.getByTestId('replay-stage')
+    expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    await tick(2)
+    const before = position()
+
+    probe.rerender({ expanded: true })
+    expect(document.fullscreenElement).toBeNull()
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('split')
+    expect(visible('conversation')).toBe(true)
+    expect(visible('notebook')).toBe(true)
+    expect(position()).toBe(before)
+    expect(screen.getByRole('button', { name: 'Pause replay' })).toBeTruthy()
+    showAll()
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('columns')
+    const project = screen.getByTestId('project-material')
+    fireEvent.change(within(project).getByRole('textbox'), {
+      target: { value: 'Expanded preview reading' }
+    })
+    await tick(2)
+    expect(position()).toBeGreaterThan(before)
+    const expandedPosition = position()
+
+    probe.rerender({ expanded: false })
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('tabs')
+    expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Original conversation' })).toBeTruthy()
+    expect(position()).toBe(expandedPosition)
+    expect(screen.getByRole('button', { name: 'Pause replay' })).toBeTruthy()
+    await tick(2)
+    expect(position()).toBeGreaterThan(expandedPosition)
+
+    probe.rerender({ expanded: true })
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('columns')
+    expect(screen.getByTestId('replay-stage')).toBe(stage)
+    expect(screen.getByTestId('project-material')).toBe(project)
+    expect((within(project).getByRole('textbox') as HTMLInputElement).value).toBe(
+      'Expanded preview reading'
+    )
+    expect(probe.mounts).toEqual({ project: 1, results: 1 })
+    expect(probe.unmounts).toEqual({ project: 0, results: 0 })
+  })
+
+  it('keeps native expanded layout independent of DOM fullscreen entry and exit', async () => {
+    const onToggleExpanded = vi.fn()
+    const probe = harness({ host: undefined, expanded: true, onToggleExpanded })
+    await tick(5)
+    expect(screen.getByRole('button', { name: 'Collapse preview' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Enter full screen' })).toBeTruthy()
+    const panel = enterFullscreen()
+    const exit = vi.fn(async () => changeFullscreen(null))
+    const originalExit = Object.getOwnPropertyDescriptor(document, 'exitFullscreen')
+    Object.defineProperty(document, 'exitFullscreen', { configurable: true, value: exit })
+    try {
+      showAll()
+      fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }))
+      expect(exit).toHaveBeenCalledOnce()
+      expect(onToggleExpanded).not.toHaveBeenCalled()
+      expect(document.fullscreenElement).toBeNull()
+      expect(panel.getAttribute('data-replay-layout-mode')).toBe('columns')
+      expect(screen.getByRole('button', { name: 'Replay layout' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Enter full screen' })).toBeTruthy()
+
+      enterFullscreen()
+      probe.rerender({ expanded: false })
+      expect(document.fullscreenElement).toBe(panel)
+      expect(panel.getAttribute('data-replay-layout-mode')).toBe('columns')
+      expect(screen.getByRole('button', { name: 'Expand preview' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }))
+      expect(panel.getAttribute('data-replay-layout-mode')).toBe('tabs')
+      expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    } finally {
+      if (originalExit) Object.defineProperty(document, 'exitFullscreen', originalExit)
+      else Reflect.deleteProperty(document, 'exitFullscreen')
+    }
+  })
+
+  it('keeps browser expanded previews tabbed until the panel enters DOM fullscreen', async () => {
+    const probe = harness({ expanded: true })
+    await tick(5)
+    const panel = screen.getByTestId('replay-panel')
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('tabs')
+    expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    enterFullscreen()
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('split')
+    changeFullscreen(null)
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('tabs')
+    expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    probe.rerender({ expanded: false })
+    expect(panel.getAttribute('data-replay-layout-mode')).toBe('tabs')
+  })
+
+  it('keeps ordinary native replay in its existing presentation when the preview expands', () => {
+    harness({ host: undefined, presentationMode: undefined, expanded: true })
+    expect(screen.getByTestId('replay-panel').getAttribute('data-replay-presentation')).toBeNull()
+    expect(screen.getByTestId('replay-stage').getAttribute('data-replay-layout')).toBe(
+      'interactive'
+    )
+    expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Original conversation' })).toBeNull()
+  })
+
+  it.each(['live', 'recorded'] as const)(
+    'keeps %s execution evidence in its existing presentation even with research mode and expanded preview',
+    (kind) => {
+      const snapshot: RunObservationSnapshot = {
+        identity: {
+          projectId: 'layout-project',
+          sessionId: 'layout-session',
+          operationId: 'operation'
+        },
+        cursor: { epoch: 'epoch', sequence: 1 },
+        observedAt: 10_000,
+        phase: 'preparing',
+        stepId: 'operation:operation',
+        run: null,
+        artifacts: [],
+        artifactsTruncated: false
+      }
+      const source = {
+        sourceIdentity: 'operation:operation',
+        snapshot,
+        history: [snapshot],
+        onAskSelection: vi.fn()
+      }
+      harness({
+        host: undefined,
+        expanded: true,
+        document: buildObservationReplayDocument([snapshot], 'Execution layout regression'),
+        initialView: undefined,
+        recordedTimeOrigins: undefined,
+        ...(kind === 'live'
+          ? { live: { ...source, connection: 'connected' as const } }
+          : { recorded: source })
+      })
+      expect(screen.getByTestId('replay-live-record')).toBeTruthy()
+      expect(screen.getByTestId('replay-panel').getAttribute('data-replay-presentation')).toBeNull()
+      expect(screen.getByTestId('replay-stage').getAttribute('data-replay-layout')).toBe(
+        'interactive'
+      )
+      expect(screen.queryByRole('button', { name: 'Replay layout' })).toBeNull()
+      expect(screen.queryByRole('tab', { name: 'Original conversation' })).toBeNull()
+    }
+  )
+
   it('opens fullscreen with the original conversation beside Notebook and keeps the original player on exit', async () => {
     harness()
     await tick(5)

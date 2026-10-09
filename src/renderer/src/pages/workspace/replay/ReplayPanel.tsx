@@ -313,6 +313,9 @@ const ReplayPanelContent = ({
   const [focusedPane, setFocusedPane] = useState(materialViewId)
   const [selectedResourcePaneId, setSelectedResourcePaneId] = useState<string>()
   const [fullscreen, setFullscreen] = useState(false)
+  // The desktop workbench expands previews without entering DOM fullscreen.
+  // Both surfaces have room for research panes; only real fullscreen owns its exit/portal.
+  const layoutExpanded = fullscreen || (researchPresentation && host !== null && expanded)
   const paneCatalog = useMemo(
     () => [
       { id: 'conversation', label: t('Original conversation') },
@@ -329,7 +332,7 @@ const ReplayPanelContent = ({
     layout: researchLayout
   } = useResearchReplayLayout({
     enabled: researchPresentation,
-    fullscreen,
+    fullscreen: layoutExpanded,
     paneIds,
     materialId: materialViewId,
     native: host !== null,
@@ -340,7 +343,7 @@ const ReplayPanelContent = ({
     ])
   })
   const focusedPaneId =
-    researchPresentation && fullscreen
+    researchPresentation && layoutExpanded
       ? researchLayout.visiblePaneIds.includes(focusedPane)
         ? focusedPane
         : (researchLayout.visiblePaneIds[0] ?? 'conversation')
@@ -454,7 +457,7 @@ const ReplayPanelContent = ({
     setFocusedPane(materialViewRequest.id)
     rememberMaterial(materialViewRequest.id)
     if (
-      fullscreen &&
+      layoutExpanded &&
       layoutPreferences.mode === 'columns' &&
       !layoutPreferences.visiblePaneIds.includes(materialViewRequest.id)
     )
@@ -1114,7 +1117,7 @@ const ReplayPanelContent = ({
     setFocusedPane(id)
     rememberMaterial(id)
     if (
-      fullscreen &&
+      layoutExpanded &&
       layoutPreferences.mode === 'columns' &&
       !layoutPreferences.visiblePaneIds.includes(id)
     )
@@ -1291,23 +1294,23 @@ const ReplayPanelContent = ({
         className="flex shrink-0 gap-1 overflow-x-auto bg-bg-000 px-2 py-1"
       >
         {paneCatalog
-          .filter((view) => !fullscreen || view.id !== 'conversation')
+          .filter((view) => !layoutExpanded || view.id !== 'conversation')
           .map((view) => (
             <Button
               key={view.id}
               role="tab"
               aria-selected={
-                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+                (layoutExpanded ? layoutPreferences.rightMaterialId : materialViewId) === view.id
               }
-              aria-controls={fullscreen ? `${researchContentId}-material` : researchContentId}
+              aria-controls={layoutExpanded ? `${researchContentId}-material` : researchContentId}
               tabIndex={
-                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+                (layoutExpanded ? layoutPreferences.rightMaterialId : materialViewId) === view.id
                   ? 0
                   : -1
               }
               data-replay-material-view={view.id}
               variant={
-                (fullscreen ? layoutPreferences.rightMaterialId : materialViewId) === view.id
+                (layoutExpanded ? layoutPreferences.rightMaterialId : materialViewId) === view.id
                   ? 'secondary'
                   : 'ghost'
               }
@@ -1574,7 +1577,7 @@ const ReplayPanelContent = ({
             </Tooltip>
           </TooltipProvider>
         ) : null}
-        {researchPresentation && fullscreen ? (
+        {researchPresentation && layoutExpanded ? (
           <ReplayLayoutMenu
             preferences={layoutPreferences}
             onChange={changeLayoutPreferences}
@@ -1644,7 +1647,7 @@ const ReplayPanelContent = ({
           </TooltipProvider>
         ) : null}
       </div>
-      {researchPresentation && !fullscreen ? researchTabs : null}
+      {researchPresentation && !layoutExpanded ? researchTabs : null}
       {live ? (
         <div
           className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-200 px-3 py-1 text-xs"
@@ -1719,9 +1722,9 @@ const ReplayPanelContent = ({
       <div
         className="min-h-0 min-w-0 flex-1 overflow-hidden"
         id={researchPresentation ? researchContentId : undefined}
-        role={researchPresentation ? (fullscreen ? 'region' : 'tabpanel') : undefined}
+        role={researchPresentation ? (layoutExpanded ? 'region' : 'tabpanel') : undefined}
         aria-label={
-          researchPresentation && fullscreen
+          researchPresentation && layoutExpanded
             ? t('Research materials')
             : researchPresentation
               ? materialViewId === 'conversation'
@@ -1742,7 +1745,7 @@ const ReplayPanelContent = ({
             selectedContent={researchPresentation ? inspectedContent : undefined}
             selectedContentByPane={researchPresentation ? inspectedContents : undefined}
             researchLayout={researchPresentation ? researchLayout : undefined}
-            researchMaterialTabs={fullscreen ? researchTabs : undefined}
+            researchMaterialTabs={layoutExpanded ? researchTabs : undefined}
             researchTabPanelId={`${researchContentId}-material`}
             focusedPaneId={researchPresentation ? focusedPaneId : undefined}
             onFocusPane={researchPresentation ? setFocusedPane : undefined}
@@ -2004,7 +2007,7 @@ const ReplayPanelContent = ({
               })}
             </span>
           </div>
-          {fullscreen ? (
+          {layoutExpanded ? (
             <span className="text-xs font-medium text-text-200" data-testid="replay-question-pane">
               {paneCatalog.find((pane) => pane.id === focusedPaneId)?.label}
             </span>
