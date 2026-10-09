@@ -73,7 +73,9 @@
     "packages/notebook-network-sandbox/vendor/windows-runtime/npm/prepare.mjs",
     "packages/notebook-network-sandbox/runtime/src/platform/local-service.ts",
     "packages/notebook-network-sandbox/src/local-service.test.ts",
-    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts"
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.cjs",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.d.cts"
   ],
   "interfacePaths": [
     "packages/notebook-network-sandbox/src/index.ts",
@@ -86,7 +88,9 @@
     "packages/notebook-network-sandbox/vendor/wsl2/manifest.json",
     "packages/notebook-network-sandbox/src/config-root.ts",
     "packages/notebook-network-sandbox/runtime/src/platform/local-service.ts",
-    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts"
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.cjs",
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.d.cts"
   ],
   "consumerModules": ["notebook_execution"],
   "testFiles": {
