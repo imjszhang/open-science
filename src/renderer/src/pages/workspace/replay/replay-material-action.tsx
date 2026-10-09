@@ -56,9 +56,9 @@ export function ReplayMaterialActionProvider({
 // eslint-disable-next-line react-refresh/only-export-components
 export function useReplayMaterialAction(action: ReplayMaterialAction | undefined): boolean {
   const context = useContext(MaterialActionContext)
-  const latest = useRef(action)
+  const latest = useRef(context ? action : undefined)
   useLayoutEffect(() => {
-    latest.current = action
+    latest.current = context ? action : undefined
   })
   const owner = useRef(Symbol('replay-material'))
   const present = Boolean(action)
@@ -68,8 +68,12 @@ export function useReplayMaterialAction(action: ReplayMaterialAction | undefined
   const recordedAt = action?.recordedAt
   const title = action?.title
   useLayoutEffect(() => {
-    if (!context || !present || !label) return
+    if (!context) return
     const identity = owner.current
+    if (!present || !label) {
+      context.register(identity, undefined)
+      return
+    }
     context.register(identity, {
       label,
       disabled,
@@ -81,7 +85,16 @@ export function useReplayMaterialAction(action: ReplayMaterialAction | undefined
         if (current && !current.disabled && !current.pending) current.onAsk()
       }
     })
-    return () => context.register(identity, undefined)
   }, [context, present, label, disabled, pending, recordedAt, title])
+  // Updating a decoded timestamp replaces the action atomically. Only leaving the
+  // provider or unmounting revokes ownership between otherwise available actions.
+  useLayoutEffect(() => {
+    if (!context) return
+    const identity = owner.current
+    return () => {
+      latest.current = undefined
+      context.register(identity, undefined)
+    }
+  }, [context])
   return context !== null
 }

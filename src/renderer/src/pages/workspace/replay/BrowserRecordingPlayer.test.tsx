@@ -249,7 +249,7 @@ it('reserves the viewport and holds one bounded decoded frame only while the nex
   expect(screen.getByRole('slider').getAttribute('value')).toBe('1999')
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
-  ).toBe(true)
+  ).toBe(false)
   const second = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
   fireEvent.loadedMetadata(second)
   expect(canvas.hidden).toBe(false)
@@ -475,7 +475,7 @@ it('does not invent alignment or offer autonomous playback when no time anchor e
   expect(onSeek).not.toHaveBeenCalled()
 })
 
-it('holds a decoded poster at a controlled segment transition but disables citing until the new frame decodes', () => {
+it('holds a referenceable decoded poster at a controlled segment transition until the new frame decodes', () => {
   const drawImage = vi.fn()
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     drawImage
@@ -509,7 +509,7 @@ it('holds a decoded poster at a controlled segment transition but disables citin
   expect(canvas.hidden).toBe(false)
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
-  ).toBe(true)
+  ).toBe(false)
   const second = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
   fireEvent.loadedMetadata(second)
   expect(second.currentTime).toBe(0.03)
@@ -873,6 +873,87 @@ it('publishes decoded media time for the footer and withdraws it while buffering
   expect(onActionChange.mock.lastCall?.[0]).toMatchObject({ recordedAt: undefined, disabled: true })
 })
 
+it('updates footer timestamps without transiently withdrawing the action and clears stale callbacks on unmount', async () => {
+  const onActionChange = vi.fn(),
+    onAskMoment = vi.fn()
+  const { unmount } = render(
+    <BrowserRecordingPlayer
+      recording={browserRecordingFixture()}
+      mediaUrl={mediaUrl}
+      onActionChange={onActionChange}
+      onAskMoment={onAskMoment}
+    />
+  )
+  const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+  fireEvent.loadedData(video)
+  const action = onActionChange.mock.lastCall?.[0]
+  onActionChange.mockClear()
+  for (const time of [0.2, 0.4, 0.6]) {
+    video.currentTime = time
+    fireEvent.timeUpdate(video)
+  }
+  expect(onActionChange.mock.calls.map(([value]) => value?.recordedAt)).toEqual([1200, 1400, 1600])
+  expect(onActionChange.mock.calls.every(([value]) => value && !value.disabled)).toBe(true)
+  unmount()
+  expect(onActionChange).toHaveBeenLastCalledWith(undefined)
+  await act(async () => action.onAsk())
+  expect(onAskMoment).not.toHaveBeenCalled()
+})
+
+it.each(['hole', 'next-loading', 'drift'] as const)(
+  'asks about the actual displayed held frame during %s, never the clock or undecoded target',
+  async (kind) => {
+    mockCanvas()
+    const recording = browserRecordingFixture()
+    recording.segments[1].startMs = 2130
+    const onAskMoment = vi.fn(),
+      onSeek = vi.fn(),
+      onActionChange = vi.fn()
+    const props = {
+      recording,
+      mediaUrl,
+      onAskMoment,
+      onActionChange,
+      presentationMode: 'research' as const
+    }
+    const transport = (offsetMs: number): BrowserRecordingTransport => ({
+      offsetMs,
+      playing: true,
+      speed: 1,
+      onSeek
+    })
+    const { rerender } = render(
+      <BrowserRecordingPlayer {...props} transport={transport(kind === 'drift' ? 500 : 1900)} />
+    )
+    const video = screen.getByLabelText('Recorded webpage') as HTMLVideoElement
+    decodedVideo(video)
+    video.currentTime = kind === 'drift' ? 0.4 : 1.999
+    fireEvent.timeUpdate(video)
+    const initialCalls = onActionChange.mock.calls.length
+    rerender(
+      <BrowserRecordingPlayer {...props} transport={transport(kind === 'drift' ? 700 : 2010)} />
+    )
+    if (kind === 'next-loading')
+      rerender(<BrowserRecordingPlayer {...props} transport={transport(2140)} />)
+    const canvas = screen.getByTestId('held-recorded-frame') as HTMLCanvasElement
+    expect(canvas.hidden).toBe(false)
+    const moment = kind === 'drift' ? 400 : 1999
+    const action = onActionChange.mock.lastCall?.[0]
+    expect(action).toMatchObject({ disabled: false, recordedAt: recording.startedAt + moment })
+    expect(
+      onActionChange.mock.calls.slice(initialCalls).every(([value]) => value && !value.disabled)
+    ).toBe(true)
+    await act(async () => action.onAsk())
+    expect(onSeek).toHaveBeenCalledExactlyOnceWith(moment)
+    expect(onAskMoment).toHaveBeenCalledExactlyOnceWith(moment)
+    expect(onSeek.mock.invocationCallOrder[0]).toBeLessThan(onAskMoment.mock.invocationCallOrder[0])
+    rerender(<BrowserRecordingPlayer {...props} active={false} transport={transport(2200)} />)
+    onAskMoment.mockClear()
+    await act(async () => action.onAsk())
+    expect(onAskMoment).not.toHaveBeenCalled()
+  }
+)
+
 it('promotes the already decoded next node without reloading it and keeps only two decoders', async () => {
   const { rerender, unmount } = render(
     <BrowserRecordingPlayer
@@ -1100,7 +1181,7 @@ const mockCanvas = (): ReturnType<typeof vi.fn> => {
 }
 
 it.each([130, 480])(
-  'silently holds a real bounded frame through a %sms segment hole, without changing the clock or allowing references',
+  'silently holds a referenceable real frame through a %sms segment hole without changing the clock',
   (hole) => {
     const drawImage = mockCanvas()
     const recording = browserRecordingFixture()
@@ -1142,7 +1223,7 @@ it.each([130, 480])(
     expect(screen.getByTestId('recorded-video-surface').style.aspectRatio).toBe(aspect)
     expect(
       screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
-    ).toBe(true)
+    ).toBe(false)
     // Advance through a longer hole in ordinary clock ticks, then promote the ready decoder.
     if (hole > 250) {
       rerender(<BrowserRecordingPlayer {...props} transport={transport(2250)} />)
@@ -1255,7 +1336,7 @@ it('holds the last decoded frame during internal drift correction but clears it 
   expect(drawImage).toHaveBeenCalledWith(element, 0, 0, 1280, 720)
   expect(
     screen.getByRole('button', { name: 'Ask about this moment' }).hasAttribute('disabled')
-  ).toBe(true)
+  ).toBe(false)
   fireEvent.seeking(element)
   expect(canvas.hidden).toBe(false)
   fireEvent.seeked(element)

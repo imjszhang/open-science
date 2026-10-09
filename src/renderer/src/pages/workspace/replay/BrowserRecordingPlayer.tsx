@@ -486,25 +486,41 @@ const BrowserRecordingPlayerContent = ({
     recording.coverage.droppedFrames > 0 ||
     recording.coverage.gaps.length > 0 ||
     !['finished', 'stopped'].includes(recording.coverage.stopReason)
-  const askDisabled = !active || !segment || !source || asking || failed || loading
+  const showingHeldFrame = active && playing && (loading || shortHole) && heldOffset !== undefined
+  // A retained canvas is real recorded evidence. Cite its captured timestamp while the
+  // next segment decodes, never the clock's unrecorded gap or the incoming segment.
+  const heldMoment =
+    showingHeldFrame &&
+    heldSource &&
+    heldOffset >= heldSource.startMs &&
+    heldOffset < heldSource.endMs
+      ? heldOffset
+      : undefined
+  const askDisabled =
+    !active ||
+    !aligned ||
+    asking ||
+    failed ||
+    missing ||
+    (heldMoment === undefined && (!segment || !source || loading))
   const ask = (): void => {
+    if (askDisabled || !onAskMoment || !mounted.current) return
     const element = video.current
-    if (
-      askDisabled ||
-      !onAskMoment ||
-      !element ||
-      !segment ||
-      element.seeking ||
-      element.readyState < 2
-    )
-      return
-    // Capture the actual decoded media position, never a stale research-clock timestamp.
-    element.pause()
-    const atMs = Math.min(
-      segment.endMs - 1,
-      Math.max(segment.startMs, segment.startMs + Math.round(element.currentTime * 1000))
-    )
+    let atMs: number
+    if (heldMoment !== undefined) {
+      const canvas = heldFrame.current
+      if (!canvas || canvas.hidden || !canvas.width || !canvas.height) return
+      atMs = heldMoment
+    } else {
+      if (!element || !segment || element.seeking || element.readyState < 2) return
+      // Capture the actual decoded media position, never a stale research-clock timestamp.
+      atMs = Math.min(
+        segment.endMs - 1,
+        Math.max(segment.startMs, segment.startMs + Math.round(element.currentTime * 1000))
+      )
+    }
     if (!Number.isFinite(atMs)) return
+    element?.pause()
     if (transport) transport.onSeek(atMs)
     else {
       desiredOffset.current = atMs
@@ -523,10 +539,11 @@ const BrowserRecordingPlayerContent = ({
       })
   }
   const actionLabel = active && onAskMoment ? t('Ask about this moment') : undefined
+  const actionOffset =
+    heldMoment ??
+    (decodedPosition?.source === sourceIdentity ? decodedPosition?.offsetMs : undefined)
   const actionRecordedAt =
-    !askDisabled && decodedPosition && decodedPosition.source === sourceIdentity
-      ? recording.startedAt + decodedPosition.offsetMs
-      : undefined
+    !askDisabled && actionOffset !== undefined ? recording.startedAt + actionOffset : undefined
   const actionTitle = recording.title ?? t('Project recording')
   const materialAction = actionLabel
     ? {
@@ -546,6 +563,14 @@ const BrowserRecordingPlayerContent = ({
     actionCallback.current = onActionChange
   })
   const hasActionCallback = Boolean(onActionChange)
+  const publishesAction = hasActionCallback && Boolean(actionLabel)
+  useLayoutEffect(() => {
+    if (!publishesAction) return
+    return () => {
+      latestAction.current = undefined
+      actionCallback.current?.(undefined)
+    }
+  }, [publishesAction])
   useLayoutEffect(() => {
     if (!hasActionCallback || !actionLabel) return
     actionCallback.current?.({
@@ -559,7 +584,6 @@ const BrowserRecordingPlayerContent = ({
         if (action && !action.disabled && !action.pending) action.onAsk()
       }
     })
-    return () => actionCallback.current?.(undefined)
   }, [hasActionCallback, actionLabel, askDisabled, asking, actionRecordedAt, actionTitle])
   const compact = presentationMode === 'research' || sharedAction
   const centralized = sharedAction || (presentationMode === 'research' && hasActionCallback)
@@ -843,7 +867,7 @@ const BrowserRecordingPlayerContent = ({
           <canvas
             ref={setHeldFrameNode}
             aria-hidden="true"
-            hidden={!active || !playing || (!loading && !shortHole) || heldOffset === undefined}
+            hidden={!showingHeldFrame}
             className="absolute inset-0 h-full w-full object-contain"
             data-testid="held-recorded-frame"
           />
