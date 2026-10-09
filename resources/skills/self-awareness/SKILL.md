@@ -335,9 +335,10 @@ List file Versions with `kind: 'artifact-version'` or `'upload-version'`, and re
 `kind: 'review'`. File IDs are immutable Version IDs. Text files up to 8 MiB are readable;
 binary files return metadata, not pixels. For an image in the current Project, pass its returned `viewImage` object to `host.viewImage` to inspect that exact Version. Cross-Project images require the source preview or an attachment; do not infer visual content from metadata. Reviewer internal logs are excluded.
 
-### Research execution and Replay demos
+### Research execution and recorded evidence
 
-Replay's offline demonstration is a viewing aid, not a scientific reproduction. When a user asks
+Read-only Replay never starts an environment or program. Offline plans may run in an ordinary
+Session as a separate execution and do not establish scientific reproduction. When a user asks
 in an ordinary conversation to reproduce research, use `host.managedExecution.preflight` with the
 verified `sourceSessionId`, `sourceIdentity`, `descriptorVersionId`, and selected `planKey`. The
 current destination Project and Session are supplied by the host. Explain any missing material,
