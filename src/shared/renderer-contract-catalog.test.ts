@@ -300,6 +300,7 @@ describe('renderer contract catalog', () => {
       'specialist.onCatalogChanged',
       'specialist.previewPackageUpload',
       'specialist.setEnabled',
+      'specialist.setSessionSpecialist',
       'specialist.update'
     ])
 

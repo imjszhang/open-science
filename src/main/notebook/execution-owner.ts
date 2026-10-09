@@ -1,5 +1,6 @@
 import { NotebookExecutionStopError } from '../../shared/notebook-execution-error'
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   resolveManagedShellExecutionCapability,
   type ManagedShellExecutionCapability,
@@ -153,6 +154,17 @@ type NotebookExecutionOwnerOptions = {
     session: NotebookSessionAggregate,
     run: NotebookRunRecord
   ) => Promise<NotebookSourceFileAccessContext | undefined>
+  reviewCode?: (
+    session: NotebookSessionAggregate,
+    run: NotebookRunRecord,
+    context: NotebookSourceFileAccessContext | undefined,
+    signal?: AbortSignal
+  ) => Promise<void>
+  prepareRuntimeSelection?: (
+    session: NotebookSessionAggregate,
+    language: NotebookLanguage,
+    signal?: AbortSignal
+  ) => Promise<void>
   helperModules: Pick<
     NotebookHelperModuleHost,
     'preflight' | 'plan' | 'commitInitialized' | 'loadedEvidence'
@@ -785,6 +797,9 @@ class NotebookExecutionOwner {
     helperModuleIds?: readonly string[],
     onAdmitted?: (run: NotebookRunRecord) => void
   ): Promise<{ run: NotebookRunRecord; dependencyProjection: NotebookDependencyProjection }> {
+    if ((request.source ?? 'agent') === 'agent') {
+      await this.options.prepareRuntimeSelection?.(session, cell.language, signal)
+    }
     const admittedAt = Date.now()
     const executionCount = session.nextExecutionCount()
     const cwdBefore = session.cwd
@@ -950,10 +965,25 @@ class NotebookExecutionOwner {
                     kernelEpoch,
                     helperRequest
                   )
-                  reachedExecutor = true
                   const sourceFileAccessContext = await this.options
                     .sourceFileAccessContext?.(session, executionRun)
                     .catch(() => undefined)
+                  await this.options.reviewCode?.(
+                    session,
+                    executionRun,
+                    sourceFileAccessContext,
+                    signal
+                  )
+                  signal?.throwIfAborted()
+                  if (
+                    session.currentKernelEpochId(processKey) !== kernelEpochId ||
+                    !isDeepStrictEqual(session.runtimeBinding(cell.language), binding)
+                  ) {
+                    throw new Error(
+                      'Notebook runtime changed while code approval was pending. Retry against the current runtime.'
+                    )
+                  }
+                  reachedExecutor = true
                   let executionResult = await session
                     .execute({
                       runId,
@@ -1404,6 +1434,7 @@ class NotebookExecutionOwner {
               const sourceFileAccessContext = await this.options
                 .sourceFileAccessContext?.(session, queuedRun)
                 .catch(() => undefined)
+              await this.options.reviewCode?.(session, queuedRun, sourceFileAccessContext, signal)
               signal?.throwIfAborted()
               if (session.currentKernelEpochId('repl') !== epoch.id) {
                 throw new Error('Notebook REPL epoch retired before dispatch.')
@@ -1794,6 +1825,13 @@ class NotebookExecutionOwner {
               shellConcurrency: { limit: lease.limit, slot: lease.slot }
             },
             invoke: async () => {
+              await this.options.reviewCode?.(
+                session,
+                durableAdmission.run,
+                undefined,
+                lifecycleSignal
+              )
+              lifecycleSignal.throwIfAborted()
               const workingFileObservation = await startWorkingFileObservation({
                 dataRoot: managed
                   ? (managed.outputRoot ?? frozenShellContext.cwd)

@@ -768,7 +768,20 @@
       "src/renderer/replay-viewer/research-client.test.ts",
       "src/renderer/replay-viewer/research-viewer.test.tsx",
       "src/renderer/src/lib/replay/transcript.test.ts",
-      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
+      "src/main/literature/pdf-translation/ipc.test.ts",
+      "src/main/literature/pdf-translation/index.test.ts",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfPreview.test.tsx",
+      "src/main/literature/pdf-translation/checkpoints.test.ts",
+      "src/main/literature/pdf-translation/usage.test.ts",
+      "src/main/literature/pdf-translation/diagnostics.test.ts",
+      "src/main/literature/pdf-translation/reader-ownership.test.ts",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationEditions.test.tsx",
+      "src/main/literature/pdf-translation/local.test.ts",
+      "src/main/local-models/ipc.test.ts",
+      "src/main/literature/pdf-translation/pdf-cache.test.ts",
+      "src/main/notebook/code-risk-admission.test.ts"
     ]
   },
   "capabilityOverlays": [],

@@ -355,6 +355,7 @@ describe('agent memory project scope migration', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         CURRENT_MIGRATION_ID
       ],
       to: CURRENT_MIGRATION_ID

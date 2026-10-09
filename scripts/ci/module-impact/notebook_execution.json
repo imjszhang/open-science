@@ -226,7 +226,8 @@
     "src/main/notebook/managed-shell.macos.integration.test.ts",
     "src/main/notebook/managed-confinement.macos.integration.test.ts",
     "src/main/notebook/managed-output-redaction.test.ts",
-    "src/main/notebook/managed-output-redaction.ts"
+    "src/main/notebook/managed-output-redaction.ts",
+    "src/main/notebook/code-risk-admission.test.ts"
   ],
   "interfacePaths": [
     "src/main/notebook/configured-shell-runtime.ts",
@@ -423,7 +424,8 @@
       "src/main/notebook/managed-shell-runtime.test.ts",
       "src/main/notebook/managed-shell.macos.integration.test.ts",
       "src/main/notebook/managed-confinement.macos.integration.test.ts",
-      "src/main/notebook/managed-output-redaction.test.ts"
+      "src/main/notebook/managed-output-redaction.test.ts",
+      "src/main/notebook/code-risk-admission.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",
@@ -1080,7 +1082,9 @@
       "src/main/research-replay/service-timing.test.ts",
       "src/main/research-replay/service.test.ts",
       "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
-      "src/renderer/replay-viewer/research-browser.integration.test.ts"
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/main/literature/pdf-translation/checkpoints.test.ts",
+      "src/main/notebook/code-risk-analysis.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],

@@ -6,7 +6,8 @@
     "src/main/local-models/download.ts",
     "src/main/local-models/ipc.ts",
     "src/main/local-models/owner.test.ts",
-    "src/main/local-models/owner.ts"
+    "src/main/local-models/owner.ts",
+    "src/main/local-models/ipc.test.ts"
   ],
   "interfacePaths": [
     "src/main/local-models/catalog.ts",
@@ -378,7 +379,16 @@
       "src/main/research-replay/service-timing.test.ts",
       "src/main/research-replay/service.test.ts",
       "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
-      "src/renderer/replay-viewer/research-browser.integration.test.ts"
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/main/literature/pdf-translation/ipc.test.ts",
+      "src/main/literature/pdf-translation/index.test.ts",
+      "src/main/literature/pdf-translation/checkpoints.test.ts",
+      "src/main/literature/pdf-translation/usage.test.ts",
+      "src/main/literature/pdf-translation/diagnostics.test.ts",
+      "src/main/literature/pdf-translation/reader-ownership.test.ts",
+      "src/main/literature/pdf-translation/local.test.ts",
+      "src/main/local-models/ipc.test.ts",
+      "src/main/literature/pdf-translation/pdf-cache.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

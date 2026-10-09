@@ -720,7 +720,9 @@
       "src/renderer/replay-viewer/research-browser.integration.test.ts",
       "src/renderer/replay-viewer/research-client.test.ts",
       "src/renderer/replay-viewer/research-viewer.test.tsx",
-      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
+      "src/main/literature/pdf-translation/checkpoints.test.ts",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationExport.test.tsx"
     ]
   },
   "capabilityOverlays": ["e2e_regressions"],

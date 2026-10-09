@@ -1431,7 +1431,19 @@ describe('Session Store architecture', () => {
           'src/renderer/src/stores/research-run-store.test.ts',
           'src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx',
           'src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx',
-          'src/main/research-demos/owner.macos.integration.test.ts'
+          'src/main/research-demos/owner.macos.integration.test.ts',
+          'src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx',
+          'src/renderer/replay-viewer/browser-recording-viewer.test.tsx',
+          'src/renderer/replay-viewer/browser-recording.integration.test.ts',
+          'src/renderer/src/pages/workspace/browser-recording-question.test.tsx',
+          'src/renderer/replay-viewer/browser-recording-transport.integration.test.ts',
+          'src/renderer/replay-viewer/research-browser.integration.test.ts',
+          'src/renderer/replay-viewer/research-client.test.ts',
+          'src/renderer/replay-viewer/research-viewer.test.tsx',
+          'src/renderer/src/lib/replay/transcript.test.ts',
+          'src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx',
+          'src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx',
+          'src/renderer/src/pages/workspace/previews/renderers/PdfTranslationEditions.test.tsx'
         ]
       },
       capabilityOverlays: ['renderer_state'],

@@ -671,7 +671,10 @@
       "src/main/research-replay/service-timing.test.ts",
       "src/main/research-replay/service.test.ts",
       "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
-      "src/renderer/replay-viewer/research-browser.integration.test.ts"
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/main/literature/pdf-translation/checkpoints.test.ts",
+      "src/main/literature/pdf-translation/usage.test.ts",
+      "src/main/notebook/code-risk-admission.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

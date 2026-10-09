@@ -587,7 +587,9 @@
       "src/renderer/src/lib/replay/transcript.test.ts",
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
       "src/shared/renderer-surface-inventory.test.ts",
-      "src/shared/renderer-surface-matrix.test.ts"
+      "src/shared/renderer-surface-matrix.test.ts",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationEditions.test.tsx"
     ]
   },
   "capabilityOverlays": [],

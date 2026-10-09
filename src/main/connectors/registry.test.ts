@@ -14,6 +14,55 @@ import { WORKBENCH_OMICS_TOOLS } from './descriptors/omics-workbench'
 import { VARIANTS_MAVEDB_TOOLS } from './descriptors/variants-mavedb'
 
 describe('registry + catalog', () => {
+  it('registers ChEMBL assay lookup and validates activity pagination', () => {
+    const assay = getDescriptor('chembl', 'get_assay')!
+    const activity = getDescriptor('chembl', 'get_bioactivity')!
+    expect(getConnectorTools('chembl')).toContain(assay)
+    expect(() => validateToolArguments(assay, { assay_chembl_id: 'CHEMBL1217643' })).not.toThrow()
+    for (const args of [
+      {},
+      { assay_chembl_id: '' },
+      { assay_chembl_id: 1 },
+      { assay_chembl_id: '../assay' }
+    ]) {
+      expect(() => validateToolArguments(assay, args)).toThrow(/invalid_arguments/)
+    }
+    expect(() => validateToolArguments(activity, {})).not.toThrow()
+    expect(() =>
+      validateToolArguments(activity, {
+        assay_chembl_id: 'CHEMBL1217643',
+        molecule_chembl_id: 'CHEMBL25',
+        target_chembl_id: 'CHEMBL240',
+        offset: 1000,
+        limit: 1000
+      })
+    ).not.toThrow()
+    for (const args of [
+      { offset: -1 },
+      { offset: 1.5 },
+      { offset: '1000' },
+      { offset: Infinity },
+      { offset: Number.MAX_SAFE_INTEGER + 1 },
+      { limit: 1001 },
+      { assay_chembl_id: '' }
+    ]) {
+      expect(() => validateToolArguments(activity, args)).toThrow(/invalid_arguments/)
+    }
+    const doc = renderSkillDoc('chembl')
+    for (const phrase of [
+      '### get_assay',
+      'assay_chembl_id',
+      'confidence_score',
+      'next_offset',
+      'same filters',
+      'page-local',
+      'not measurement quality',
+      'the fallback is not a verified total',
+      'inconsistent pagination metadata throws'
+    ]) {
+      expect(doc).toContain(phrase)
+    }
+  })
   it.each(['search_tcrs', 'search_bcrs'])(
     'documents the %s group filters and export completeness boundary',
     (method) => {
@@ -375,6 +424,80 @@ describe('registry + catalog', () => {
     expect(() => validateToolArguments(descriptor, { cids: '2244' })).toThrow(
       /invalid tool arguments.*cids.*array/i
     )
+  })
+  it('validates Ensembl LD inputs and publishes the same contracts in the generated skill', () => {
+    const population = '1000GENOMES:phase_3:KHV'
+    const pairArgs = {
+      variant_id1: 'rs6792369',
+      variant_id2: 'rs1042779',
+      population_name: population
+    }
+    const proxyArgs = { variant_id: 'rs1042779', population_name: population }
+    const pairwise = getDescriptor('genomes', 'ensembl_ld_pairwise')!
+    const proxies = getDescriptor('genomes', 'ensembl_ld_proxies')!
+    expect(() => validateToolArguments(pairwise, pairArgs)).not.toThrow()
+    expect(() => validateToolArguments(proxies, proxyArgs)).not.toThrow()
+    for (const [descriptor, args] of [
+      [pairwise, pairArgs],
+      [proxies, proxyArgs]
+    ] as const) {
+      for (const invalid of [
+        { ...args, population_name: undefined },
+        { ...args, population_name: '' },
+        { ...args, population_name: '  ' },
+        { ...args, population_name: null },
+        { ...args, population_name: 1 },
+        { ...args, species: '' },
+        { ...args, species: '  ' },
+        { ...args, species: null },
+        { ...args, assembly: 'GRCh37' }
+      ]) {
+        expect(() => validateToolArguments(descriptor, invalid)).toThrow(/invalid_arguments/)
+      }
+      const doc = renderSkillDoc('genomes')
+      expect(doc).toContain(`### ${descriptor.id}`)
+      expect(doc).toContain(descriptor.description)
+      expect(doc).toContain(descriptor.returns!)
+      expect(descriptor.description).toContain('High LD does not establish causality')
+      expect(descriptor.description).toContain('caller must supply the full population name')
+      expect(descriptor.description).not.toContain('/info/variation/populations')
+    }
+    for (const field of ['variant_id1', 'variant_id2'] as const) {
+      for (const value of [undefined, '', '  ', 123]) {
+        expect(() => validateToolArguments(pairwise, { ...pairArgs, [field]: value })).toThrow(
+          /invalid_arguments/
+        )
+      }
+    }
+    for (const invalid of [
+      { variant_id: undefined },
+      { variant_id: '' },
+      { variant_id: '  ' },
+      { min_r2: -0.1 },
+      { min_r2: 1.1 },
+      { min_r2: '0.8' },
+      { min_d_prime: -0.1 },
+      { min_d_prime: 1.1 },
+      { min_d_prime: null },
+      { window_size: 0 },
+      { window_size: 501 },
+      { window_size: 1.5 },
+      { max_records: 0 },
+      { max_records: 1001 },
+      { max_records: 1.5 }
+    ]) {
+      expect(() => validateToolArguments(proxies, { ...proxyArgs, ...invalid })).toThrow(
+        /invalid_arguments/
+      )
+    }
+    for (const bounds of [
+      { min_r2: 0, min_d_prime: 0, window_size: 1, max_records: 1 },
+      { min_r2: 1, min_d_prime: 1, window_size: 500, max_records: 1000 }
+    ]) {
+      expect(() => validateToolArguments(proxies, { ...proxyArgs, ...bounds })).not.toThrow()
+    }
+    expect(proxies.description).toContain('total width')
+    expect(proxies.description).toContain('does not limit upstream computation or download size')
   })
   it.each(['ncbi_get_assembly_info', 'ncbi_get_sequence_aliases'])(
     'requires a versioned assembly accession for genomes/%s',

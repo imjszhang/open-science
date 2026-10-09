@@ -367,7 +367,7 @@ const executeControlCode = async (sessionId, code) =>
   )
 
 // Keep only this deterministic provider task's progress across real process restarts. The calls
-// themselves still use the production app-owned MCP, durable permission, and Notebook paths.
+// themselves still use production durable provider permission and Notebook execution paths.
 const permissionHandoffTask = async (context, prompt) => {
   const sessionId = context.params.sessionId
   const captureRoot = process.env.OPEN_SCIENCE_E2E_HANDOFF_CAPTURE_ROOT
@@ -394,7 +394,9 @@ const permissionHandoffTask = async (context, prompt) => {
   const executeApprovedCode = async (code) => {
     const toolCall = {
       toolCallId: `permission-handoff-${randomUUID()}`,
-      title: `${frameworkServerName('open-science-notebook')}_repl_execute`,
+      // Notebook execution is admitted by the host; use a provider-owned fixture tool to
+      // exercise durable provider approval independently of Notebook code-risk review.
+      title: 'mcp__e2e-permission__execute',
       kind: 'other',
       rawInput: { code, timeoutMs: 120_000 }
     }
@@ -404,9 +406,7 @@ const permissionHandoffTask = async (context, prompt) => {
     })
     const permission = await context.client.request(acp.methods.client.session.requestPermission, {
       sessionId,
-      // OpenCode sends the executable arguments on tool_call; its permission request is sparse.
-      // Exercise the production input-restoration path consistently before and after restart.
-      toolCall: { ...toolCall, rawInput: {} },
+      toolCall,
       options: [
         { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
         { kind: 'reject_once', name: 'Deny', optionId: 'deny-once' }
@@ -1650,6 +1650,36 @@ if (process.argv.includes('--version')) {
         const handoffReply = await permissionHandoffTask(context, prompt)
         if (handoffReply) {
           reply = handoffReply
+        } else if (prompt.includes('WORKSPACE_TRANSLATION_PDF_BASE64:')) {
+          const content = prompt.match(/WORKSPACE_TRANSLATION_PDF_BASE64:([A-Za-z0-9+/=]+)/u)?.[1]
+          if (!content) throw new Error('Missing workspace translation PDF fixture.')
+          const stored = await withMcpClient(
+            context.params.sessionId,
+            'open-science-artifacts',
+            async (client) =>
+              toolResult(
+                'write_artifact_file',
+                await client.callTool({
+                  name: 'write_artifact_file',
+                  arguments: {
+                    filename: 'workspace-paired.pdf',
+                    mimeType: 'application/pdf',
+                    content,
+                    encoding: 'base64'
+                  }
+                })
+              )
+          )
+          if (!stored.artifact?.version_id)
+            throw new Error('Workspace PDF Version was not finalized.')
+          reply = 'Workspace translation PDF created.'
+        } else if (prompt.includes('PAIR_PDF_ACCEPTANCE')) {
+          // Controlled inference only; PDF generation, IPC and reader remain production code.
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+          reply =
+            (prompt.includes('PAIR_PDF_INLINE_LINK') ? 'Methods: ' : '') +
+            '测量受控实验室培养物中的细胞生长。' +
+            (prompt.includes('PAIR_PDF_INLINE_LINK') ? '[1][2]' : '')
         } else if (prompt.includes('Verify interaction follow-up.')) {
           reply = 'Interaction follow-up completed.'
         } else if (prompt.includes('Request restart verification permission.')) {

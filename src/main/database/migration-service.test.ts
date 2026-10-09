@@ -330,6 +330,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -380,6 +381,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -387,7 +389,7 @@ describe('application database migrations', () => {
     expect(await client.literatureItem.findMany()).toEqual(before)
     expect(
       await client.$queryRawUnsafe(
-        `SELECT * FROM "_open_science_migrations" WHERE id NOT IN ('0039_literature_metadata_commit_receipt', '0040_literature_collection_revision', '0041_bookmarks', '0042_classification_usage', '0043_pdf_annotations', '0044_literature_smart_collections', '0045_literature_smart_pause_run', '0046_journal_attributes', '0047_session_replay', '0048_pdf_annotation_sharing', '0049_pascalcase_table_names', '0050_session_research_membership') ORDER BY id`
+        `SELECT * FROM "_open_science_migrations" WHERE id NOT IN ('0039_literature_metadata_commit_receipt', '0040_literature_collection_revision', '0041_bookmarks', '0042_classification_usage', '0043_pdf_annotations', '0044_literature_smart_collections', '0045_literature_smart_pause_run', '0046_journal_attributes', '0047_session_replay', '0048_pdf_annotation_sharing', '0049_pascalcase_table_names', '0050_literature_translation', '0050_session_research_membership') ORDER BY id`
       )
     ).toEqual(ledger)
     await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({ applied: [] })
@@ -774,6 +776,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: null,
@@ -833,6 +836,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0033_compute_job_harvest_retry',
@@ -954,6 +958,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -1058,6 +1063,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -1176,6 +1182,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0005_project_preview_state_owner_fk',
@@ -1280,6 +1287,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0005_project_preview_state_owner_fk',
@@ -1480,6 +1488,7 @@ describe('application database migrations', () => {
       { id: '0047_session_replay' },
       { id: '0048_pdf_annotation_sharing' },
       { id: '0049_pascalcase_table_names' },
+      { id: '0050_literature_translation' },
       { id: '0050_session_research_membership' },
       { id: '9997_test_suffix' }
     ])
@@ -1583,6 +1592,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0001_runtime_schema_baseline',
@@ -1690,6 +1700,7 @@ describe('application database migrations', () => {
       { id: '0047_session_replay' },
       { id: '0048_pdf_annotation_sharing' },
       { id: '0049_pascalcase_table_names' },
+      { id: '0050_literature_translation' },
       { id: '0050_session_research_membership' }
     ])
   })
@@ -1833,6 +1844,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership',
         '9997_test_suffix'
       ],
@@ -2109,6 +2121,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -2256,6 +2269,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -2355,6 +2369,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -2457,6 +2472,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -2593,6 +2609,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -3120,6 +3137,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ]
     })
@@ -3189,7 +3207,7 @@ describe('application database migrations', () => {
         entries.filter((entry) => entry.endsWith('.backup')).sort()
       )
     ).resolves.toEqual([
-      'open-science.db.before-0049_pascalcase_table_names.backup',
+      'open-science.db.before-0050_literature_translation.backup',
       'open-science.db.before-0050_session_research_membership.backup',
       unknownBackupName
     ])
@@ -3509,6 +3527,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0024_compute_job_file_evidence',
@@ -3653,6 +3672,7 @@ describe('application database migrations', () => {
         '0047_session_replay',
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
+        '0050_literature_translation',
         '0050_session_research_membership'
       ],
       from: '0024_compute_job_file_evidence',

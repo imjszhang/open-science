@@ -5,6 +5,7 @@ import { journalAttributesMigration } from './migrations/0046-journal-attributes
 import { sessionReplayMigration } from './migrations/0047-session-replay'
 import { literatureSmartCollectionsMigration } from './migrations/0044-literature-smart-collections'
 import { literatureSmartPauseRunMigration } from './migrations/0045-literature-smart-pause-run'
+import { literatureTranslationMigration } from './migrations/0050-literature-translation'
 import { classificationUsageMigration } from './migrations/0042-classification-usage'
 import { literatureCollectionRevisionMigration } from './migrations/0040-literature-collection-revision'
 import { bookmarksMigration } from './migrations/0041-bookmarks'
@@ -927,6 +928,17 @@ const MIGRATION_MANIFEST = [
     backupRetention: 'retain'
   },
   {
+    ...literatureTranslationMigration,
+    checksum: checksumMigrationPayload(
+      literatureTranslationMigration.id,
+      literatureTranslationMigration.statements,
+      literatureTranslationMigration.verifiers,
+      literatureTranslationMigration.operations
+    ),
+    backupOnApply: 'required',
+    backupRetention: 'retain'
+  },
+  {
     ...sessionResearchMembershipMigration,
     checksum: checksumMigrationPayload(
       sessionResearchMembershipMigration.id,
@@ -1338,6 +1350,7 @@ const currentApplicationSchemaExtensions = {
 
 const verifyCurrentApplicationSchema = async (client: PrismaClient): Promise<void> => {
   await verifyCurrentRuntimeSchema(client, currentApplicationSchemaExtensions)
+  await runMigrationVerifiers(client, literatureTranslationMigration.verifiers)
   // The generated schema enforces the latest checks; frozen auxiliary verifiers also accept
   // the exact stronger expressions from the immutable suffix.
   await runMigrationVerifiers(
@@ -2216,6 +2229,27 @@ const migrateApplicationDatabaseWithManifest = async (
   }
 
   const applied: string[] = []
+  // The Test fork shipped research membership before upstream's independently numbered
+  // 0050 translation migration. Accept only that exact, checksum-verified historical
+  // prefix; apply the missing upstream migration normally without rewriting either ID.
+  if (
+    manifest === MIGRATION_MANIFEST &&
+    ledger.at(-1)?.id === sessionResearchMembershipMigration.id &&
+    !ledger.some((entry) => entry.id === literatureTranslationMigration.id)
+  ) {
+    validateLedger(
+      ledger,
+      MIGRATION_MANIFEST.filter((entry) => entry.id !== literatureTranslationMigration.id)
+    )
+    const translation = MIGRATION_MANIFEST.find(
+      (entry) => entry.id === literatureTranslationMigration.id
+    )!
+    options.onProgress?.({ phase: 'migrating', migrationId: translation.id })
+    await ensureBackupBeforeMigration(translation)
+    await applyManifestMigration(client, translation)
+    applied.push(translation.id)
+    ledger = await readLedger(client)
+  }
   const appliedCount = validateLedger(ledger, manifest)
   if (appliedCount === manifest.length) {
     return complete({ adoptedLegacy: false, applied, from, to: latest.id })

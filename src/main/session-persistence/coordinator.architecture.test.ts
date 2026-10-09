@@ -1866,7 +1866,24 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/research-demos/owner.test.ts',
       'src/main/research-demos/inspection.test.ts',
       'src/main/notebook/managed-confinement.macos.integration.test.ts',
-      'src/main/research-demos/owner.macos.integration.test.ts'
+      'src/main/research-demos/owner.macos.integration.test.ts',
+      'src/main/notebook/offline-plan-admission.test.ts',
+      'src/main/project-recordings/managed-adapter.test.ts',
+      'src/main/project-recordings/recorder.test.ts',
+      'src/main/notebook/screened-auxiliary-output.test.ts',
+      'src/renderer/replay-viewer/browser-recording.integration.test.ts',
+      'src/main/browser-recordings/external-port.test.ts',
+      'src/main/browser-recordings/owner.test.ts',
+      'src/main/research-replay/http-host.integration.test.ts',
+      'src/main/research-replay/observation-association.test.ts',
+      'src/main/research-replay/observation-selection.test.ts',
+      'src/main/research-replay/service-timing.test.ts',
+      'src/main/research-replay/service.test.ts',
+      'src/renderer/replay-viewer/browser-recording-transport.integration.test.ts',
+      'src/renderer/replay-viewer/research-browser.integration.test.ts',
+      'src/main/literature/pdf-translation/checkpoints.test.ts',
+      'src/main/literature/pdf-translation/usage.test.ts',
+      'src/main/notebook/code-risk-admission.test.ts'
     ])
     expect(sessionPersistence.capabilityOverlays).toEqual([
       'windows_sensitive',

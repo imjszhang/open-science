@@ -578,7 +578,12 @@
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
       "src/renderer/src/pages/workspace/replay/ReplayResearchLayout.test.tsx",
       "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationPreparation.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationView.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationExport.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationEditions.test.tsx"
     ]
   },
   "capabilityOverlays": [],
