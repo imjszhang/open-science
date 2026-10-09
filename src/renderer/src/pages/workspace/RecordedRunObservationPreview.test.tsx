@@ -145,7 +145,7 @@ describe('recorded Run observation preview', () => {
     fireEvent.click(screen.getByRole('button', { name }))
   }
   it.each(['Project replay', 'Results'])(
-    'does not move the %s tab before its first pointer click selects it',
+    'selects the %s tab on its first pointer click without pausing the current view',
     (label) => {
       const { archive, media } = attachmentFixture()
       render(
@@ -160,6 +160,8 @@ describe('recorded Run observation preview', () => {
       )
       fireEvent.click(screen.getByRole('button', { name: /^Research materials$/ }))
       const tab = screen.getByRole('button', { name: new RegExp(`^${label}$`) })
+      const status = screen.getByTestId('replay-live-status')
+      expect(status.textContent).toContain('Run history')
       fireEvent.pointerDown(tab)
       expect(screen.queryByText('Inspecting recorded evidence')).toBeNull()
       expect(tab.getAttribute('aria-pressed')).toBe('false')
@@ -169,7 +171,13 @@ describe('recorded Run observation preview', () => {
       expect(screen.getByRole('button', { name: /^Notebook$/ }).getAttribute('aria-pressed')).toBe(
         'false'
       )
-      expect(screen.getByText('Inspecting recorded evidence')).toBeTruthy()
+      expect(screen.getByTestId('replay-live-status')).toBe(status)
+      expect(status.textContent).toContain('Run history')
+      expect(screen.queryByText('Inspecting recorded evidence')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Show latest record' })).toBeNull()
+      if (label === 'Results')
+        expect(screen.getByRole('button', { name: /^result.json/ })).toBeTruthy()
+      else expect(screen.getByRole('region', { name: 'Project replay' })).toBeTruthy()
     }
   )
   it('keeps results independent of frame and Notebook selection, with exact file-level Ask', async () => {
