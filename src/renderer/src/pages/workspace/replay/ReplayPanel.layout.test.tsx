@@ -356,6 +356,62 @@ describe('research replay layout', () => {
     }
   })
 
+  it('saves a completed native expanded preview resize across fullscreen and collapse transitions', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return new DOMRect(0, 0, this.hasAttribute('data-replay-pane-group') ? 1601 : 0, 800)
+    })
+    vi.stubGlobal(
+      'PointerEvent',
+      class extends MouseEvent {
+        readonly pointerId: number
+        constructor(type: string, options: PointerEventInit = {}) {
+          super(type, options)
+          this.pointerId = options.pointerId ?? 1
+        }
+      }
+    )
+    const probe = harness({ host: undefined, expanded: true })
+    await tick(5)
+    fireEvent.click(screen.getByRole('tab', { name: 'Project replay' }))
+    const separator = screen.getByRole('separator', {
+      name: 'Resize Original conversation and Project replay'
+    })
+    let captured = false
+    separator.setPointerCapture = vi.fn(() => {
+      captured = true
+    })
+    separator.hasPointerCapture = vi.fn(() => captured)
+    separator.releasePointerCapture = vi.fn(() => {
+      captured = false
+    })
+    expect(separator.getAttribute('aria-valuenow')).toBe('35')
+    fireEvent.pointerDown(separator, { button: 0, clientX: 560, pointerId: 1 })
+    fireEvent.pointerMove(separator, { clientX: 656, pointerId: 1 })
+    expect(separator.getAttribute('aria-valuenow')).toBe('41')
+    expect(JSON.parse(localStorage.getItem('research-replay-layout:v1')!).widthsByLayout).toEqual(
+      {}
+    )
+    fireEvent.pointerUp(separator, { clientX: 656, pointerId: 1 })
+    expect(captured).toBe(false)
+    expect(JSON.parse(localStorage.getItem('research-replay-layout:v1')!).widthsByLayout).toEqual({
+      'split:conversation,project': { conversation: 41, project: 59 }
+    })
+
+    enterFullscreen()
+    changeFullscreen(null)
+    expect(separator.getAttribute('aria-valuenow')).toBe('41')
+    probe.rerender({ expanded: false })
+    expect(screen.queryByRole('separator')).toBeNull()
+    probe.rerender({ expanded: true })
+    expect(
+      screen
+        .getByRole('separator', { name: 'Resize Original conversation and Project replay' })
+        .getAttribute('aria-valuenow')
+    ).toBe('41')
+  })
+
   it('keeps browser expanded previews tabbed until the panel enters DOM fullscreen', async () => {
     const probe = harness({ expanded: true })
     await tick(5)
