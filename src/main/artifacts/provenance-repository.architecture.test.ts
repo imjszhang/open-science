@@ -1,5 +1,9 @@
+import {
+  listProductionSources,
+  readProductionSource
+} from '../../../test/architecture-source-index'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 
 import {
   canHaveModifiers,
@@ -17,6 +21,7 @@ import {
   isPropertyDeclaration,
   isReturnStatement,
   isVariableStatement,
+  preProcessFile,
   ScriptKind,
   ScriptTarget,
   SyntaxKind,
@@ -226,6 +231,7 @@ describe('Artifact Provenance repository architecture', () => {
         'listRunVersions',
         'prepareProjectReconciliation',
         'readCodeReconstructionCache',
+        'readPublishedVersionForWrite',
         'reconcileSession',
         'recordLiteratureAbstractRead',
         'recordLiteraturePdfRead',
@@ -235,6 +241,7 @@ describe('Artifact Provenance repository architecture', () => {
         'releaseWriteReservation',
         'replayVersion',
         'reserveWrite',
+        'resolvePublishedSessionVersionsByContent',
         'resolveReviewerTurnFileEvidence',
         'resolveVersionDescriptors',
         'validateFinalizationOwnership',
@@ -304,6 +311,7 @@ describe('Artifact Provenance repository architecture', () => {
     expect(topLevelValues(facadeFile)).toEqual(
       [
         'SAFE_SEGMENT_PATTERN',
+        'assertExpectedArtifactContent',
         'assertSafeSegment',
         'hasServerInferredProducer',
         'journalRecoveryPlan',
@@ -518,7 +526,9 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/artifacts/resumed-finalization-ownership.test.ts',
       'src/main/artifacts/export-filename.ts',
       'src/main/artifacts/artifact-reproducibility-commands.test.ts',
-      'src/main/artifacts/artifact-reproducibility-commands.ts'
+      'src/main/artifacts/artifact-reproducibility-commands.ts',
+      'src/main/artifacts/session-version-content-reader.test.ts',
+      'src/main/artifacts/session-version-content-reader.ts'
     ])
     expect(module.interfacePaths).toEqual([
       'src/main/artifacts/provenance-message-snapshot.ts',
@@ -557,7 +567,8 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/notebook/reproduction-runtime.ts',
       'src/renderer/src/pages/workspace/ArtifactReproducibilityPanel.tsx',
       'src/main/artifacts/ro-crate-export.ts',
-      'src/main/artifacts/artifact-reproducibility-commands.ts'
+      'src/main/artifacts/artifact-reproducibility-commands.ts',
+      'src/main/artifacts/session-version-content-reader.ts'
     ])
     expect(module.consumerModules).toEqual(['session_persistence'])
     expect(module.testFiles.owner).toEqual([
@@ -602,7 +613,8 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/artifacts/session-reproducibility.test.ts',
       'src/main/artifacts/storage-access.context.test.ts',
       'src/main/artifacts/resumed-finalization-ownership.test.ts',
-      'src/main/artifacts/artifact-reproducibility-commands.test.ts'
+      'src/main/artifacts/artifact-reproducibility-commands.test.ts',
+      'src/main/artifacts/session-version-content-reader.test.ts'
     ])
     expect(module.testFiles.contract).toEqual([
       'src/main/artifacts/artifact-reproducibility-ipc.test.ts',
@@ -993,7 +1005,58 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/desktop-native-electron.test.ts',
       'src/main/session-plan/session-plan-turn-outcome.test.ts',
       'src/main/acp/specialist-switch-recovery.integration.test.ts',
-      'src/main/agents/production-completion-handoff.test.ts'
+      'src/main/agents/production-completion-handoff.test.ts',
+      'src/main/session-package/research-reproduction.integration.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts',
+      'src/main/composition/handoff.test.ts',
+      'src/main/composition/managed-execution.integration.test.ts',
+      'src/main/composition/session-packages.test.ts',
+      'src/main/notebook/local-rpc-server.managed-execution.test.ts',
+      'src/main/notebook/managed-auxiliary-output.test.ts',
+      'src/main/notebook/managed-execution-collection.integration.test.ts',
+      'src/main/notebook/managed-execution-entrypoints.integration.test.ts',
+      'src/main/notebook/managed-execution-output.test.ts',
+      'src/main/notebook/managed-execution-service.test.ts',
+      'src/main/notebook/managed-nested-generation.integration.test.ts',
+      'src/main/notebook/managed-output-publication.integration.test.ts',
+      'src/main/notebook/research-material-authority.test.ts',
+      'src/main/notebook/screened-auxiliary-output.test.ts',
+      'src/main/notebook/session-operation-owner.integration.test.ts',
+      'src/main/research-execution-profiles/ipc.test.ts',
+      'src/main/session-package/headless.test.ts',
+      'src/main/run-observation/capture-package.integration.test.ts',
+      'src/main/run-observation/recorded-reader.test.ts',
+      'src/main/run-observation/managed-coordinator.test.ts',
+      'src/main/project-recordings/managed-adapter.test.ts',
+      'src/main/run-observation-external-port.test.ts',
+      'src/main/browser-recordings/external-port.test.ts',
+      'src/main/runtime-view/browser-host.integration.test.ts',
+      'src/main/replay-viewer/http-host.integration.test.ts',
+      'src/main/run-observation/managed-port.test.ts',
+      'src/main/run-observation/managed-status.test.ts',
+      'src/main/browser-recordings/owner.test.ts',
+      'src/main/run-observation/media-collector.test.ts',
+      'src/main/project-recordings/recorder.test.ts',
+      'src/main/managed-runtime-views.integration.test.ts',
+      'src/main/observation-desktop/bridge.test.ts',
+      'src/main/research-demos/owner.macos.integration.test.ts',
+      'src/main/notebook/offline-plan-admission.test.ts',
+      'src/renderer/replay-viewer/browser-recording.integration.test.ts',
+      'src/renderer/replay-viewer/browser.integration.test.ts',
+      'src/renderer/replay-viewer/browser-recording-transport.integration.test.ts',
+      'src/main/research-demos/ipc.test.ts',
+      'src/main/research-demos/owner.test.ts',
+      'src/main/research-demos/inspection.test.ts',
+      'src/renderer/replay-viewer/research-browser.integration.test.ts',
+      'src/main/research-replay/http-host.integration.test.ts',
+      'src/main/research-replay/observation-association.test.ts',
+      'src/main/research-replay/observation-selection.test.ts',
+      'src/main/research-replay/service-timing.test.ts',
+      'src/main/research-replay/service.test.ts',
+      'src/main/research-runs/inspection.test.ts',
+      'src/main/research-runs/ipc.test.ts',
+      'src/main/replay-viewer/desktop-embed.integration.test.ts',
+      'src/main/notebook/managed-execution-service.macos.integration.test.ts'
     ])
     expect(module.capabilityOverlays).toEqual([
       'windows_sensitive',
@@ -1002,4 +1065,24 @@ describe('Artifact Provenance repository architecture', () => {
     ])
     expect(module.fallbackCapability).toBe('main_runtime')
   })
+})
+
+it('keeps Literature and Artifact implementations connected only through injected capabilities', () => {
+  const root = resolve(__dirname, '../../..')
+  const artifacts = resolve(root, 'src/main/artifacts') + sep
+  const literature = resolve(root, 'src/main/literature') + sep
+  const violations: string[] = []
+  for (const file of listProductionSources(root, ['src/main/artifacts', 'src/main/literature'])) {
+    const forbidden = file.startsWith(artifacts) ? literature : artifacts
+    for (const { fileName: specifier } of preProcessFile(
+      readProductionSource(file, root),
+      true,
+      true
+    ).importedFiles) {
+      if (specifier.startsWith('.') && resolve(dirname(file), specifier).startsWith(forbidden)) {
+        violations.push(`${relative(root, file)} -> ${specifier}`)
+      }
+    }
+  }
+  expect(violations).toEqual([])
 })
