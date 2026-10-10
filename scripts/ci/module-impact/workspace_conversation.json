@@ -89,6 +89,7 @@
     "src/renderer/src/pages/workspace/TurnOutcomeNotice.test.tsx",
     "src/renderer/src/pages/workspace/SessionHeaderMenu.tsx",
     "src/renderer/src/pages/workspace/SessionHeaderMenu.test.tsx",
+    "src/renderer/src/pages/workspace/workspace-session-recovery.ts",
     "src/renderer/src/pages/workspace/ResearchRunLauncher.tsx",
     "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
     "src/renderer/src/pages/workspace/research-run-request.ts",
@@ -127,6 +128,7 @@
     "src/renderer/src/pages/workspace/workspace-message-queue-projection.ts",
     "src/renderer/src/pages/workspace/workspace-tool-activity-details.ts",
     "src/renderer/src/pages/workspace/workspace-tool-activity-groups.ts",
+    "src/renderer/src/pages/workspace/workspace-session-recovery.ts",
     "src/renderer/src/pages/workspace/ResearchRunLauncher.tsx",
     "src/renderer/src/pages/workspace/research-run-request.ts",
     "src/renderer/src/pages/workspace/use-research-run-launcher.tsx"
@@ -275,13 +277,14 @@
       "src/renderer/src/pages/workspace/NotebookFolderAccessNotice.interaction.test.tsx",
       "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts",
       "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx",
+      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx",
+      "src/renderer/src/pages/workspace/session-plan/session-plan-resume.test.tsx",
       "src/main/composition/handoff.test.ts",
       "src/main/composition/managed-execution.integration.test.ts",
       "src/main/index-fatal-errors.test.ts",
       "src/main/index-startup-failure.test.ts",
       "src/main/replay-viewer/assets.test.ts",
       "src/main/runtime-electron-wiring.test.ts",
-      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
       "src/renderer/replay-viewer/ViewerApp.test.tsx",
       "src/renderer/replay-viewer/browser.integration.test.ts",
       "src/renderer/replay-viewer/recorded-viewer.test.tsx",
@@ -309,8 +312,7 @@
       "src/renderer/replay-viewer/research-client.test.ts",
       "src/renderer/replay-viewer/research-viewer.test.tsx",
       "src/renderer/src/lib/replay/transcript.test.ts",
-      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
-      "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx"
     ]
   },
   "capabilityOverlays": [],

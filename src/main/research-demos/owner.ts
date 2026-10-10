@@ -19,6 +19,7 @@ import {
   type RunObservationSelection
 } from '../../shared/run-observation'
 import { recordedObservationTargetSchema } from '../../shared/run-observation-recorded'
+import type { RunObservationRecordingStatus } from '../../shared/run-observation-recording-status'
 import type { ManagedExecutionService } from '../notebook/managed-execution-service'
 import type { ManagedSessionCreationLookup } from '../session-persistence/create-managed-session'
 import type { CallerContext } from '../caller-context'
@@ -117,10 +118,11 @@ export type ResearchDemoService = Pick<
   | 'cancelOperation'
   | 'releaseEnvironment'
   | 'inspectExecution'
-  | 'recordingStatus'
->
+> & {
+  recordingStatus(value: unknown): Promise<RunObservationRecordingStatus>
+}
 
-/** Replay orchestration only. Material admission, execution and publication stay with their
+/** Ordinary-Session offline execution. Material admission, execution and publication stay with their
  * existing owners. No model, synthetic Session ID or renderer-provided command is involved. */
 export class ResearchDemoOwner {
   private readonly queues = new Map<string, Promise<unknown>>()

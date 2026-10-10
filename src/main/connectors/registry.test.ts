@@ -984,3 +984,114 @@ describe('Cellosaurus registration', () => {
     }
   })
 })
+
+describe('ClinVar submissions / registered contract', () => {
+  const descriptor = getDescriptor('variants', 'clinvar_get_submissions')!
+
+  it('registers a discoverable tool with its versioned pagination contract', () => {
+    expect(descriptor).toBe(
+      getConnectorTools('variants').find((tool) => tool.id === 'clinvar_get_submissions')
+    )
+    const doc = renderSkillDoc('variants')
+    expect(doc).toContain('### clinvar_get_submissions')
+    expect(doc).toContain('next_page')
+    expect(doc).toContain('direct_evidence_available')
+  })
+
+  it.each([
+    { accession: 'VCV000045122' },
+    { accession: 'VCV000045122.20', offset: 200, max_submissions: 200 }
+  ])('accepts registered arguments %#', (args) => {
+    expect(() => validateToolArguments(descriptor, args)).not.toThrow()
+  })
+
+  it.each([
+    {},
+    { accession: 45122 },
+    { accession: '45122', offset: -1 },
+    { accession: '45122', offset: 0.5 },
+    { accession: '45122', max_submissions: 0 },
+    { accession: '45122', max_submissions: 201 },
+    { accession: '45122', max_submissions: '10' }
+  ])('rejects invalid arguments through the registered validator %#', (args) => {
+    expect(() => validateToolArguments(descriptor, args)).toThrow('invalid_arguments')
+  })
+})
+
+describe('ENCORI registration and input contracts', () => {
+  it.each([
+    ['query_mirna_targets', 'target'],
+    ['query_rna_rna_interactions', 'rna'],
+    ['query_rbp_targets', 'rbp'],
+    ['query_cerna_network', 'cerna'],
+    ['query_rbp_disease', 'tissue'],
+    ['get_binding_sites', 'dataset_id'],
+    ['get_reference_tables', 'table_name']
+  ])('rejects blank and control-containing text through the %s schema', (id, field) => {
+    const tool = getDescriptor('encori', id)!
+    const example = tool.example!
+    const args = JSON.parse(example.slice(example.indexOf('{'), example.lastIndexOf('}') + 1))
+    expect(() => validateToolArguments(tool, args)).not.toThrow()
+    for (const value of ['valid text', '  valid text  ', '基因 α'])
+      expect(() => validateToolArguments(tool, { ...args, [field]: value })).not.toThrow()
+    for (const value of ['', ' \t ', '\r', 'A\rB', '\n', 'A\nB', '\0', 'A\0B', '\0AB', 'AB\0'])
+      expect(() => validateToolArguments(tool, { ...args, [field]: value })).toThrow(
+        'invalid_arguments'
+      )
+  })
+  it('registers ten available tools and publishes their exact schemas in the generated Skill', () => {
+    const tools = getConnectorTools('encori')
+    expect(tools).toHaveLength(10)
+    const doc = renderSkillDoc('encori')
+    for (const tool of tools) {
+      expect(getDescriptor('encori', tool.id)).toBe(tool)
+      expect(doc).toContain(`### ${tool.id}`)
+      expect(tool.example).toBeTruthy()
+    }
+    expect(doc).toContain('raw_response_path')
+    expect(doc).toContain('verified_gzip')
+  })
+  it('documents each configured total deadline in the generated Skill', () => {
+    const doc = renderSkillDoc('encori')
+    for (const tool of getConnectorTools('encori')) {
+      const seconds =
+        tool.id === 'download_bulk_dataset' ? 3600 : tool.id === 'list_bulk_datasets' ? 300 : 120
+      expect(tool.totalTimeoutMs).toBe(seconds * 1000)
+      expect(tool.returns).toContain(`${seconds}-second total deadline`)
+      expect(tool.returns).toContain('45-second network idle timeout')
+      expect(doc).toContain(tool.returns)
+    }
+  })
+  it('withholds degradome from dispatch and generated Skills while its provider is unavailable', () => {
+    expect(getDescriptor('encori', 'query_degradome_events')).toBeUndefined()
+    expect(getConnectorTools('encori').some((tool) => tool.id === 'query_degradome_events')).toBe(
+      false
+    )
+    expect(renderSkillDoc('encori')).not.toContain('query_degradome_events')
+  })
+  it('enforces preview boundaries and the allowlist of downloadable files', () => {
+    const query = getDescriptor('encori', 'query_mirna_targets')!
+    const args = {
+      assembly: 'hg38',
+      gene_type: 'mRNA',
+      mirna: 'all',
+      clip_exp_num: 1,
+      degra_exp_num: 0,
+      pancancer_num: 0,
+      program_num: 1,
+      program: 'TargetScan',
+      target: 'PDCD4',
+      cell_type: 'HeLa'
+    }
+    for (const max_records of [0, 201, 1.5])
+      expect(() => validateToolArguments(query, { ...args, max_records })).toThrow(
+        'invalid_arguments'
+      )
+    expect(() => validateToolArguments(query, { ...args, max_records: 2 })).not.toThrow()
+    expect(() =>
+      validateToolArguments(getDescriptor('encori', 'download_bulk_dataset')!, {
+        filename: '../outside.tar.gz'
+      })
+    ).toThrow('invalid_arguments')
+  })
+})

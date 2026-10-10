@@ -1,9 +1,9 @@
+import { createManagedRunObservationReader } from '../managed-run-observation'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import sharp from 'sharp'
 import type {
   ArtifactVersionDescriptor,
   ArtifactVersionFile
@@ -16,8 +16,7 @@ import type { NotebookRunDocument, NotebookRunRecord } from '../../shared/notebo
 import {
   ManagedExecutionService,
   type ManagedExecutionServiceDependencies,
-  type ManagedExecutionTurnContext,
-  type ManagedObservationMediaRegistration
+  type ManagedExecutionTurnContext
 } from './managed-execution-service'
 import {
   ManagedResearchEnvironmentOwner,
@@ -31,20 +30,11 @@ import { createManagedExecutionTurnPort } from './managed-execution-port'
 import { resolveManagedOutputRecoveryAuthority } from './managed-output-recovery'
 import { managedOutputWriteAttemptSchema } from './managed-output-publication'
 import type { ManagedExecutionOutput } from './managed-execution-output'
-import { RunObservationRecorder } from '../run-observation/recorder'
-import { RunObservationOwner } from '../run-observation/owner'
-import { parseRunObservationArchive } from '../../shared/run-observation-archive'
-import { saveAuxiliaryOutput } from '../run-observation/auxiliary-output'
-import { ObservationMediaCollector } from '../run-observation/media-collector'
-import { readObservationProjectExport } from '../run-observation/project-export-reader'
-import { createManagedRunObservationReader } from '../managed-run-observation'
+import { saveAuxiliaryOutput } from './managed-auxiliary-output'
+import type { ManagedExecutionObservationPort } from './managed-execution-observation-port'
 
 const roots: string[] = []
-const observationOwners: RunObservationRecorder[] = []
 afterEach(async () => {
-  await Promise.all(
-    observationOwners.splice(0).map((owner) => owner.close().catch(() => undefined))
-  )
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 const scope = { projectId: 'project', sessionId: 'receiver' }
@@ -57,58 +47,110 @@ const provenance = {
   promptMessageId: 'prompt'
 }
 
-it('finishes independent project recording inside output authority lifetime, without a project service or observation reader', async () => {
-  const h = await setup()
-  const close = vi.fn(async () => {
-    expect(h.runs).toHaveLength(1)
-    const registration = register.mock.calls[0][0]
-    const file = await resolveManagedOutputAuthority(
-      registration.outputAuthority,
-      registration.target,
-      'result.json'
+const unavailableObservation = (): ManagedExecutionObservationPort => ({
+  begin: vi.fn(async () => ({
+    result: { status: 'unavailable' as const, warning: 'capture-unavailable' as const }
+  })),
+  publish: vi.fn(async () => ({
+    result: { status: 'unavailable' as const, warning: 'capture-unavailable' as const },
+    savedInCurrentTurn: false
+  })),
+  confirm: vi.fn(async () => undefined),
+  reconcilePublished: vi.fn(async () => undefined),
+  drain: vi.fn(async () => undefined)
+})
+
+it.each(['external', 'turn'] as const)(
+  'rejects unsupported explicit observation before admitting a %s execution',
+  async (entrypoint) => {
+    const h = await setup()
+    const request = { ...h.request, recordObservation: true }
+    await expect(
+      entrypoint === 'external'
+        ? h.service.execute(request)
+        : h.service.executeInTurn(request, h.context)
+    ).rejects.toThrow('Run observation is not available')
+    expect(h.dependencies.operations.start).not.toHaveBeenCalled()
+    expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
+    expect(h.savedOutputs).toEqual([])
+    await expect(
+      h.service.getEnvironment({ ...scope, environmentId: h.request.environmentId })
+    ).resolves.toMatchObject({ state: 'ready' })
+  }
+)
+
+it.each([undefined, false])(
+  'never captures ordinary execution with recordObservation=%s',
+  async (value) => {
+    const h = await setup()
+    const observation = unavailableObservation()
+    h.dependencies.observation = observation
+    const result = await h.service.executeInTurn(
+      { ...h.request, recordObservation: value },
+      h.context
     )
-    expect(await readFile(file.path, 'utf8')).toBe('{"value":42}')
-    return {
-      status: 'saved' as const,
-      artifactId: 'project-recording',
-      versionId: 'project-recording-version',
-      warnings: []
-    }
-  })
-  const register = vi.fn<
-    NonNullable<ManagedExecutionServiceDependencies['registerProjectRecording']>
-  >(() => ({ close }))
-  h.dependencies.registerProjectRecording = register
-  const result = await h.service.executeDemoInTurn(
-    { ...h.request, recordObservation: true },
-    h.context
-  )
+    expect(result.status).toBe('completed')
+    expect(result.observation).toBeUndefined()
+    expect(result.outputs).toHaveLength(2)
+    expect(observation.begin).not.toHaveBeenCalled()
+    expect(observation.publish).not.toHaveBeenCalled()
+    expect(observation.drain).not.toHaveBeenCalled()
+  }
+)
+
+it('keeps an installed observer unavailable result separate from the real experiment result', async () => {
+  const h = await setup()
+  const observation = unavailableObservation()
+  h.dependencies.observation = observation
+  const result = await h.service.executeInTurn({ ...h.request, recordObservation: true }, h.context)
   expect(result.status).toBe('completed')
-  expect(result.projectRecording).toMatchObject({
-    status: 'saved',
-    versionId: 'project-recording-version'
-  })
-  expect(register).toHaveBeenCalledOnce()
-  expect(register.mock.calls[0][0].target).not.toHaveProperty('runId')
-  expect(close).toHaveBeenCalledOnce()
+  expect(result.observation).toEqual({ status: 'unavailable', warning: 'capture-unavailable' })
+  expect(result.outputs).toHaveLength(2)
+  expect(observation.begin).toHaveBeenCalledOnce()
+  expect(observation.publish).toHaveBeenCalledOnce()
+  expect(observation.begin).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ...scope,
+      operationId: 'operation',
+      executionInvocationId: expect.stringMatching(/^managed-[a-f0-9]{64}$/)
+    }),
+    expect.objectContaining({ ...scope, provenanceContext: provenance })
+  )
   expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
 })
 
-it('does not change or retry an experiment when optional project recording publication fails', async () => {
-  const h = await setup()
-  h.dependencies.registerProjectRecording = () => ({
-    close: async () => {
-      throw new Error('capture failed')
+it.each(['reported', 'thrown'] as const)(
+  'keeps a %s capture-start failure separate from execution and delegates publication recovery',
+  async (failure) => {
+    const h = await setup()
+    const observation = unavailableObservation()
+    const result = { status: 'failed' as const, warning: 'capture-start-failed' as const }
+    if (failure === 'thrown') {
+      vi.mocked(observation.begin).mockRejectedValue(new Error('Capture could not start'))
+    } else {
+      vi.mocked(observation.begin).mockResolvedValue({ result })
     }
-  })
-  const result = await h.service.executeInTurn({ ...h.request, recordObservation: true }, h.context)
-  expect(result.status).toBe('completed')
-  expect(result.projectRecording).toEqual({
-    status: 'unavailable',
-    warnings: ['publication-failed']
-  })
-  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-})
+    vi.mocked(observation.publish).mockResolvedValue({ result, savedInCurrentTurn: false })
+    h.dependencies.observation = observation
+
+    const completed = await h.service.executeInTurn(
+      { ...h.request, recordObservation: true },
+      h.context
+    )
+    expect(completed).toMatchObject({ status: 'completed', observation: result })
+    expect(completed.outputs).toHaveLength(2)
+    expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
+    expect(observation.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({ ...scope, operationId: 'operation' }),
+        handle: undefined,
+        recovery: false
+      })
+    )
+    expect(observation.drain).not.toHaveBeenCalled()
+  }
+)
+
 const deferred = (): { promise: Promise<void>; resolve: () => void } => {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {
@@ -1392,24 +1434,31 @@ it('does not choose a latest Run when recorded invocation identity is ambiguous'
   )
 })
 
-it('requires an explicit service declaration and available Main integration before admitting an interactive run', async () => {
-  const h = await setup()
-  await expect(
-    h.service.execute({ ...h.request, projectView: { title: 'Project' } })
-  ).rejects.toThrow('declared local service port')
-  await expect(
-    h.service.execute({ ...h.request, localServicePort: 4173, projectView: { title: 'Project' } })
-  ).rejects.toThrow('not available')
-  expect(h.dependencies.operations.start).not.toHaveBeenCalled()
-  expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
-})
+it.each(['external', 'turn'] as const)(
+  'requires an explicit service declaration and available Main integration before admitting a %s interactive run',
+  async (entrypoint) => {
+    const h = await setup()
+    const execute = (request: ExecuteManagedEnvironmentRequest): Promise<unknown> =>
+      entrypoint === 'external'
+        ? h.service.execute(request)
+        : h.service.executeInTurn(request, h.context)
+    await expect(execute({ ...h.request, projectView: { title: 'Project' } })).rejects.toThrow(
+      'declared local service port'
+    )
+    await expect(
+      execute({ ...h.request, localServicePort: 4173, projectView: { title: 'Project' } })
+    ).rejects.toThrow('not available')
+    expect(h.dependencies.operations.start).not.toHaveBeenCalled()
+    expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
+    expect(h.savedOutputs).toEqual([])
+  }
+)
 
 it.skipIf(process.platform !== 'darwin')(
   'binds the opt-in adapter and proof to the actual managed service generation',
   async () => {
     const h = await setup()
     const unregister = vi.fn()
-    h.dependencies.observations = { start: vi.fn(), load: vi.fn(), markPublished: vi.fn() }
     h.dependencies.registerProjectService = vi.fn(() => unregister)
     h.dependencies.registerObservationMedia = vi.fn(() => ({ close: vi.fn() }))
     vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
@@ -1448,7 +1497,6 @@ it.skipIf(process.platform !== 'darwin')(
       h.context
     )
     expect(unregister).toHaveBeenCalledOnce()
-    expect(h.dependencies.observations.start).not.toHaveBeenCalled()
     expect(h.dependencies.registerObservationMedia).not.toHaveBeenCalled()
     expect(h.savedOutputs.some((output) => output.filename.startsWith('replay-'))).toBe(false)
     const inspected = await h.service.inspectExecution({ ...scope, operationId: 'operation' })
@@ -1457,698 +1505,7 @@ it.skipIf(process.platform !== 'darwin')(
   }
 )
 
-async function enableObservationCapture(
-  h: Awaited<ReturnType<typeof setup>>
-): Promise<RunObservationRecorder> {
-  h.request.recordObservation = true
-  const observer = new RunObservationOwner({
-    authorize: async () => undefined,
-    read: async (target) => {
-      const inspected = await h.service.inspectExecution(target)
-      if (!inspected) return undefined
-      return {
-        identity: inspected.identity,
-        phase: inspected.run?.status ?? 'preparing',
-        run: inspected.run,
-        artifacts: [],
-        privatePaths: [h.root],
-        secrets: inspected.secrets
-      }
-    }
-  })
-  const recorder = new RunObservationRecorder({
-    dataRoot: h.root,
-    intervalMs: 60_000,
-    read: async (target) => observer.snapshot(target, { viewerId: 'internal-recorder' }),
-    isPublished: async (target, reference) => {
-      const version = h.descriptors.get(reference.versionId)
-      return (
-        !!version &&
-        version.projectId === target.projectId &&
-        version.sessionId === target.sessionId &&
-        version.artifactId === reference.artifactId &&
-        version.checksum === reference.checksum &&
-        version.size === reference.sizeBytes &&
-        version.state === 'finalized' &&
-        version.isPublished === true
-      )
-    }
-  })
-  h.dependencies.observations = recorder
-  observationOwners.push(recorder)
-  return recorder
-}
-
-it('records opt-in managed runs in the admitted scope and publishes a Main-produced ordinary observation Artifact', async () => {
-  const h = await setup()
-  const recorder = await enableObservationCapture(h)
-  let admitted = false
-  vi.mocked(h.dependencies.withWritableSession).mockImplementation(async (_scope, run) => {
-    admitted = true
-    try {
-      return await run()
-    } finally {
-      admitted = false
-    }
-  })
-  const start = recorder.start.bind(recorder)
-  const starting = vi.spyOn(recorder, 'start').mockImplementation(async (target) => {
-    expect(admitted).toBe(true)
-    expect(h.runtime.executeManagedShell).not.toHaveBeenCalled()
-    expect(await h.service.inspectExecution(target)).toMatchObject({
-      identity: target,
-      state: 'running',
-      run: null
-    })
-    return start(target)
-  })
-  expect(h.request.projectView).toBeUndefined()
-  expect(h.request.localServicePort).toBeUndefined()
-  expect(h.dependencies.registerProjectService).toBeUndefined()
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(starting).toHaveBeenCalledOnce()
-  expect(result.observation).toMatchObject({
-    status: 'saved',
-    recordingId: expect.stringMatching(/^[a-f0-9]{64}$/)
-  })
-  const output = h.savedOutputs.find((output) => output.filename.startsWith('replay-'))!
-  const archive = parseRunObservationArchive(output.content)
-  expect(output.producerRunId).toBeUndefined()
-  expect(archive.records.at(-1)?.sourceEvidence.identity).toMatchObject({
-    ...scope,
-    runId: result.runId,
-    executionInvocationId: result.executionInvocationId
-  })
-  expect(archive.coverage).toMatchObject({ stopReason: 'run-ended', terminalRunObserved: true })
-  expect(archive.media).toEqual([
-    expect.objectContaining({
-      name: 'result.json',
-      checksum: sha('{"value":42}'),
-      sizeBytes: 12,
-      sourceVersionId: result.outputs[0].versionId,
-      stepKeys: []
-    })
-  ])
-  expect(result.outputs).toHaveLength(3)
-  const archiveVersion = result.observation!.versionId!
-  expect(await h.service.recordingStatus({ ...scope, runId: result.runId })).toMatchObject({
-    target: { ...scope, runId: result.runId },
-    state: 'saving'
-  })
-  expect(
-    (await h.service.recordingStatus({ ...scope, runId: result.runId })).archive
-  ).toBeUndefined()
-  h.publishSavedVersions(
-    result.outputs
-      .filter((output) => output.versionId !== archiveVersion)
-      .map((output) => output.versionId)
-  )
-  await h.service.reconcilePublishedOutputs(scope)
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-  h.publishSavedVersions([archiveVersion])
-  await h.service.reconcilePublishedOutputs(scope)
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-  const target = {
-    ...scope,
-    operationId: h.context.operationId,
-    executionInvocationId: result.executionInvocationId
-  }
-  expect((await recorder.load(target))?.publication.state).toBe('published')
-  expect(await h.service.recordingStatus({ ...scope, runId: result.runId })).toMatchObject({
-    state: 'saved',
-    archive: { ...scope, versionId: archiveVersion }
-  })
-  for (const selected of [
-    { ...scope, runId: result.runId },
-    { ...scope, operationId: h.context.operationId },
-    { ...scope, executionInvocationId: result.executionInvocationId },
-    { ...target, runId: result.runId }
-  ]) {
-    const status = await h.service.recordingStatus(selected)
-    expect(status.target).toEqual(selected)
-    expect(status.state).toBe('saved')
-    expect(status.archive?.versionId).toBe(archiveVersion)
-  }
-  const descriptor = h.descriptors.get(archiveVersion)!
-  h.descriptors.set(archiveVersion, { ...descriptor, checksum: sha('tampered') })
-  expect(
-    (await h.service.recordingStatus({ ...scope, runId: result.runId })).archive
-  ).toBeUndefined()
-  h.descriptors.set(archiveVersion, descriptor)
-  expect(
-    (await new ManagedExecutionService(h.dependencies).executeInTurn(h.request, h.context))
-      .observation?.status
-  ).toBe('published')
-  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-})
-
-it('does not enroll ordinary managed executions in observation capture', async () => {
-  const h = await setup()
-  h.dependencies.observations = { start: vi.fn(), load: vi.fn(), markPublished: vi.fn() }
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(result.observation).toBeUndefined()
-  expect(h.dependencies.observations.start).not.toHaveBeenCalled()
-  expect(h.dependencies.observations.load).not.toHaveBeenCalled()
-  expect(h.dependencies.observations.markPublished).not.toHaveBeenCalled()
-  expect(result.outputs).toHaveLength(2)
-})
-
-it('reports capture admission failure without failing the original execution or fabricating an Archive', async () => {
-  const h = await setup()
-  h.request.recordObservation = true
-  h.dependencies.observations = {
-    start: vi.fn(async () => {
-      throw new Error('/private/capture path unavailable')
-    }),
-    load: vi.fn(async () => undefined),
-    markPublished: vi.fn()
-  }
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(result.status).toBe('completed')
-  expect(result.observation).toMatchObject({
-    status: 'unavailable',
-    warning: 'capture-start-failed'
-  })
-  expect(result.outputs).toHaveLength(2)
-  expect(h.savedOutputs.some((output) => output.filename.startsWith('replay-'))).toBe(false)
-  expect(JSON.stringify(result)).not.toContain('/private/')
-  h.publishSavedVersions()
-  await h.service.reconcilePublishedOutputs(scope)
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-})
-
-it('retains observation publication failure and retries its actual capture without executing the command again', async () => {
-  const h = await setup()
-  const recorder = await enableObservationCapture(h)
-  const save = vi.mocked(h.context.saveOutput).getMockImplementation()!
-  vi.mocked(h.context.saveOutput).mockImplementation(async (output) => {
-    if (output.filename.startsWith('replay-')) throw new Error('archive write unavailable')
-    return save(output)
-  })
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(result).toMatchObject({
-    status: 'completed',
-    observation: { status: 'pending', warning: 'archive-save-failed' }
-  })
-  const target = {
-    ...scope,
-    operationId: h.context.operationId,
-    executionInvocationId: result.executionInvocationId
-  }
-  expect((await recorder.load(target))?.archive?.records.length).toBeGreaterThan(0)
-  h.publishSavedVersions()
-  await h.service.reconcilePublishedOutputs(scope)
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-  const context = h.contextFor('recover-archive', 'next-prompt')
-  const awaitingPublication = await h.service.collectOutputsInTurn(
-    {
-      ...scope,
-      environmentId: h.request.environmentId,
-      collectionId: result.collectionId!,
-      requestId: 'recover'
-    },
-    context
-  )
-  expect(awaitingPublication).toMatchObject({
-    status: 'completed',
-    observation: { status: 'saved' }
-  })
-  expect(h.savedOutputs.filter((output) => output.filename.startsWith('replay-'))).toHaveLength(1)
-  expect(context.recoverOutput).not.toHaveBeenCalled()
-  h.publishSavedVersions()
-  await h.service.reconcilePublishedOutputs(scope)
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-  const recovered = await h.service.collectOutputsInTurn(
-    {
-      ...scope,
-      environmentId: h.request.environmentId,
-      collectionId: result.collectionId!,
-      requestId: 'recover-2'
-    },
-    context
-  )
-  expect(recovered.observation?.status).toBe('published')
-  expect(recovered.outputs).toHaveLength(3)
-  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-})
-
-it('reconciles the original inline write intent after a save-to-receipt crash window without publishing a duplicate', async () => {
-  const h = await setup()
-  await enableObservationCapture(h)
-  const save = vi.mocked(h.context.saveOutput).getMockImplementation()!
-  vi.mocked(h.context.saveOutput).mockImplementation(async (output) => {
-    const artifact = await save(output)
-    if (output.filename.startsWith('replay-'))
-      throw new Error('response lost after durable archive save')
-    return artifact
-  })
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(result.observation?.status).toBe('pending')
-  expect(result.outputs).toHaveLength(2)
-  const request = {
-    ...scope,
-    environmentId: h.request.environmentId,
-    collectionId: result.collectionId!,
-    requestId: 'recover-archive'
-  }
-  const context = h.contextFor('archive-recovery', 'next-prompt')
-  await expect(
-    new ManagedExecutionService(h.dependencies).collectOutputsInTurn(request, context)
-  ).rejects.toThrow('awaiting publication')
-  expect(h.savedOutputs.filter((output) => output.filename.startsWith('replay-'))).toHaveLength(1)
-  expect(context.saveOutput).not.toHaveBeenCalled()
-  h.publishSavedVersions()
-  const recovered = await new ManagedExecutionService(h.dependencies).collectOutputsInTurn(
-    request,
-    context
-  )
-  expect(recovered.observation?.status).toBe('published')
-  expect(recovered.outputs).toHaveLength(3)
-  expect(h.dependencies.artifacts.replayVersion).toHaveBeenCalledWith(
-    expect.objectContaining({
-      projectId: scope.projectId,
-      appSessionId: scope.sessionId,
-      artifactRunId: 'artifact-operation',
-      filename: expect.stringMatching(/^replay-/)
-    })
-  )
-  expect(vi.mocked(h.dependencies.artifacts.replayVersion!).mock.calls[0][0]).not.toHaveProperty(
-    'producerRunId'
-  )
-  expect(h.savedOutputs.filter((output) => output.filename.startsWith('replay-'))).toHaveLength(1)
-  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-})
-
-it('fails closed when a prior observation write cannot be reconciled, preserving the sidecar and Run outputs', async () => {
-  const h = await setup()
-  const recorder = await enableObservationCapture(h)
-  const save = vi.mocked(h.context.saveOutput).getMockImplementation()!
-  vi.mocked(h.context.saveOutput).mockImplementation(async (output) => {
-    const artifact = await save(output)
-    if (output.filename.startsWith('replay-')) throw new Error('lost archive response')
-    return artifact
-  })
-  const result = await h.service.executeInTurn(h.request, h.context)
-  h.publishSavedVersions()
-  delete h.dependencies.artifacts.replayVersion
-  const context = h.contextFor('cannot-reconcile', 'next-prompt')
-  expect(
-    await h.service.collectOutputsInTurn(
-      {
-        ...scope,
-        environmentId: h.request.environmentId,
-        collectionId: result.collectionId!,
-        requestId: 'recover'
-      },
-      context
-    )
-  ).toMatchObject({
-    status: 'completed',
-    observation: { status: 'pending', warning: 'archive-recovery-pending' }
-  })
-  expect(context.saveOutput).not.toHaveBeenCalled()
-  expect(
-    (
-      await recorder.load({
-        ...scope,
-        operationId: h.context.operationId,
-        executionInvocationId: result.executionInvocationId
-      })
-    )?.publication.state
-  ).toBe('unpublished')
-  expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-  expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-})
-
-it('drains optional capture after execution cancellation without masking the original error or leaving a timer alive', async () => {
-  const h = await setup()
-  const recorder = await enableObservationCapture(h)
-  const finish = vi.fn(async () => {
-    throw new Error('capture finish failure')
-  })
-  const abort = vi.fn(async () => undefined)
-  vi.spyOn(recorder, 'start').mockResolvedValue({
-    recordingId: sha('capture'),
-    target: { ...scope, executionInvocationId: 'invocation' },
-    sample: vi.fn(),
-    appendMedia: vi.fn(),
-    finish,
-    abort
-  })
-  vi.mocked(h.runtime.executeManagedShell).mockRejectedValueOnce(new Error('execution cancelled'))
-  await expect(h.service.executeInTurn(h.request, h.context)).rejects.toThrow('execution cancelled')
-  expect(finish).toHaveBeenCalledOnce()
-  expect(abort).toHaveBeenCalledOnce()
-  expect(h.runtime.confirmManagedShellCleanup).toHaveBeenCalled()
-  expect(h.savedOutputs).toHaveLength(0)
-})
-
-it('keeps explicit recordObservation:false off even when the Main recorder is installed', async () => {
-  const h = await setup()
-  h.request.recordObservation = false
-  h.dependencies.observations = { start: vi.fn(), load: vi.fn(), markPublished: vi.fn() }
-  const result = await h.service.executeInTurn(h.request, h.context)
-  expect(result.observation).toBeUndefined()
-  expect(h.dependencies.observations.start).not.toHaveBeenCalled()
-  expect(result.outputs).toHaveLength(2)
-})
-
-it.skipIf(process.platform !== 'darwin')(
-  'registers capture after the real environment callback has bound its Run and drains auxiliary writes before freezing the archive',
-  async () => {
-    const h = await setup()
-    const recorder = await enableObservationCapture(h)
-    const collector = new ObservationMediaCollector()
-    const bytes = await sharp({
-      create: { width: 8, height: 6, channels: 3, background: '#8d526c' }
-    })
-      .png()
-      .toBuffer()
-    h.request.localServicePort = 4173
-    h.request.projectView = { title: 'Generic project', entryPath: '/' }
-    h.request.outputs = [
-      ...(h.request.outputs ?? []),
-      { path: 'images/frame.png', filename: 'frame.png' }
-    ]
-    let registration: ManagedObservationMediaRegistration | undefined
-    const releaseWrite = deferred(),
-      enteredWrite = deferred(),
-      runtimeReturned = deferred()
-    let captured: Awaited<ReturnType<typeof collector.capture>> | undefined
-    let lateCapture: Promise<void> | undefined
-    let closing = false
-    const close = vi.fn<() => Promise<void>>(async () => undefined)
-    h.dependencies.registerProjectService = vi.fn(() => () => undefined)
-    h.dependencies.registerObservationMedia = vi.fn(
-      (input: ManagedObservationMediaRegistration) => {
-        registration = input
-        const lease = collector.register({
-          target: input.target,
-          generationId: input.generationId,
-          recording: input.recording,
-          signal: input.signal,
-          assertCurrent: () => input.signal.throwIfAborted(),
-          projectExports: input.outputs
-            .filter((output) => /\.(png|jpe?g|webp)$/i.test(output.filename))
-            .map((output) => output.filename),
-          readProjectExport: (key, signal) => {
-            const matches = input.outputs.filter((output) => output.filename === key)
-            if (matches.length !== 1) throw new Error('unavailable declared export')
-            return readObservationProjectExport({
-              authority: input.outputAuthority,
-              scope: input.target,
-              path: matches[0].path,
-              signal
-            })
-          },
-          sampleCurrent: async () => {
-            await input.recording.sample()
-            return (await recorder.load(input.recording.target))!.history.snapshots.at(-1)!
-          },
-          saveAuxiliaryOutput: input.saveAuxiliaryOutput
-        })
-        close.mockImplementation(async () => {
-          closing = true
-          await lease.close()
-        })
-        return { close }
-      }
-    )
-    let imageWrites = 0
-    const captureContext: ManagedExecutionTurnContext = {
-      ...h.context,
-      saveAuxiliaryOutput: vi.fn(async (output) => {
-        if (output.filename.startsWith('replay-frame-') && ++imageWrites === 2) {
-          enteredWrite.resolve()
-          await releaseWrite.promise
-        }
-        return saveAuxiliaryOutput(output, h.context.saveOutput)
-      })
-    }
-    vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
-      const result = await h.executeFixture(request, capability)
-      const run = h.runs[0]
-      run.status = 'running'
-      delete run.endedAt
-      const policy = resolveManagedShellExecutionCapability(capability, {
-        ...scope,
-        executionInvocationId: request.executionInvocationId!
-      })
-      const path = join(policy.environment.OPEN_SCIENCE_OUTPUT_DIR, 'images', 'frame.png')
-      await mkdir(dirname(path))
-      await writeFile(path, bytes)
-      run.workingFiles.push({
-        path,
-        relativePath: `data/managed-execution/${h.request.environmentId}/files/images/frame.png`,
-        kind: 'other',
-        size: bytes.length,
-        createdByRunId: run.runId,
-        generationId: 'generation-frame',
-        checksum: sha(bytes)
-      })
-      await policy.localService!.prepareSocket({ runId: run.runId })
-      expect(registration).toMatchObject({
-        target: {
-          ...scope,
-          operationId: h.context.operationId,
-          executionInvocationId: request.executionInvocationId,
-          runId: run.runId
-        },
-        generationId: expect.any(String),
-        outputs: h.request.outputs
-      })
-      const registeredService = vi.mocked(h.dependencies.registerProjectService!).mock.calls[0][0]
-      expect(registration!.generationId).toBe(registeredService.scope.generationId)
-      expect(
-        (
-          await resolveManagedOutputAuthority(
-            registration!.outputAuthority,
-            registration!.target,
-            'images/frame.png'
-          )
-        ).path
-      ).toBe(path)
-      const access = { assertAuthorized: () => undefined }
-      expect(collector.options(registration!.target, access)).toEqual({
-        hostView: false,
-        projectExports: ['frame.png']
-      })
-      await expect(
-        collector.capture(
-          registration!.target,
-          {
-            source: 'project-export',
-            exportKey: 'result.json',
-            idempotencyKey: 'undeclared-image'
-          },
-          access
-        )
-      ).rejects.toMatchObject({ code: 'unavailable' })
-      captured = await collector.capture(
-        registration!.target,
-        { source: 'project-export', exportKey: 'frame.png', idempotencyKey: 'kept-image' },
-        access
-      )
-      lateCapture = expect(
-        collector.capture(
-          registration!.target,
-          { source: 'project-export', exportKey: 'frame.png', idempotencyKey: 'late-image' },
-          access
-        )
-      ).rejects.toMatchObject({ code: 'unavailable' })
-      await enteredWrite.promise
-      run.status = 'completed'
-      run.endedAt = 2
-      runtimeReturned.resolve()
-      return result
-    })
-    try {
-      let done = false
-      const execution = h.service.executeInTurn(h.request, captureContext).then((result) => {
-        done = true
-        return result
-      })
-      await runtimeReturned.promise
-      await vi.waitFor(() => expect(closing).toBe(true))
-      expect(done).toBe(false)
-      expect(
-        h.savedOutputs.some((output) => /^replay-[a-f0-9]+\.json$/.test(output.filename))
-      ).toBe(false)
-      expect(
-        collector.listFrames(registration!.target, { assertAuthorized: () => undefined })
-      ).toEqual([])
-      releaseWrite.resolve()
-      const result = await execution
-      await lateCapture
-      expect(result.status).toBe('completed')
-      expect(close).toHaveBeenCalledOnce()
-      expect(h.runtime.executeManagedShell).toHaveBeenCalledOnce()
-      const replay = h.savedOutputs.find((output) =>
-        /^replay-[a-f0-9]+\.json$/.test(output.filename)
-      )!
-      const archive = parseRunObservationArchive(replay.content)
-      expect(archive.media.find((media) => media.mediaKey === captured!.captureId)).toMatchObject({
-        checksum: sha(bytes),
-        stepKeys: [captured!.stepKey],
-        capture: { source: 'project-export' }
-      })
-      expect(archive.media.filter((media) => media.capture)).toHaveLength(1)
-      const image = h.savedOutputs.find((output) => output.filename.startsWith('replay-frame-'))!
-      expect(image.producerRunId).toBeUndefined()
-      expect(h.savedOutputs.find((output) => output.filename === 'frame.png')!.producerRunId).toBe(
-        result.runId
-      )
-      expect(h.descriptors.get(captured!.versionId)!.checksum).toBe(sha(bytes))
-      await expect(
-        collector.capture(
-          registration!.target,
-          { source: 'project-export', exportKey: 'frame.png', idempotencyKey: 'after-close' },
-          { assertAuthorized: () => undefined }
-        )
-      ).rejects.toMatchObject({ code: 'unavailable' })
-      h.publishSavedVersions()
-      await h.service.reconcilePublishedOutputs(scope)
-      expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-    } finally {
-      releaseWrite.resolve()
-      await collector.close()
-    }
-  }
-)
-
-it.skipIf(process.platform !== 'darwin')(
-  'keeps media admission and drain failures auxiliary to Run cleanup and original output publication',
-  async () => {
-    for (const failure of ['register', 'close'] as const) {
-      const h = await setup()
-      await enableObservationCapture(h)
-      h.request.localServicePort = 4173
-      h.request.projectView = { title: 'Generic project', entryPath: '/' }
-      h.dependencies.registerProjectService = vi.fn(() => () => undefined)
-      const close = vi.fn(async () => {
-        throw new Error('optional media drain failed')
-      })
-      h.dependencies.registerObservationMedia = vi.fn(() => {
-        if (failure === 'register') throw new Error('optional media registry failed')
-        return { close }
-      })
-      vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
-        const result = await h.executeFixture(request, capability)
-        const policy = resolveManagedShellExecutionCapability(capability, {
-          ...scope,
-          executionInvocationId: request.executionInvocationId!
-        })
-        await policy.localService!.prepareSocket({ runId: h.runs[0].runId })
-        return result
-      })
-      const result = await h.service.executeInTurn(h.request, h.context)
-      expect(result.status).toBe('completed')
-      expect(result.observation?.status).toBe('saved')
-      expect(h.savedOutputs.find((output) => output.filename === 'result.json')).toMatchObject({
-        content: '{"value":42}',
-        producerRunId: result.runId
-      })
-      expect(close).toHaveBeenCalledTimes(failure === 'close' ? 1 : 0)
-      h.publishSavedVersions()
-      await h.service.reconcilePublishedOutputs(scope)
-      expect((await h.environments.get(h.request)).pendingCollection).toBeUndefined()
-    }
-  }
-)
-
-it.skipIf(process.platform !== 'darwin')(
-  'revokes media at execution cancellation while retaining the original partial-output publication lifetime',
-  async () => {
-    const h = await setup()
-    const recorder = await enableObservationCapture(h)
-    const collector = new ObservationMediaCollector()
-    const controller = new AbortController()
-    h.request.localServicePort = 4173
-    h.request.projectView = { title: 'Generic project', entryPath: '/' }
-    h.dependencies.registerProjectService = vi.fn(() => () => undefined)
-    let registration: ManagedObservationMediaRegistration | undefined
-    const close = vi.fn<() => Promise<void>>(async () => undefined)
-    h.dependencies.registerObservationMedia = vi.fn(
-      (input: ManagedObservationMediaRegistration) => {
-        registration = input
-        const lease = collector.register({
-          target: input.target,
-          generationId: input.generationId,
-          recording: input.recording,
-          signal: input.signal,
-          assertCurrent: () => input.signal.throwIfAborted(),
-          projectExports: [],
-          sampleCurrent: async () => {
-            await input.recording.sample()
-            return (await recorder.load(input.recording.target))!.history.snapshots.at(-1)!
-          },
-          saveAuxiliaryOutput: input.saveAuxiliaryOutput
-        })
-        close.mockImplementation(() => lease.close())
-        return { close }
-      }
-    )
-    vi.mocked(h.runtime.executeManagedShell).mockImplementation(async (request, capability) => {
-      await h.executeFixture(request, capability)
-      const run = h.runs[0]
-      run.status = 'running'
-      const policy = resolveManagedShellExecutionCapability(capability, {
-        ...scope,
-        executionInvocationId: request.executionInvocationId!
-      })
-      await policy.localService!.prepareSocket({ runId: run.runId })
-      expect(
-        collector.options(registration!.target, {
-          assertAuthorized: () => undefined,
-          hostViewAvailable: true
-        }).hostView
-      ).toBe(true)
-      run.status = 'cancelled'
-      run.exitCode = null
-      controller.abort(new Error('original execution cancellation'))
-      expect(registration!.signal.aborted).toBe(true)
-      const source = vi.fn()
-      await expect(
-        collector.capture(
-          registration!.target,
-          { source: 'host-view', idempotencyKey: 'after-cancel' },
-          { assertAuthorized: () => undefined, captureHostView: source }
-        )
-      ).rejects.toMatchObject({ code: 'unavailable' })
-      expect(source).not.toHaveBeenCalled()
-      // Publication authority remains live until the original stopped-Run outputs are collected.
-      await expect(
-        resolveManagedOutputAuthority(
-          registration!.outputAuthority,
-          registration!.target,
-          'result.json'
-        )
-      ).resolves.toHaveProperty('path')
-      return { stdout: '', stderr: '', exitCode: null, cancelled: true }
-    })
-    try {
-      const result = await h.service.executeInTurn(h.request, h.context, controller.signal)
-      expect(result.status).toBe('cancelled')
-      expect(result.observation?.status).toBe('saved')
-      expect(close).toHaveBeenCalledOnce()
-      expect(h.savedOutputs.find((output) => output.filename === 'result.json')).toMatchObject({
-        content: '{"value":42}',
-        producerRunId: result.runId
-      })
-      await expect(
-        resolveManagedOutputAuthority(
-          registration!.outputAuthority,
-          registration!.target,
-          'result.json'
-        )
-      ).rejects.toThrow()
-    } finally {
-      await collector.close()
-    }
-  }
-)
-
-it('keeps Replay purpose Main-owned and rejects switching the same request into research', async () => {
+it('keeps offline execution purpose Main-owned and rejects switching the same request into research', async () => {
   const h = await setup()
   let policy: ReturnType<typeof resolveManagedShellExecutionCapability> | undefined
   vi.mocked(h.runtime.executeManagedShell).mockImplementation(

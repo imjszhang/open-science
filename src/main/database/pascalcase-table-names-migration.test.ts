@@ -77,7 +77,7 @@ it('initializes only canonical table names and reopens without another migration
   client = createProjectDbClient(root)
   expect(await migrateApplicationDatabase(client)).toMatchObject({
     applied: [],
-    to: '0050_session_research_membership'
+    to: '0051_session_research_membership'
   })
   await expect(verifyCurrentApplicationSchema(client)).resolves.toBeUndefined()
 })
@@ -102,7 +102,7 @@ it('preserves every value, ID, relationship, receipt and unrelated trigger acros
     applied: [
       '0049_pascalcase_table_names',
       '0050_literature_translation',
-      '0050_session_research_membership'
+      '0051_session_research_membership'
     ]
   })
   for (const [index, [, table]] of names.entries())
@@ -167,7 +167,7 @@ it('rolls back names, records and the ledger on failure and restores FK enforcem
     applied: [
       '0049_pascalcase_table_names',
       '0050_literature_translation',
-      '0050_session_research_membership'
+      '0051_session_research_membership'
     ]
   })
 })

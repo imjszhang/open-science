@@ -1,3 +1,8 @@
+import { OfflinePlanAdmission } from './offline-plan-admission'
+import {
+  executeOfflinePlanRequestSchema,
+  type OfflinePlanInspection
+} from '../../shared/offline-execution'
 import { configuredCredentialPatterns, screenAuxiliaryOutput } from './screened-auxiliary-output'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readdir, open } from 'node:fs/promises'
@@ -21,11 +26,6 @@ import type {
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
-  executeOfflinePlanRequestSchema,
-  type OfflinePlanInspection
-} from '../../shared/offline-execution'
-import { OfflinePlanAdmission } from './offline-plan-admission'
-import {
   createManagedSessionRequestSchema,
   collectManagedOutputsRequestSchema,
   executeManagedEnvironmentRequestSchema,
@@ -37,21 +37,18 @@ import {
   managedObservationResultSchema,
   prepareManagedEnvironmentRequestSchema,
   type CreateManagedSessionRequest,
+  type ManagedObservationResult,
   type ManagedRuntimeDiagnosticCode,
   type ManagedRuntimeDiagnostics
 } from '../../shared/managed-execution'
 import type { NotebookRunInputFile, NotebookRunRecord } from '../../shared/notebook'
 import {
-  runObservationDemoViewingAdmissionSchema,
-  type RunObservationDemoViewingAdmission,
-  type RunObservationTarget
-} from '../../shared/run-observation'
-import type { RunObservationRecordingStatus } from '../../shared/run-observation-recording-status'
-import type {
-  RunObservationRecorder,
-  RunObservationRecordingHandle
-} from '../run-observation/recorder'
-import { ManagedRunObservationCoordinator } from '../run-observation/managed-coordinator'
+  legacyDemoViewingAdmissionSchema as runObservationDemoViewingAdmissionSchema,
+  type LegacyDemoViewingAdmission as RunObservationDemoViewingAdmission,
+  type ManagedObservationTarget as RunObservationTarget,
+  type ManagedObservationHandle as RunObservationRecordingHandle,
+  type ManagedExecutionObservationPort
+} from './managed-execution-observation-port'
 import type { ArtifactVersionDescriptor } from '../../shared/artifact-provenance'
 import {
   runtimeViewLaunchSchema,
@@ -261,6 +258,9 @@ export type ManagedExecutionInspection = {
   run: NotebookRunRecord | null
   artifacts: ArtifactVersionDescriptor[]
   projectView?: RuntimeViewLaunch
+  /** Main-only evidence admission, consumed by the independent recording status reader. */
+  recordObservation?: boolean
+  observation?: ManagedObservationResult
   /** Main-private redaction inputs, never a public response. */
   secrets: string[]
 }
@@ -310,7 +310,7 @@ export type ManagedExecutionServiceDependencies = {
   artifacts: Pick<ArtifactProvenanceRepository, 'resolveVersionDescriptors'> &
     Partial<Pick<ArtifactProvenanceRepository, 'replayVersion' | 'readPublishedVersionForWrite'>>
   /** Optional independent Main capture; enabled only by the recordObservation request option. */
-  observations?: Pick<RunObservationRecorder, 'start' | 'load' | 'markPublished'>
+  observation?: ManagedExecutionObservationPort
   notebooks: Pick<NotebookRunRepository, 'readSessionDocuments'>
   operations: Pick<SessionOperationOwner, 'start' | 'get' | 'wait' | 'cancel'>
   runtime: Pick<NotebookRuntimeService, 'executeManagedShell' | 'confirmManagedShellCleanup'>
@@ -493,16 +493,16 @@ export class ManagedExecutionService {
     { fingerprint: string; completion: Promise<ManagedExecutionResult> }
   >()
 
-  private readonly observationCoordinator: ManagedRunObservationCoordinator
   private readonly offlinePlans: OfflinePlanAdmission
 
   constructor(private readonly dependencies: ManagedExecutionServiceDependencies) {
     this.offlinePlans = new OfflinePlanAdmission({ ...dependencies, service: this })
-    this.observationCoordinator = new ManagedRunObservationCoordinator({
-      dataRoot: dependencies.dataRoot,
-      artifacts: dependencies.artifacts,
-      recorder: () => dependencies.observations
-    })
+  }
+
+  private get observation(): ManagedExecutionObservationPort {
+    if (!this.dependencies.observation)
+      throw new Error('Run observation is not available in this runtime.')
+    return this.dependencies.observation
   }
 
   /** Read-only exact admission lookup. No executor, Session, environment or process is created. */
@@ -610,84 +610,10 @@ export class ManagedExecutionService {
         : {}),
       run,
       artifacts,
+      ...(journal.recordObservation ? { recordObservation: true } : {}),
+      ...(journal.observation ? { observation: structuredClone(journal.observation) } : {}),
       ...(journal.projectView ? { projectView: journal.projectView } : {}),
       secrets: [...(live?.secrets ?? [])]
-    }
-  }
-
-  /** Main-only exact native archive attestation; no public request can supply this authority. */
-  async readNativeObservationSourceVersionMapping(
-    ...input: Parameters<ManagedRunObservationCoordinator['readNativeSourceVersionMapping']>
-  ): Promise<Readonly<Record<string, string>> | undefined> {
-    return this.observationCoordinator.readNativeSourceVersionMapping(...input)
-  }
-
-  /** Status never publishes, restarts recording or creates an execution. */
-  async recordingStatus(value: unknown): Promise<RunObservationRecordingStatus> {
-    const target = inspectionTargetSchema.parse(value)
-    const inspected = await this.inspectExecution(target)
-    if (!inspected) throw new Error('The exact managed execution is unavailable.')
-    const journal = await this.readJournal(inspected.identity.executionInvocationId.slice(8))
-    if (
-      !journal ||
-      journal.projectId !== inspected.identity.projectId ||
-      journal.sessionId !== inspected.identity.sessionId ||
-      journal.operationId !== inspected.identity.operationId
-    )
-      throw new Error('The recorded execution identity is unavailable.')
-    if (!journal.recordObservation) return { target, state: 'not-recorded' }
-    // An app restart may follow a successful Artifact write but precede its private recording
-    // receipt. Reconcile only that original published write; this never executes or saves again.
-    await this.observationCoordinator.confirm(observationTarget(journal))
-    // Preserve the caller's validated selector in the response. Recorder storage uses its own
-    // canonical admission target; adding/removing selectors here would invalidate the viewer scope.
-    const recorded = await this.dependencies.observations?.load(observationTarget(journal))
-    const publication = recorded?.publication
-    const versionId = publication?.state !== 'unpublished' ? publication?.versionId : undefined
-    let archive: RunObservationRecordingStatus['archive']
-    if (versionId && publication && publication.state !== 'unpublished') {
-      const versions = await this.dependencies.artifacts.resolveVersionDescriptors({
-        projectId: target.projectId,
-        appSessionId: target.sessionId,
-        versionIds: [versionId]
-      })
-      const exact = versions.filter(
-        (version) =>
-          version.versionId === versionId &&
-          version.projectId === target.projectId &&
-          version.sessionId === target.sessionId &&
-          (!publication.artifactId || version.artifactId === publication.artifactId) &&
-          version.checksum === publication.checksum &&
-          version.size === publication.sizeBytes &&
-          version.state === 'finalized' &&
-          version.isPublished === true
-      )
-      if (exact.length === 1)
-        archive = {
-          projectId: target.projectId,
-          sessionId: target.sessionId,
-          artifactId: exact[0].artifactId,
-          versionId
-        }
-    }
-    const capacityLimit = recorded?.capacityLimit ?? recorded?.archive?.coverage.capacityLimit
-    const state: RunObservationRecordingStatus['state'] = archive
-      ? 'saved'
-      : capacityLimit
-        ? 'capacity'
-        : recorded?.status === 'recording' && !recorded.recovered
-          ? 'recording'
-          : journal.observation?.status === 'failed' ||
-              journal.observation?.status === 'unavailable'
-            ? 'failed'
-            : !recorded && journal.observation?.status === 'recording'
-              ? 'recording'
-              : 'saving'
-    return {
-      target,
-      state,
-      ...(archive ? { archive } : {}),
-      ...(capacityLimit ? { capacityLimit } : {})
     }
   }
 
@@ -1045,7 +971,7 @@ export class ManagedExecutionService {
 
   /** The existing Artifact publication hook is a hint; exact durable Versions remain authority. */
   async reconcilePublishedOutputs(scope?: { projectId: string; sessionId: string }): Promise<void> {
-    await this.observationCoordinator.reconcilePublished(scope)
+    await this.dependencies.observation?.reconcilePublished(scope)
     if (!scope) {
       let names: string[]
       try {
@@ -1457,7 +1383,7 @@ export class ManagedExecutionService {
   ): Promise<void> {
     if (!journal.recordObservation) return
     const files = journal.collection?.frozen?.files ?? []
-    const publication = await this.observationCoordinator.publish({
+    const publication = await this.observation.publish({
       target: observationTarget(journal),
       context,
       handle,
@@ -1492,8 +1418,10 @@ export class ManagedExecutionService {
   }
 
   private async refreshObservation(journal: Journal): Promise<void> {
-    if (!journal.recordObservation) return
-    const current = await this.observationCoordinator.confirm(observationTarget(journal))
+    // A read on an installation without the optional adapter preserves the original evidence.
+    // It must neither relabel a stored capture nor manufacture publication confirmation.
+    if (!journal.recordObservation || !this.dependencies.observation) return
+    const current = await this.observation.confirm(observationTarget(journal))
     if (current) journal.observation = current
     if (journal.result && journal.observation) journal.result.observation = journal.observation
   }
@@ -1699,6 +1627,8 @@ export class ManagedExecutionService {
       throw new Error('Offline demos cannot use research profiles.')
     if (request.projectView && !this.dependencies.registerProjectService)
       throw new Error('Interactive project viewing is not available in this runtime.')
+    if (request.recordObservation && !this.dependencies.observation)
+      throw new Error('Run observation is not available in this runtime.')
     inputVersionIds =
       inputVersionIds === undefined ? undefined : z.array(identity).max(32).parse(inputVersionIds)
     const previousOperation = await this.dependencies.operations.get({
@@ -1846,6 +1776,8 @@ export class ManagedExecutionService {
     demoViewing = this.validateDemoViewing(request, purpose, demoViewing)
     if (request.projectView && !this.dependencies.registerProjectService)
       throw new Error('Interactive project viewing is not available in this runtime.')
+    if (request.recordObservation && !this.dependencies.observation)
+      throw new Error('Run observation is not available in this runtime.')
     const context: ManagedExecutionTurnContext = Object.freeze({
       operationId: admittedContext.operationId,
       executionInvocationId: admittedContext.executionInvocationId,
@@ -2049,12 +1981,15 @@ export class ManagedExecutionService {
     try {
       return await this.dependencies.withWritableSession(request, async () => {
         if (request.recordObservation) {
-          const capture = await this.observationCoordinator.begin(
-            observationTarget(journal),
-            context
-          )
-          observationHandle = capture.handle
-          journal.observation = capture.result
+          try {
+            const capture = await this.observation.begin(observationTarget(journal), context)
+            observationHandle = capture.handle
+            journal.observation = capture.result
+          } catch {
+            // Capture admission is auxiliary. Publication and drain still run through the
+            // adapter so an interrupted capture cannot bypass its exact write authority.
+            journal.observation = { status: 'failed', warning: 'capture-start-failed' }
+          }
           await this.writeJournal(journal).catch(() => undefined)
         }
         return this.dependencies.environments.withExecution(
@@ -2303,7 +2238,7 @@ export class ManagedExecutionService {
       // Keep cleanup order independent of optional observation. Finish drains its own pending
       // reads and freezes a truthful partial on errors; it never cancels or restarts the Run.
       await closeMedia()
-      if (observationHandle) await this.observationCoordinator.drain(observationHandle)
+      if (observationHandle) await this.observation.drain(observationHandle)
       unregisterService?.()
       this.liveOutput.delete(key)
     }

@@ -1,3 +1,4 @@
+import { configureTestElectronHost } from '../../../test/runtime-host'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,8 +10,10 @@ import type {
 } from '../../shared/artifact-provenance'
 import type { RunObservationSnapshot } from '../../shared/run-observation'
 import type { ManagedOutputWriteAttempt } from '../notebook/managed-output-publication'
-import { saveAuxiliaryOutput } from './auxiliary-output'
+import { saveAuxiliaryOutput } from '../notebook/managed-auxiliary-output'
 import { ManagedRunObservationCoordinator } from './managed-coordinator'
+import { createManagedObservationPort } from './managed-port'
+import { createManagedRecordingStatusReader } from './managed-status'
 import { RunObservationRecorder } from './recorder'
 import { RunObservationOwner } from './owner'
 import { createManagedRunObservationReader } from '../managed-run-observation'
@@ -24,6 +27,8 @@ vi.mock('electron', () => ({
   shell: { openPath: vi.fn() },
   ipcMain: { handle: vi.fn(), removeHandler: vi.fn() }
 }))
+
+await configureTestElectronHost(await import('electron'))
 
 const target = {
   projectId: 'project-a',
@@ -361,7 +366,15 @@ it.skipIf(process.platform === 'win32').each(['returned', 'response-lost'] as co
       withWritableSession: async <T>(_scope: unknown, action: () => Promise<T>): Promise<T> =>
         action()
     }
-    service = new ManagedExecutionService({ ...dependencies, observations: recorder })
+    const coordinator = new ManagedRunObservationCoordinator({
+      dataRoot: h.fixture.storageRoot,
+      recorder: () => recorder,
+      artifacts: h.artifacts
+    })
+    service = new ManagedExecutionService({
+      ...dependencies,
+      observation: createManagedObservationPort(coordinator).port
+    })
     const save = h.artifacts.saveVersion.bind(h.artifacts)
     let savedVersion: ArtifactVersionFile | undefined
     let saveCount = 0
@@ -408,7 +421,8 @@ it.skipIf(process.platform === 'win32').each(['returned', 'response-lost'] as co
       timeoutMs: 10_000,
       recordObservation: true
     })
-    expect(await h.owner.wait({ ...scope, requestId: 'actual-publication' })).toMatchObject({
+    const settled = await h.owner.wait({ ...scope, requestId: 'actual-publication' })
+    expect(settled, settled?.error).toMatchObject({
       status: 'completed',
       notebookRunIds: [expect.any(String)]
     })
@@ -445,14 +459,26 @@ it.skipIf(process.platform === 'win32').each(['returned', 'response-lost'] as co
     const immutableBefore = await readFile(join(h.fixture.storageRoot, row.contentStorageKey))
     await recorder.close()
     const restartedRecorder = makeRecorder()
-    service = new ManagedExecutionService({ ...dependencies, observations: restartedRecorder })
+    const restartedCoordinator = new ManagedRunObservationCoordinator({
+      dataRoot: h.fixture.storageRoot,
+      recorder: () => restartedRecorder,
+      artifacts: h.artifacts
+    })
+    service = new ManagedExecutionService({
+      ...dependencies,
+      observation: createManagedObservationPort(restartedCoordinator).port
+    })
+    const recordingStatus = createManagedRecordingStatusReader({
+      inspect: (target) => service.inspectExecution(target),
+      coordinator: restartedCoordinator,
+      recorder: restartedRecorder,
+      artifacts: h.artifacts
+    })
     const replay = vi
       .spyOn(h.artifacts, 'replayVersion')
       .mockRejectedValue(new Error('Status must never replay or repair a write.'))
     const writesBefore = await h.fixture.client.artifactVersion.count()
-    expect(
-      await service.recordingStatus({ ...scope, operationId: operation.operationId })
-    ).toMatchObject({
+    expect(await recordingStatus({ ...scope, operationId: operation.operationId })).toMatchObject({
       state: 'saved',
       archive: { ...scope, artifactId: row.artifactId, versionId: row.id }
     })

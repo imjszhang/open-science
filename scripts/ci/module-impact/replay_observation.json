@@ -1,5 +1,7 @@
 {
   "ownerPaths": [
+    "src/shared/browser-recording-transport.test.ts",
+    "src/shared/browser-recording-transport.ts",
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
     "src/renderer/replay-viewer/RecordedViewerApp.tsx",
     "src/renderer/replay-viewer/ReferencePanel.tsx",
@@ -107,11 +109,10 @@
     "src/renderer/src/pages/workspace/replay/use-browser-recording-transport.test.tsx",
     "src/renderer/src/pages/workspace/replay/use-browser-recording-transport.ts",
     "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
-    "src/renderer/src/pages/workspace/replay/use-replay-executions.tsx",
-    "src/shared/browser-recording-transport.test.ts",
-    "src/shared/browser-recording-transport.ts"
+    "src/renderer/src/pages/workspace/replay/use-replay-executions.tsx"
   ],
   "interfacePaths": [
+    "src/shared/browser-recording-transport.ts",
     "src/renderer/replay-viewer/BrowserArtifactPreview.tsx",
     "src/renderer/replay-viewer/RecordedViewerApp.tsx",
     "src/renderer/replay-viewer/ReferencePanel.tsx",
@@ -171,12 +172,12 @@
     "src/renderer/src/pages/workspace/replay/recording-source-label.ts",
     "src/renderer/src/pages/workspace/replay/replay-recorded-gaps.ts",
     "src/renderer/src/pages/workspace/replay/use-browser-recording-transport.ts",
-    "src/renderer/src/pages/workspace/replay/use-replay-executions.tsx",
-    "src/shared/browser-recording-transport.ts"
+    "src/renderer/src/pages/workspace/replay/use-replay-executions.tsx"
   ],
   "consumerModules": [],
   "testFiles": {
     "owner": [
+      "src/shared/browser-recording-transport.test.ts",
       "src/renderer/replay-viewer/ViewerApp.test.tsx",
       "src/renderer/replay-viewer/browser.integration.test.ts",
       "src/renderer/replay-viewer/client.test.ts",
@@ -220,8 +221,7 @@
       "src/renderer/src/pages/workspace/replay/RecordedMediaViewport.test.tsx",
       "src/renderer/src/pages/workspace/replay/replay-recorded-gaps.test.ts",
       "src/renderer/src/pages/workspace/replay/use-browser-recording-transport.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
-      "src/shared/browser-recording-transport.test.ts"
+      "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx"
     ],
     "contract": [],
     "consumer": [
@@ -231,7 +231,6 @@
       "src/main/index-startup-failure.test.ts",
       "src/main/replay-viewer/assets.test.ts",
       "src/main/runtime-electron-wiring.test.ts",
-      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
       "src/renderer/src/App.test.tsx",
       "src/renderer/src/components/global-search/GlobalSearchDialog.i18n.render.test.tsx",
       "src/renderer/src/components/global-search/GlobalSearchDialog.test.tsx",
@@ -273,13 +272,13 @@
       "src/renderer/src/pages/workspace/replay/ReplayPanel.test.tsx",
       "src/renderer/web/bootstrap.test.ts",
       "src/renderer/web/renderer-argument-shape-characterization.test.ts",
+      "src/renderer/src/pages/workspace/WorkspaceSidebarContainer.test.tsx",
+      "src/renderer/src/pages/home/HomePage.persistence.test.tsx",
+      "src/renderer/src/pages/home/HomePage.render.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
       "src/renderer/src/pages/workspace/research-preview-navigation.test.ts",
       "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
-      "src/renderer/src/pages/workspace/WorkspaceSidebarContainer.test.tsx",
       "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
-      "src/renderer/src/pages/home/HomePage.persistence.test.tsx",
-      "src/renderer/src/pages/home/HomePage.render.test.tsx",
       "src/main/research-demos/owner.macos.integration.test.ts",
       "src/main/replay-viewer/recorded-resource-context-menu.integration.test.ts",
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx"

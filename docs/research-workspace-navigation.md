@@ -1,6 +1,5 @@
 # Research navigation and recorded-run viewing
 
-Implemented locally on top of the stage-three Replay branch, 2026-10-06.
 The research name is the entry to the original research. Its immutable transcript, right-hand
 Replay and question composer share one view. Saved discussions remain children of the research.
 This change adds no Session type, changes neither `.science` v1 nor execution authority, and keeps
@@ -44,10 +43,11 @@ grants, running processes or credentials.
 
 ## Discovering saved runs
 
-The research preview offers Session process, Run recordings, Original records and Source files.
-A newly discovered recording list becomes the initial view only before interaction; delayed
-results do not interrupt playback, seeking, reading or scrolling. The imported Notebook links
-to saved recordings instead of trying to observe an author's Run.
+The research preview offers the original conversation, Notebook, project recordings, and Results
+as independent material views. Discovery supplies verified recording choices without interrupting
+playback, seeking, reading, or scrolling. The imported Notebook links to saved recordings instead
+of trying to observe an author's Run. See [research Replay](research-replay-viewer.md) for the shared
+clock and fullscreen layouts.
 
 Discovery reuses the source-scoped Replay Artifact catalog. It reads exact receiving Versions in
 pages of at most 32 candidates, with two concurrent 4 KB previews. Conflicting and out-of-scope
@@ -75,16 +75,12 @@ acceptance. Navigation, cancelled recovery and closed viewers invalidate pending
 No Ask action sends a message. A first Send uses the research membership and source context to
 create a discussion; it cannot append to or change the imported Session.
 
-## Validation and installed acceptance
+## Validation
 
 Automated coverage includes source entry and exact navigation, original transcript visibility,
 source/draft isolation, first-send membership and immutable source preservation, cancellation,
 stale handoffs, receiving identity checks, saved recording discovery, source labels and preview
 retention. Eight-locale guards, module registration checks, types and changed-file lint apply.
 Desktop journeys cover research-name navigation both before and after discussions and restart.
-
-Build reviewed commits with the independent Test maintenance tool, retaining its data and backup.
-Use the existing live-07 receiving research (#84) and ordinary execution (#83) to verify source
-entry, inline questions, source read-only actions, saved-image viewing and exact-step Ask. Record
-the installed commit, version and results in that release's acceptance receipt. UI acceptance
-must not be represented as another scientific experiment.
+These tests use isolated fixtures; source navigation and viewing never constitute a new scientific
+experiment or prove that the original experiment can run on another machine.

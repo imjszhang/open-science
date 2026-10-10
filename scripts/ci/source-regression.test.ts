@@ -54,19 +54,6 @@ it('uses the packaging heap budget for Web builds in every workflow', () => {
   )
 })
 
-it('builds the scoped Replay viewer for desktop regression and every packaged platform', () => {
-  const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts
-  expect(scripts['build:replay-viewer']).toBe('vite build --config vite.replay-viewer.config.ts')
-  expect(scripts['build:e2e']).toBe(
-    'node --max-old-space-size=4096 node_modules/electron-vite/bin/electron-vite.js build && npm run build:replay-viewer'
-  )
-  for (const platform of ['mac', 'win', 'linux'])
-    expect(scripts[`build:${platform}`]).toBe(
-      `npm run build:web && electron-vite build && electron-builder --${platform}`
-    )
-  expect(scripts.build).toBe('npm run typecheck && electron-vite build && npm run build:web')
-})
-
 it('checks the reported Windows failures in the blocking PR core job', () => {
   const step = pr.jobs.windows_core.steps.find(
     ({ name }) => name === 'Test scheduled Windows validation regressions'
@@ -158,13 +145,8 @@ describe('trusted supplemental selection', () => {
     expect(toGitHubOutputPlan(plan).macosGroups).toEqual(['journeys', 'regressions', 'delegation'])
   })
 
-  it.each([
-    'e2e/browser/settings-undo.spec.ts',
-    'e2e/browser/project-recording.spec.ts',
-    'e2e/browser/fixture/project-recording.html',
-    'e2e/browser/fixture/project-recording.tsx'
-  ])('runs the whole browser lane for %s without unrelated Vitest or Electron groups', (path) => {
-    const plan = resolvePlan([path])
+  it('runs the whole browser lane without forcing unrelated Vitest or Electron groups', () => {
+    const plan = resolvePlan(['e2e/browser/settings-undo.spec.ts'])
     expect(plan.mode).toBe('selective')
     // Keep real Windows font, clipboard and browser-startup behavior in the existing bundle.
     expect(plan.bundles).toEqual(['policy', 'static', 'macos_e2e', 'windows_e2e'])
@@ -367,21 +349,6 @@ describe('independent source regression', () => {
       }
     }
   )
-
-  it('enables the real recorded-HTML Electron context-menu regression in the shared macOS action', () => {
-    const command = action.runs.steps.find(
-      (step) => step.name === 'Test recorded resource context menus'
-    )!
-    expect(command.if).toBe("inputs.group == 'regressions'")
-    expect(command.env?.RUN_RECORDED_RESOURCE_CONTEXT_MENU).toBe('1')
-    expect(command.run).toBe(
-      'npx vitest run src/main/replay-viewer/recorded-resource-context-menu.integration.test.ts'
-    )
-    const plan = resolvePlan([
-      'src/main/replay-viewer/recorded-resource-context-menu.integration.test.ts'
-    ])
-    expect(toGitHubOutputPlan(plan).macosGroups).toContain('regressions')
-  })
 
   it('runs both scheduled rounds even when main has not changed', () => {
     expect(scheduled.jobs).not.toHaveProperty('plan')

@@ -1,4 +1,4 @@
-import { sessionResearchMembershipMigration } from './migrations/0050-session-research-membership'
+import { sessionResearchMembershipMigration } from './migrations/0051-session-research-membership'
 import { pascalcaseTableNamesMigration } from './migrations/0049-pascalcase-table-names'
 import { pdfAnnotationSharingMigration } from './migrations/0048-pdf-annotation-sharing'
 import { journalAttributesMigration } from './migrations/0046-journal-attributes'
@@ -2229,27 +2229,6 @@ const migrateApplicationDatabaseWithManifest = async (
   }
 
   const applied: string[] = []
-  // The Test fork shipped research membership before upstream's independently numbered
-  // 0050 translation migration. Accept only that exact, checksum-verified historical
-  // prefix; apply the missing upstream migration normally without rewriting either ID.
-  if (
-    manifest === MIGRATION_MANIFEST &&
-    ledger.at(-1)?.id === sessionResearchMembershipMigration.id &&
-    !ledger.some((entry) => entry.id === literatureTranslationMigration.id)
-  ) {
-    validateLedger(
-      ledger,
-      MIGRATION_MANIFEST.filter((entry) => entry.id !== literatureTranslationMigration.id)
-    )
-    const translation = MIGRATION_MANIFEST.find(
-      (entry) => entry.id === literatureTranslationMigration.id
-    )!
-    options.onProgress?.({ phase: 'migrating', migrationId: translation.id })
-    await ensureBackupBeforeMigration(translation)
-    await applyManifestMigration(client, translation)
-    applied.push(translation.id)
-    ledger = await readLedger(client)
-  }
   const appliedCount = validateLedger(ledger, manifest)
   if (appliedCount === manifest.length) {
     return complete({ adoptedLegacy: false, applied, from, to: latest.id })

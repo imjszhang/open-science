@@ -53,7 +53,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 import type { MigrationProgress } from '../../shared/storage'
 import { copyAndVerify, deleteSources, validateMigrationSourceLinks } from './data-migration'
-import { MANAGED_EXECUTION_DATA_DIRS, MIGRATABLE_DATA_DIRS } from './data-directories'
+import { MIGRATABLE_DATA_DIRS } from './data-directories'
 
 let from: string
 let to: string
@@ -89,37 +89,6 @@ const exists = async (path: string): Promise<boolean> => {
 }
 
 describe('validateMigrationSourceLinks', () => {
-  it('moves managed execution and Session idempotency receipts before removing their old copies', async () => {
-    for (const directory of MANAGED_EXECUTION_DATA_DIRS) {
-      await mkdir(join(from, directory), { recursive: true })
-      await writeFile(join(from, directory, 'receipt.json'), `retained-${directory}`)
-    }
-    expect(
-      await copyAndVerify({
-        from,
-        to,
-        dirs: [...MIGRATABLE_DATA_DIRS],
-        signal: new AbortController().signal,
-        onProgress: () => undefined
-      })
-    ).toMatchObject({ ok: true })
-    for (const directory of MANAGED_EXECUTION_DATA_DIRS) {
-      expect(await readFile(join(to, directory, 'receipt.json'), 'utf8')).toBe(
-        `retained-${directory}`
-      )
-      expect(await readFile(join(from, directory, 'receipt.json'), 'utf8')).toBe(
-        `retained-${directory}`
-      )
-    }
-    expect((await deleteSources(from, [...MIGRATABLE_DATA_DIRS])).failed).toEqual([])
-    for (const directory of MANAGED_EXECUTION_DATA_DIRS) {
-      expect(await exists(join(from, directory))).toBe(false)
-      expect(await readFile(join(to, directory, 'receipt.json'), 'utf8')).toBe(
-        `retained-${directory}`
-      )
-    }
-  })
-
   it('moves model receipts, installed weights and resumable downloads with the data root', async () => {
     const files = [
       'models/pdf-tables/active.json',

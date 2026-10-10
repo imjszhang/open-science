@@ -154,7 +154,7 @@ describe('application database (integration)', () => {
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
         '0050_literature_translation',
-        '0050_session_research_membership'
+        '0051_session_research_membership'
       ]
     })
 
@@ -1180,7 +1180,7 @@ describe('application database (integration)', () => {
         '0048_pdf_annotation_sharing',
         '0049_pascalcase_table_names',
         '0050_literature_translation',
-        '0050_session_research_membership'
+        '0051_session_research_membership'
       ]
     })
 

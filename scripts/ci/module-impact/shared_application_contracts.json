@@ -159,7 +159,6 @@
     "src/shared/renderer-contracts/system.ts",
     "src/shared/renderer-contracts/update.ts",
     "src/shared/renderer-contracts/window.ts",
-    "src/shared/managed-execution.ts",
     "src/shared/pdf-translation.ts",
     "src/shared/pdf-translation-languages.ts",
     "src/shared/pdf-translation-languages.test.ts",
@@ -192,7 +191,9 @@
     "src/shared/pdf-translation-numeric-units.test.ts",
     "src/shared/pdf-translation-snapshot.ts",
     "src/shared/pdf-translation-models.ts",
-    "src/shared/pdf-translation-models.test.ts"
+    "src/shared/pdf-translation-models.test.ts",
+    "src/shared/pdf-text.test.ts",
+    "src/shared/managed-execution.ts"
   ],
   "interfacePaths": [
     "src/shared/interface-scale.ts",
@@ -285,11 +286,11 @@
     "src/shared/pdf-annotations.ts",
     "src/shared/literature-smart-collections.ts",
     "src/shared/journal-attributes.ts",
-    "src/shared/managed-execution.ts",
     "src/shared/provider-text-generation-failure.ts",
     "src/shared/pdf-translation-snapshot.ts",
     "src/shared/pdf-translation-languages.ts",
-    "src/shared/pdf-translation-models.ts"
+    "src/shared/pdf-translation-models.ts",
+    "src/shared/managed-execution.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -341,7 +342,8 @@
       "src/shared/pdf-translation-batching.test.ts",
       "src/shared/pdf-translation-numeric-units.test.ts",
       "src/shared/pdf-translation-languages.test.ts",
-      "src/shared/pdf-translation-models.test.ts"
+      "src/shared/pdf-translation-models.test.ts",
+      "src/shared/pdf-text.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -353,10 +355,6 @@
       "src/renderer/src/pages/literature/journals/journal-import-file.test.ts",
       "src/renderer/src/pages/literature/JournalAttributes.render.test.tsx",
       "src/main/windows-titlebar.test.ts",
-      "packages/open-science/managed-execution-types.test.ts",
-      "src/main/notebook/managed-execution-service.test.ts",
-      "src/main/notebook/local-rpc-server.managed-execution.test.ts",
-      "src/main/notebook/managed-execution-entrypoints.integration.test.ts",
       "src/main/literature/pdf-translation/index.test.ts",
       "src/renderer/src/pages/workspace/previews/renderers/PdfTranslationControls.test.tsx",
       "src/renderer/src/pages/workspace/previews/renderers/PdfPreview.test.tsx"

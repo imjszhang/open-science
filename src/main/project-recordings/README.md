@@ -25,12 +25,22 @@ declared output is read through the existing managed-output authority. It is UTF
   "format": "open-science-project-recording-data",
   "version": 1,
   "states": [
-    { "id": "state-0", "sequence": 0, "reportedAt": 1791351200000,
-      "label": "Initial state", "value": { "score": 0 } }
+    {
+      "id": "state-0",
+      "sequence": 0,
+      "reportedAt": 1791351200000,
+      "label": "Initial state",
+      "value": { "score": 0 }
+    }
   ],
   "events": [
-    { "id": "action-0", "sequence": 0, "reportedAt": 1791351201000,
-      "name": "Move left", "data": { "actor": "agent-1" } }
+    {
+      "id": "action-0",
+      "sequence": 0,
+      "reportedAt": 1791351201000,
+      "name": "Move left",
+      "data": { "actor": "agent-1" }
+    }
   ]
 }
 ```

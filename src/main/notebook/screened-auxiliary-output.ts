@@ -1,4 +1,4 @@
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../run-observation/auxiliary-output'
+import type { AuxiliaryOutput, AuxiliaryOutputResult } from './managed-auxiliary-output'
 
 /** Main-only patterns shared by required outputs and optional recording publication. */
 export function configuredCredentialPatterns(secrets: readonly string[]): Buffer[] {

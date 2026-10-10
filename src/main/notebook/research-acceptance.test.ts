@@ -802,3 +802,5 @@ it('uses only selected slots through production encrypted profile save/lease, ke
   cipher.destroy()
   await expect(store.lease(profile.profileId, binding, slots)).rejects.toThrow('unavailable')
 })
+
+;(await import('../../../test/runtime-metadata')).configureTestRuntimeMetadata()

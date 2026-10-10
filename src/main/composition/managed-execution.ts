@@ -51,6 +51,9 @@ import { createManagedRunObservationReader } from '../managed-run-observation'
 import { RunObservationOwner } from '../run-observation/owner'
 import { ObservationViewers } from '../run-observation/viewers'
 import { RunObservationRecorder } from '../run-observation/recorder'
+import { ManagedRunObservationCoordinator } from '../run-observation/managed-coordinator'
+import { createManagedObservationPort } from '../run-observation/managed-port'
+import { createManagedRecordingStatusReader } from '../run-observation/managed-status'
 import { createRecordedObservationReader } from '../run-observation/recorded-reader'
 import {
   ObservationMediaCollector,
@@ -249,6 +252,12 @@ export async function composeManagedExecution({
     dataRoot,
     startDriver: startElectronSurfaceRecording
   })
+  const observationCoordinator = new ManagedRunObservationCoordinator({
+    dataRoot,
+    artifacts: managedFiles.artifactProvenanceRepository,
+    recorder: () => observationRecorder
+  })
+  const observationAdapter = createManagedObservationPort(observationCoordinator)
   const service: ManagedExecutionService = new ManagedExecutionService({
     profiles: new ResearchExecutionProfileStore(resolveConfigRoot()),
     artifacts: managedFiles.artifactProvenanceRepository,
@@ -274,6 +283,7 @@ export async function composeManagedExecution({
         assertOpen(input.target)
       }),
     registerObservationMedia: (input) => {
+      const recording = observationAdapter.resolveRecording(input.recording)
       const outputs = input.outputs.filter((output) => /\.(png|jpe?g|webp)$/i.test(output.filename))
       const assertCurrent = (): void => {
         input.signal.throwIfAborted()
@@ -282,7 +292,7 @@ export async function composeManagedExecution({
       return observationMedia.register({
         target: input.target,
         generationId: input.generationId,
-        recording: input.recording,
+        recording,
         signal: input.signal,
         assertCurrent,
         projectExports: outputs.map((output) => output.filename),
@@ -299,8 +309,8 @@ export async function composeManagedExecution({
         sampleCurrent: async (signal) => {
           signal.throwIfAborted()
           assertCurrent()
-          await input.recording.sample()
-          const current = await observationRecorder.load(input.recording.target)
+          await recording.sample()
+          const current = await observationRecorder.load(recording.target)
           signal.throwIfAborted()
           assertCurrent()
           const sample = current?.history.snapshots.at(-1)
@@ -316,11 +326,7 @@ export async function composeManagedExecution({
         saveAuxiliaryOutput: input.saveAuxiliaryOutput
       })
     },
-    observations: {
-      start: (target) => observationRecorder.start(target),
-      load: (target) => observationRecorder.load(target),
-      markPublished: (target, reference) => observationRecorder.markPublished(target, reference)
-    },
+    observation: observationAdapter.port,
     runtimes,
     materials: (request) =>
       createResearchMaterialAuthority(
@@ -440,6 +446,12 @@ export async function composeManagedExecution({
       )
     }
   })
+  const recordingStatus = createManagedRecordingStatusReader({
+    inspect: (target) => service.inspectExecution(target),
+    coordinator: observationCoordinator,
+    recorder: observationRecorder,
+    artifacts: managedFiles.artifactProvenanceRepository
+  })
   const observation: RunObservationOwner = new RunObservationOwner({
     authorize: (target, viewer) => observationViewers.assertViewer(target, viewer),
     read: createManagedRunObservationReader(service)
@@ -478,7 +490,7 @@ export async function composeManagedExecution({
       )
       if (browserNative) return browserNative
       // A working copy can contain both imported archives and new native recordings.
-      const native = await service.readNativeObservationSourceVersionMapping(
+      const native = await observationCoordinator.readNativeSourceVersionMapping(
         target,
         archiveIdentity
       )
@@ -640,7 +652,7 @@ export async function composeManagedExecution({
         throw error
       }
     },
-    recordingStatus: (target) => service.recordingStatus(target),
+    recordingStatus: (target) => recordingStatus(target),
     viewers: observationViewers,
     projectViews,
     readAsset: createReplayViewerAssetReader(),
@@ -743,7 +755,18 @@ export async function composeManagedExecution({
       readSession: (projectId, sessionId) => sessions.readSessionSnapshot(projectId, sessionId),
       readOrigin: (request) => sessionPackages.sessionPackageService.readOrigin(request)
     },
-    service,
+    service: {
+      runtimes: () => service.runtimes(),
+      createSession: (request) => service.createSession(request),
+      prepare: (request, signal) => service.prepare(request, signal),
+      executeDemo: (request, options) => service.executeDemo(request, options),
+      getOperation: (request) => service.getOperation(request),
+      waitOperation: (request) => service.waitOperation(request),
+      cancelOperation: (request) => service.cancelOperation(request),
+      releaseEnvironment: (request) => service.releaseEnvironment(request),
+      inspectExecution: (request) => service.inspectExecution(request),
+      recordingStatus
+    },
     track: (operation) => trackAdmitted(() => withDataRootWrite(operation)),
     createCarrierSession: (request) =>
       creator.create(request as Parameters<typeof creator.create>[0]),
@@ -774,7 +797,7 @@ export async function composeManagedExecution({
       viewerHost.captureContent(viewerId, request, caller),
     recordingStatus: async (target) => {
       await authorizeObservationScope(target)
-      const status = await service.recordingStatus(target)
+      const status = await recordingStatus(target)
       await authorizeObservationScope(target)
       return status
     },

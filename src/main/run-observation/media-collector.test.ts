@@ -10,7 +10,7 @@ import { createManagedExecutionOutputWriter } from '../notebook/managed-executio
 import { SessionRepository } from '../session-persistence/repository'
 import { initDataRoot } from '../storage-root'
 import { RunObservationRecorder } from './recorder'
-import { saveAuxiliaryOutput } from './auxiliary-output'
+import { saveAuxiliaryOutput } from '../notebook/managed-auxiliary-output'
 import {
   ObservationMediaCollector,
   type ObservationMediaRegistration,

@@ -628,6 +628,7 @@ describe('Settings backend ownership architecture', () => {
       'src/main/composition/storage-startup.ts',
       'src/main/settings/application-commands.ts',
       'src/main/settings/bootstrap-application-commands.ts',
+      'src/main/settings/file-commands.ts',
       'src/main/settings/ipc.ts',
       'src/main/settings/service-capabilities.ts',
       'src/main/settings/workflows/appearance.ts',
@@ -808,11 +809,15 @@ describe('Settings backend ownership architecture', () => {
     const specialists = readSource(resolve(projectRoot, 'src/main/composition/specialists.ts'))
     const handoff = readSource(resolve(projectRoot, 'src/main/composition/handoff.ts'))
     const compute = readSource(resolve(projectRoot, 'src/main/composition/compute.ts'))
-    const mainIndex = readSource(resolve(projectRoot, 'src/main/index.ts'))
-    expect(mainIndex).toContain('const settingsStore = bootstrapLocations.settingsStore')
-    expect(mainIndex).toContain('const startupSettingsRepository = bootstrapLocations.repository')
-    expect(mainIndex).toMatch(
-      /registerIpcHandlers\(\{\s+mainEntryPath,\s+settingsStore,\s+translate,/u
+    const nodeEntry = readSource(resolve(projectRoot, 'src/main/node-entry.ts'))
+    expect(nodeEntry).toContain(
+      'const { settingsStore, repository } = await prepareApplicationLocations(configRoot)'
+    )
+    expect(nodeEntry).toContain('const startupSettings = await repository.getSettings()')
+    expect(nodeEntry).toMatch(/createCoreRuntime\(\{[\s\S]*?\bsettingsStore,/u)
+    const desktopEntry = readSource(resolve(projectRoot, 'src/main/index.ts'))
+    expect(desktopEntry).not.toMatch(
+      /\b(?:new SettingsRepository|prepareApplicationLocations|createCoreRuntime)\s*\(/u
     )
     expect(settingsBootstrap).toContain('settingsStore ?? resolveConfigRoot()')
     // Package transactions use the shared production repository; their fallback supports standalone use.
@@ -844,7 +849,7 @@ describe('Settings backend ownership architecture', () => {
       handoff.indexOf('const updateCommandOwner')
     )
     expect(updateInstallHandoff).toContain(
-      'releaseSettingsInstallAdmission = settingsService.holdInstallAdmission()'
+      'releaseSettingsInstallAdmission ??= settingsService.holdInstallAdmission()'
     )
     expect(updateInstallHandoff).toContain('releaseAdmission?.()')
     const dataRootInstallHandoff = handoff.slice(
@@ -1032,7 +1037,9 @@ describe('Settings backend ownership architecture', () => {
       'src/main/settings/classification-settings.ts',
       'src/main/settings/classification-settings.test.ts',
       'src/main/settings/classification-usage.ts',
-      'src/main/settings/classification-usage.test.ts'
+      'src/main/settings/classification-usage.test.ts',
+      'src/main/settings/file-commands.ts',
+      'src/main/settings/file-commands.test.ts'
     ])
     expect(manifest.modules.settings_service_facade.interfacePaths).toEqual([
       'src/main/settings/service.ts',
@@ -1043,7 +1050,8 @@ describe('Settings backend ownership architecture', () => {
       'src/main/settings/reviewer-model-owner.ts',
       'src/main/settings/settings-snapshot-commit-owner.ts',
       'src/main/settings/subagent-model-owner.ts',
-      'src/main/settings/vision-model-owner.ts'
+      'src/main/settings/vision-model-owner.ts',
+      'src/main/settings/file-commands.ts'
     ])
     expect(manifest.modules.settings_repository.consumerModules).toEqual([
       'settings_provider_accounts',
@@ -1115,11 +1123,12 @@ describe('Settings backend ownership architecture', () => {
       'src/main/web-service/task-api.test.ts',
       'src/main/literature/smart-collections.test.ts',
       'src/main/session-persistence/ipc.test.ts',
+      'src/main/composition/reviewer.test.ts',
+      'src/main/desktop-runtime-transport.integration.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts',
       'src/main/composition/managed-execution.integration.test.ts',
-      'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
       'src/main/composition/session-packages.test.ts',
       'src/main/composition/handoff.test.ts',
-      'src/main/composition/artifact-surfaces.test.ts',
       'src/main/research-demos/owner.macos.integration.test.ts'
     ])
     expect(manifest.modules.settings_backend_resolution.testFiles.consumer).toEqual([
@@ -1570,56 +1579,6 @@ describe('Settings backend ownership architecture', () => {
       'src/main/acp/approved-handoff-outcome.integration.test.ts',
       'src/main/acp/approved-handoff-outcome.test.ts',
       'src/main/agent-framework/claude-shared-settings.integration.test.ts',
-      'src/main/session-package/research-reproduction.integration.test.ts',
-      'src/main/composition/managed-execution.integration.test.ts',
-      'src/main/notebook/local-rpc-server.managed-execution.test.ts',
-      'src/main/notebook/managed-execution-entrypoints.integration.test.ts',
-      'src/main/notebook/managed-execution-service.macos.integration.test.ts',
-      'src/main/notebook/managed-execution-service.test.ts',
-      'src/main/notebook/research-material-authority.test.ts',
-      'src/main/notebook/session-operation-owner.integration.test.ts',
-      'src/main/session-package/headless.test.ts',
-      'src/main/notebook/managed-research-acceptance.macos.integration.test.ts',
-      'src/main/composition/handoff.test.ts',
-      'src/main/composition/session-packages.test.ts',
-      'src/main/notebook/managed-nested-generation.integration.test.ts',
-      'src/main/notebook/managed-execution-collection.integration.test.ts',
-      'src/main/notebook/managed-output-publication.integration.test.ts',
-      'src/main/composition/artifact-surfaces.test.ts',
-      'src/main/managed-runtime-views.integration.test.ts',
-      'src/main/replay-viewer/http-host.integration.test.ts',
-      'src/main/run-observation-external-port.test.ts',
-      'src/main/run-observation/managed-coordinator.test.ts',
-      'src/main/run-observation/recorded-reader.test.ts',
-      'src/main/runtime-view/browser-host.integration.test.ts',
-      'src/main/runtime-view/tuanzi.macos.integration.test.ts',
-      'src/renderer/replay-viewer/browser.integration.test.ts',
-      'src/main/run-observation/capture-package.integration.test.ts',
-      'src/main/notebook/managed-execution-output.test.ts',
-      'src/main/run-observation/auxiliary-output.test.ts',
-      'src/main/run-observation/media-collector.test.ts',
-      'src/main/replay-viewer/desktop-embed.integration.test.ts',
-      'src/main/research-runs/inspection.test.ts',
-      'src/main/research-runs/ipc.test.ts',
-      'src/main/research-demos/owner.test.ts',
-      'src/main/research-demos/ipc.test.ts',
-      'src/main/research-execution-profiles/ipc.test.ts',
-      'src/main/research-demos/inspection.test.ts',
-      'src/main/research-demos/owner.macos.integration.test.ts',
-      'src/main/notebook/offline-plan-admission.test.ts',
-      'src/main/project-recordings/managed-adapter.test.ts',
-      'src/main/project-recordings/recorder.test.ts',
-      'src/main/notebook/screened-auxiliary-output.test.ts',
-      'src/main/browser-recordings/external-port.test.ts',
-      'src/renderer/replay-viewer/browser-recording.integration.test.ts',
-      'src/main/browser-recordings/owner.test.ts',
-      'src/main/research-replay/http-host.integration.test.ts',
-      'src/main/research-replay/observation-association.test.ts',
-      'src/main/research-replay/observation-selection.test.ts',
-      'src/main/research-replay/service-timing.test.ts',
-      'src/main/research-replay/service.test.ts',
-      'src/renderer/replay-viewer/browser-recording-transport.integration.test.ts',
-      'src/renderer/replay-viewer/research-browser.integration.test.ts',
       'src/main/literature/pdf-translation/checkpoints.test.ts',
       'src/main/literature/pdf-translation/index.test.ts',
       'src/main/literature/pdf-translation/diagnostics.test.ts',
@@ -1628,7 +1587,68 @@ describe('Settings backend ownership architecture', () => {
       'src/main/literature/pdf-translation/usage.test.ts',
       'src/main/literature/pdf-translation/pdf-cache.test.ts',
       'src/main/literature/pdf-translation/api-target.test.ts',
-      'src/main/literature/pdf-translation/agent-target.test.ts'
+      'src/main/literature/pdf-translation/agent-target.test.ts',
+      'src/main/desktop-runtime-transport.integration.test.ts',
+      'src/main/side-chat/application-commands.test.ts',
+      'src/main/artifacts/artifact-reproducibility-commands.test.ts',
+      'src/main/settings/file-commands.test.ts',
+      'src/main/office-preview/application-commands.test.ts',
+      'src/main/reviewer/paged-preview-host.test.ts',
+      'src/main/desktop-native-electron.test.ts',
+      'src/main/session-plan/session-plan-turn-outcome.test.ts',
+      'src/main/acp/specialist-switch-recovery.integration.test.ts',
+      'src/main/agents/production-completion-handoff.test.ts',
+      'src/main/session-package/research-reproduction.integration.test.ts',
+      'src/main/composition/artifact-surfaces.test.ts',
+      'src/main/composition/handoff.test.ts',
+      'src/main/composition/managed-execution.integration.test.ts',
+      'src/main/composition/session-packages.test.ts',
+      'src/main/notebook/local-rpc-server.managed-execution.test.ts',
+      'src/main/notebook/managed-auxiliary-output.test.ts',
+      'src/main/notebook/managed-execution-collection.integration.test.ts',
+      'src/main/notebook/managed-execution-entrypoints.integration.test.ts',
+      'src/main/notebook/managed-execution-output.test.ts',
+      'src/main/notebook/managed-execution-service.test.ts',
+      'src/main/notebook/managed-nested-generation.integration.test.ts',
+      'src/main/notebook/managed-output-publication.integration.test.ts',
+      'src/main/notebook/research-material-authority.test.ts',
+      'src/main/notebook/screened-auxiliary-output.test.ts',
+      'src/main/notebook/session-operation-owner.integration.test.ts',
+      'src/main/research-execution-profiles/ipc.test.ts',
+      'src/main/session-package/headless.test.ts',
+      'src/main/run-observation/capture-package.integration.test.ts',
+      'src/main/run-observation/recorded-reader.test.ts',
+      'src/main/browser-recordings/external-port.test.ts',
+      'src/main/run-observation/managed-coordinator.test.ts',
+      'src/main/run-observation/managed-port.test.ts',
+      'src/main/project-recordings/managed-adapter.test.ts',
+      'src/main/run-observation-external-port.test.ts',
+      'src/main/runtime-view/browser-host.integration.test.ts',
+      'src/main/replay-viewer/http-host.integration.test.ts',
+      'src/main/browser-recordings/owner.test.ts',
+      'src/main/run-observation/media-collector.test.ts',
+      'src/main/project-recordings/recorder.test.ts',
+      'src/main/run-observation/managed-status.test.ts',
+      'src/main/managed-runtime-views.integration.test.ts',
+      'src/main/observation-desktop/bridge.test.ts',
+      'src/main/research-demos/owner.macos.integration.test.ts',
+      'src/renderer/replay-viewer/research-browser.integration.test.ts',
+      'src/main/research-replay/http-host.integration.test.ts',
+      'src/main/research-replay/observation-association.test.ts',
+      'src/main/research-replay/observation-selection.test.ts',
+      'src/main/research-replay/service-timing.test.ts',
+      'src/main/research-replay/service.test.ts',
+      'src/main/research-demos/owner.test.ts',
+      'src/main/research-runs/inspection.test.ts',
+      'src/main/research-runs/ipc.test.ts',
+      'src/main/research-demos/ipc.test.ts',
+      'src/main/notebook/offline-plan-admission.test.ts',
+      'src/renderer/replay-viewer/browser-recording.integration.test.ts',
+      'src/renderer/replay-viewer/browser.integration.test.ts',
+      'src/renderer/replay-viewer/browser-recording-transport.integration.test.ts',
+      'src/main/research-demos/inspection.test.ts',
+      'src/main/replay-viewer/desktop-embed.integration.test.ts',
+      'src/main/notebook/managed-execution-service.macos.integration.test.ts'
     ])
     expect(
       [

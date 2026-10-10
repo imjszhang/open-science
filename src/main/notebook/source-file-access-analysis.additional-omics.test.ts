@@ -1,3 +1,4 @@
+import { configureTestRuntimeMetadata } from '../../../test/runtime-metadata'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { analyzeNotebookSourceFileAccess } from './source-file-access-analysis'
@@ -697,7 +698,7 @@ adata.obs.to_csv("results/velocity-cell-metadata.csv")`
   })
 })
 
-it('captures a real agent-generated readonly SQLite ecology aggregation workflow', async () => {
+it('retains known paths without certifying a readonly SQLite ecology workflow as complete', async () => {
   const source = String.raw`from pathlib import Path
 import csv
 import json
@@ -773,10 +774,10 @@ with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
       analyzedPythonPath('outputs/species_summary.csv'),
       analyzedPythonPath('outputs/species_summary.json')
     ],
-    readState: 'complete',
-    writeState: 'complete',
-    externalState: 'complete',
-    reasonCodes: []
+    readState: 'partial',
+    writeState: 'partial',
+    externalState: 'partial',
+    reasonCodes: ['dynamic-path-unresolved', 'source-analysis-unsupported-call']
   })
 })
 
@@ -799,3 +800,5 @@ connection.close()`
     ])
   })
 })
+
+configureTestRuntimeMetadata()

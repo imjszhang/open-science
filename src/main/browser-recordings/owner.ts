@@ -20,7 +20,7 @@ import {
 } from '../../shared/browser-recording'
 import type { RunObservationTarget } from '../../shared/run-observation'
 import type { CallerContext } from '../caller-context'
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../run-observation/auxiliary-output'
+import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../notebook/managed-auxiliary-output'
 
 export type BrowserRecordingState =
   'idle' | 'starting' | 'recording' | 'paused' | 'finalizing' | 'finalized' | 'partial' | 'failed'

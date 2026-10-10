@@ -35,7 +35,7 @@ import {
 } from './managed-execution-output'
 import type { ArtifactFile } from '../../shared/artifacts'
 import type { SessionOperationContext } from './session-operation-owner'
-import { saveAuxiliaryOutput } from '../run-observation/auxiliary-output'
+import { saveAuxiliaryOutput } from './managed-auxiliary-output'
 
 export const managedExecutionProvenanceSchema = z.object({
   rootFrameId: z.string().min(1),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ArtifactVersionFile } from '../../shared/artifact-provenance'
-import { MAX_MANAGED_INLINE_BINARY_BYTES } from '../notebook/managed-execution-output'
-import { saveAuxiliaryOutput, type AuxiliaryOutput } from './auxiliary-output'
+import { MAX_MANAGED_INLINE_BINARY_BYTES } from './managed-execution-output'
+import { saveAuxiliaryOutput, type AuxiliaryOutput } from './managed-auxiliary-output'
 
 const artifact = { versionId: 'version-a' } as ArtifactVersionFile
 const png =

@@ -97,6 +97,7 @@ const startTestWebHttpServer = (
 
   return startWebHttpServer({
     ...serverOptions,
+    fetchPreview: serverOptions.fetchPreview ?? ((request) => net.fetch(request.url)),
     applicationCommands: options.applicationCommands ?? {
       localWeb: { commandNames: () => localNames, invoke: invokeDirect },
       remoteWeb: {
@@ -5505,6 +5506,9 @@ describe('managed execution HTTP API', () => {
       'runtimes',
       'createSession',
       'inspectMaterials',
+      'preflight',
+      'requestConfiguration',
+      'getConfiguration',
       'inspectOfflinePlans',
       'executeOfflinePlan',
       'prepare',
@@ -5523,7 +5527,7 @@ describe('managed execution HTTP API', () => {
       )
       expect(await response.json()).toMatchObject({ data: { status: 'running' } })
     }
-    expect(call).toHaveBeenCalledTimes(14)
+    expect(call).toHaveBeenCalledTimes(17)
     expect(
       contexts.every(
         (context) =>

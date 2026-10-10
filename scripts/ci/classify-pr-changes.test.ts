@@ -16,6 +16,17 @@ import { createAffectedTestPlan } from './module-test-impact.mjs'
 const readManifest = (): ReturnType<JSON['parse']> =>
   JSON.parse(readFileSync(resolve('scripts/ci/change-impact.json'), 'utf8'))
 
+it.each([
+  'src/main/acp/specialist-switch-recovery.integration.test.ts',
+  'src/main/acp/prompt-turn-workflow.ts',
+  'src/main/agents/claude-code-handoff.ts',
+  'src/main/specialist/session-reconfiguration.ts',
+  'src/main/composition/agent-completion.ts',
+  'src/main/session-persistence/claude-replay.ts'
+])('runs the Windows Specialist recovery contract for %s', (path) => {
+  expect(classifyChanges([{ path, status: 'modified' }]).lanes).toContain('windows_runtime')
+})
+
 const listSourceFiles = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name)
@@ -759,10 +770,10 @@ describe('pull request change classification', () => {
 
   it.each([
     'src/main/notebook/windows-shell.ts',
-    'src/shared/research-reproduction.ts',
     'src/main/notebook/code-risk-analysis.ts',
     'src/main/notebook/runtime-service.ts',
     'src/shared/tool-detail-sanitizer.ts',
+    'src/shared/research-reproduction.ts',
     'src/shared/renderer-contract-catalog.ts',
     'src/shared/renderer-contracts/settings-preferences.ts'
   ])('adds Windows GUI consumers for Windows-sensitive source %s', (path) => {

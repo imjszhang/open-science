@@ -14,7 +14,7 @@ import {
   saveAuxiliaryOutput,
   type AuxiliaryOutput,
   type AuxiliaryOutputResult
-} from '../run-observation/auxiliary-output'
+} from '../notebook/managed-auxiliary-output'
 import { createProvenanceTestFixture } from '../artifacts/provenance-test-fixtures'
 import { createManagedExecutionOutputWriter } from '../notebook/managed-execution-output'
 import { SessionRepository } from '../session-persistence/repository'

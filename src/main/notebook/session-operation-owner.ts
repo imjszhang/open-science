@@ -37,7 +37,7 @@ import {
   saveAuxiliaryOutput,
   type AuxiliaryOutput,
   type AuxiliaryOutputResult
-} from '../run-observation/auxiliary-output'
+} from './managed-auxiliary-output'
 
 const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)

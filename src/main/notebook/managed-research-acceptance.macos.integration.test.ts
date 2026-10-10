@@ -1075,3 +1075,5 @@ it.skipIf(process.platform !== 'darwin' || packageOnly || !materialsRoot || !evi
   // Keep publication, collection and cleanup within a separate bounded harness allowance.
   2_700_000
 )
+
+;(await import('../../../test/runtime-metadata')).configureTestRuntimeMetadata()

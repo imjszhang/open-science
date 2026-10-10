@@ -681,3 +681,5 @@ it.skipIf(!enabled)(
   },
   180000
 )
+
+;(await import('../../../test/runtime-metadata')).configureTestRuntimeMetadata()

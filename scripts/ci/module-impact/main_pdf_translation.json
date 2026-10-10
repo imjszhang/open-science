@@ -1,5 +1,6 @@
 {
   "ownerPaths": [
+    "src/main/literature/pdf-translation/application-commands.ts",
     "test/fixtures/pdf-translation/compact-cjk-table-header-fit.jsonl",
     "test/fixtures/pdf-translation/compact-cjk-linked-label-fit.jsonl",
     "test/fixtures/pdf-translation/cross-column-word-hyphen-linked-citation.jsonl",
@@ -140,9 +141,15 @@
     "src/main/literature/pdf-translation/parameter-prose-roundtrip.test.ts",
     "src/main/literature/pdf-translation/spaced-script-roundtrip.test.ts",
     "src/main/literature/pdf-translation/structural-roundtrip.test.ts",
-    "src/main/literature/pdf-translation/terminal-link-roundtrip.test.ts"
+    "src/main/literature/pdf-translation/terminal-link-roundtrip.test.ts",
+    "resources/pdf-translation-local/worker.mjs",
+    "scripts/pdf-translation-corpus.test.ts",
+    "resources/pdf-translation/reading-order.mjs",
+    "src/main/literature/pdf-translation/native-reading-order.test.ts",
+    "test/fixtures/pdf-translation/native-visual-reading-order.jsonl"
   ],
   "interfacePaths": [
+    "src/main/literature/pdf-translation/application-commands.ts",
     "src/main/literature/pdf-translation/index.ts",
     "src/main/literature/pdf-translation/ipc.ts",
     "src/main/literature/pdf-translation/usage.ts"
@@ -190,7 +197,8 @@
       "src/main/literature/pdf-translation/parameter-prose-roundtrip.test.ts",
       "src/main/literature/pdf-translation/spaced-script-roundtrip.test.ts",
       "src/main/literature/pdf-translation/structural-roundtrip.test.ts",
-      "src/main/literature/pdf-translation/terminal-link-roundtrip.test.ts"
+      "src/main/literature/pdf-translation/terminal-link-roundtrip.test.ts",
+      "src/main/literature/pdf-translation/native-reading-order.test.ts"
     ],
     "contract": [
       "src/main/literature/pdf-translation/ipc.test.ts",
@@ -575,7 +583,27 @@
       "src/renderer/src/pages/workspace/previews/renderers/pdf-translation-layout-float-footnote.test.ts",
       "src/renderer/src/pages/workspace/previews/renderers/pdf-translation-layout-paired-definition.test.ts",
       "src/renderer/src/pages/workspace/previews/renderers/pdf-translation-layout-parameter-prose.test.ts",
-      "src/renderer/src/pages/workspace/previews/renderers/pdf-translation-layout-plot-axis.test.ts"
+      "src/renderer/src/pages/workspace/previews/renderers/pdf-translation-layout-plot-axis.test.ts",
+      "src/main/desktop-runtime-transport.integration.test.ts",
+      "src/main/composition/managed-execution.integration.test.ts",
+      "src/main/composition/handoff.test.ts",
+      "src/main/composition/artifact-surfaces.test.ts",
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
+      "src/renderer/src/pages/workspace/RecordedRunObservationPreview.test.tsx",
+      "src/renderer/replay-viewer/ViewerApp.test.tsx",
+      "src/renderer/replay-viewer/browser-recording-viewer.test.tsx",
+      "src/renderer/replay-viewer/recorded-viewer.test.tsx",
+      "src/renderer/src/pages/workspace/replay/LiveReplayView.test.tsx",
+      "src/renderer/src/pages/workspace/replay/use-recorded-materials.test.tsx",
+      "src/renderer/replay-viewer/research-client.test.ts",
+      "src/renderer/replay-viewer/research-viewer.test.tsx",
+      "src/main/replay-viewer/assets.test.ts",
+      "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
+      "src/renderer/replay-viewer/browser-recording.integration.test.ts",
+      "src/renderer/replay-viewer/browser.integration.test.ts",
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/main/replay-viewer/desktop-embed.integration.test.ts",
+      "src/main/research-demos/owner.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions"],

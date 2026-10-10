@@ -5,8 +5,8 @@ import {
   MAX_MANAGED_INLINE_BASE64_CHARACTERS,
   isCanonicalManagedInlineBase64,
   type ManagedExecutionOutput
-} from '../notebook/managed-execution-output'
-import type { ManagedOutputPublication } from '../notebook/managed-output-publication'
+} from './managed-execution-output'
+import type { ManagedOutputPublication } from './managed-output-publication'
 
 const schema = z
   .object({

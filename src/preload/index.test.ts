@@ -605,6 +605,7 @@ describe('preload bridge — public surface inventory', () => {
       'sessionReplay.getSelectionSnapshot',
       'sessionReplay.list',
       'sessionReplay.listSelectionSnapshots',
+      'sessionReplay.readObservationBindings',
       'sessionReplay.saveSelectionSnapshot',
       'sessionReplay.saveView',
       'sessionReplay.setResearchMembership',

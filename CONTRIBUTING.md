@@ -18,8 +18,8 @@ project for everyone.
 - Git
 
 Node 24 is the development and CI toolchain. The published CLI continues to support
-Node >=22.5.0; PR Gate checks CLI/SDK compatibility on Node 22 as well. Electron
-ships its own Node runtime, so changing the toolchain does not upgrade Electron.
+Node >=22.5.0; PR Gate checks CLI/SDK compatibility on Node 22 as well. Standalone artifacts require Node >=22.13.0. Desktop packages include a separately pinned ordinary
+Node backend executable; Electron remains the native UI host.
 
 The typecheck scripts use the native TypeScript compiler pinned as `typescript-native`.
 The separate `typescript` dependency provides the JavaScript compiler API used by API-map
@@ -61,6 +61,10 @@ partially patched installation. See the upstream
 [patch-package guidance](https://github.com/ds300/patch-package#applying-patches).
 
 ### Run in development
+
+`npm run dev:web` builds and runs the ordinary Node host and Web UI. `npm run pack:backend`
+creates an independent, target-specific npm tarball. See the [standalone runtime guide](docs/standalone-runtime.md)
+for native build prerequisites, secure-storage requirements and host capability boundaries.
 
 ```bash
 npm run dev
@@ -125,11 +129,11 @@ Read the existing owner document before changing one of these areas, then run it
 
 ## Project Structure
 
-This is an Electron application built with electron-vite, React, and TypeScript.
-Three runtime process layers and a shared module live under `src/`:
+The desktop uses Electron, electron-vite, React and TypeScript; business owners run in ordinary Node.
+The desktop host, standalone Node host, and shared modules live under `src/`:
 
-- `src/main/` — Electron main process (ACP runtime, session persistence,
-  artifacts, notebook, projects, IPC handlers).
+- `src/main/` — shared business runtime and its Node/Electron entry points (ACP, session
+  persistence, artifacts, Notebook, projects, host adapters).
 - `src/preload/` — preload bridge exposing a typed `window.api` to the renderer.
 - `src/renderer/` — React UI (pages, stores, components).
 - `src/shared/` — types and helpers shared across processes.
@@ -203,8 +207,17 @@ These checks validate registration, not the changed product behavior. Also run
 `npm run test:module -- <module-id>` for the affected modules and the other checks required by the
 [Verification Policy](#verification-policy). After committing, inspect
 `npm run test:affected:explain -- --base origin/main --head HEAD`; this compares committed revisions
-and does not include staged or unstaged edits. Unknown ownership and existing full-validation
-markers retain the full fallback; registration does not waive required CI.
+and does not include staged or unstaged edits. Unknown ownership and directly changed full-validation
+owners retain the full fallback; registration does not waive required CI. Exact registered runtime-resource
+and package owners use their module evidence and platform overlays, regardless of directory.
+
+Regression data under `test/fixtures/` does not need per-file module ownership or runtime-consumer
+edges. `testFixtureSuites` in `scripts/ci/change-impact.json` maps bounded data paths to test-suite
+patterns; adding a PDF JSON/JSONL case within the existing directory needs no manifest edit. Fixture
+changes run those tests directly, without expanding production consumers. Mixed source changes keep
+their normal module coverage. Unknown fixture directories and executable helpers retain conservative
+routing until their test scope is established. Existing fixture ownership entries from older commits
+are retained for the trusted Integrity preservation check; fixture selection no longer relies on them.
 
 See [CI control-plane approval](#ci-control-plane-approval) for additive registration exemptions,
 coverage-preservation rules and changes that require CI owner approval.
@@ -329,14 +342,17 @@ Run `npm run typecheck`, `npm run lint`, and `npm test` when any of these apply:
 - the Owner Module, changed Interface, or consumers cannot be established;
 - global validation inputs change, including package metadata, TypeScript/Vitest/build configuration,
   the PR Gate workflow or classifier, or ownership, consumer, capability, or fallback routing in the
-  module-impact manifest;
+  module-impact manifest, except validated additive evidence for existing modules as described below;
 - the change crosses several runtime areas without a demonstrated impact map;
 - a release-candidate workflow or maintainer explicitly requests the complete local suite.
 
 Full fallback is a safety mechanism, not an unconditional prerequisite for every pull request.
 Contributors are not expected to reproduce every operating-system CI lane locally.
 
-Changing only `testFiles` within an already-owned Module does not trigger the full fallback. Run the
+Additive `testFiles`, interface evidence and ownership of newly added files within an existing
+Module can use selective CI after trusted validation. Existing ownership, consumer edges, capability
+routing and full-validation markers must remain intact. New modules, reassignment of existing files,
+the root manifest and executable CI policy still require full validation. Run the
 manifest validation tests, `npm run test:module -- <module-id>`, the affected process typechecks and
 lint instead; exact-head CI remains authoritative for the complete portable and platform suites.
 
@@ -546,8 +562,12 @@ It preserves surviving owner/interface/test paths, consumer edges, capability ov
 routing and existing full-validation markers. References to actually deleted files may be removed.
 New explicit ownership cannot hide existing inferred test coverage. Unknown policy metadata and
 coverage reductions fail the check; owner approval alone does not waive these invariants. Deliberate
-reductions require a separate CI policy change, not a registration-only PR. Registration changes
-still select full portable tests; this exception does not enable untrusted selective test routing.
+reductions require a separate CI policy change, not a registration-only PR. Trusted selection may
+accept additive evidence in existing module shards: it reads candidate Git blobs as JSON, verifies
+preserved policy/evidence against the merge base, and adds evidence to the trusted manifest without
+dropping newer mainline registrations. Changed records select their module evidence, including new
+tests. Unsupported or invalid registrations retain full portable routing; Integrity still blocks
+invalid data. Candidate scripts never authorize selective routing.
 Introducing this exception changes protected policy files and therefore still needs owner approval.
 It can then enter the normal queue; no bootstrap bypass is required when its checks pass.
 
@@ -579,17 +599,22 @@ inline modules and shards. The reader retains old-format Git history support.
 
 The historical inventory is complete. Run `node scripts/ci/audit-module-ownership.mjs` (or `--json`)
 to check every tracked file in these roots, including files untouched by a PR. The inventory test
-rejects gaps and duplicate owners. The consumer-coverage test checks transitive static imports and
+rejects gaps and duplicate owners, and audits every registered path for unexplained full routing,
+including runtime resources outside the mandatory source roots. The audit also lists unregistered
+runtime resources; those have no module-based exemption. The consumer-coverage test checks transitive static imports and
 explicit native/worker loading edges in `scripts/ci/module-runtime-consumers.json`. Keep IPC,
 event, filesystem and other dynamic consumer contracts explicit in module test evidence; static
 analysis alone cannot prove those relationships.
 
-Editing a registered test runs that test directly, except tests exporting shared helpers: register
+Editing a registered portable test runs that test directly, except tests exporting shared helpers: register
 those files in `interfacePaths` so their consumers remain selected. Tests owned by modules with
 `fullTestReason` also retain full validation. Editing implementations or shared test helpers
 runs the module's owner, contract and consumer evidence. Locale JSON keeps its focused translation
 guards; the shared translation runtime has its own broader module. Modules whose dynamic consumers
-cannot be safely bounded declare a nonempty `fullTestReason` and retain full validation. This is
+cannot be safely bounded declare a nonempty `fullTestReason` and retain full validation when that
+owner is directly changed. Selecting a marked module as downstream test evidence does not mean its
+shared contract changed: the complete declared consumer closure and platform overlays remain selected,
+without inheriting its full marker. This is
 intentional coverage, not an unregistered legacy exception. Unknown and destructive changes still
 fall back to full validation.
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseProjectRecording } from '../../shared/project-recording'
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../run-observation/auxiliary-output'
+import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../notebook/managed-auxiliary-output'
 import {
   startProjectRecording,
   type ProjectRecordingHandle,

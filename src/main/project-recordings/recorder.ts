@@ -16,7 +16,7 @@ import {
   type ProjectRecordingValue
 } from '../../shared/project-recording'
 import { exceedsDecodedImagePixelLimit, readRasterImageDimensions } from '../raster-image-safety'
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../run-observation/auxiliary-output'
+import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../notebook/managed-auxiliary-output'
 import { PROJECT_RECORDING_DATA_FILENAME } from '../../shared/project-recording-data'
 import {
   ProjectRecordingDeclarations,

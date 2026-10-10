@@ -23,7 +23,7 @@ export type {
   ObservationMediaCaptureResult
 } from '../../shared/run-observation-capture'
 import { exceedsDecodedImagePixelLimit, readRasterImageDimensions } from '../raster-image-safety'
-import type { AuxiliaryOutput, AuxiliaryOutputResult } from './auxiliary-output'
+import type { AuxiliaryOutput, AuxiliaryOutputResult } from '../notebook/managed-auxiliary-output'
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
 const targetSchema = z
