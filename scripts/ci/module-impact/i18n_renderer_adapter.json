@@ -5,10 +5,15 @@
     "src/renderer/src/i18n/resources.ts",
     "src/renderer/src/i18n/resources.test.ts"
   ],
-  "interfacePaths": ["src/renderer/src/i18n/resources.ts", "src/renderer/src/i18n/index.ts"],
+  "interfacePaths": [
+    "src/renderer/src/i18n/resources.ts",
+    "src/renderer/src/i18n/index.ts"
+  ],
   "consumerModules": [],
   "testFiles": {
-    "owner": ["src/renderer/src/i18n/resources.test.ts"],
+    "owner": [
+      "src/renderer/src/i18n/resources.test.ts"
+    ],
     "contract": [],
     "consumer": [
       "src/main/notebook/mirror-probe.test.ts",
@@ -312,9 +317,12 @@
       "src/main/index-startup-failure.test.ts",
       "src/main/runtime-electron-wiring.test.ts",
       "src/main/index-fatal-errors.test.ts",
-      "src/main/composition/handoff.test.ts"
+      "src/main/composition/handoff.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
-  "capabilityOverlays": ["i18n_catalog"],
+  "capabilityOverlays": [
+    "i18n_catalog"
+  ],
   "fallbackCapability": "renderer_view"
 }

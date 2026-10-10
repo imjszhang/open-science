@@ -27,7 +27,9 @@
     "src/main/runtime-view/owner.ts",
     "src/main/replay-viewer/desktop-frame-registry.ts"
   ],
-  "consumerModules": ["notebook_application"],
+  "consumerModules": [
+    "notebook_application"
+  ],
   "testFiles": {
     "owner": [
       "src/main/replay-viewer/assets.test.ts",
@@ -41,7 +43,9 @@
       "src/main/managed-runtime-views.integration.test.ts",
       "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ],
-    "contract": ["src/main/notebook/managed-execution-service.test.ts"],
+    "contract": [
+      "src/main/notebook/managed-execution-service.test.ts"
+    ],
     "consumer": [
       "src/main/notebook/managed-execution-collection.integration.test.ts",
       "src/main/notebook/managed-output-recovery.test.ts",
@@ -304,6 +308,7 @@
       "src/renderer/replay-viewer/research-viewer.test.tsx",
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
       "src/main/notebook/managed-execution-service.macos.integration.test.ts",
+      "src/main/desktop-runtime-electron-adapter.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
     ]
   },

@@ -1741,10 +1741,14 @@
       "src/main/literature/pdf-translation/scientific-scripts.test.ts",
       "src/main/literature/pdf-translation/agent-target.test.ts",
       "src/main/notebook/managed-execution-service.macos.integration.test.ts",
+      "src/main/agents/completion-handoff-lifecycle.test.ts",
       "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
       "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
-  "capabilityOverlays": ["e2e_regressions", "windows_sensitive"],
+  "capabilityOverlays": [
+    "e2e_regressions",
+    "windows_sensitive"
+  ],
   "fallbackCapability": "main_runtime"
 }
