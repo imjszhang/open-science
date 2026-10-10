@@ -281,7 +281,8 @@
       "src/renderer/src/pages/workspace/project-workspace-entry.test.ts",
       "src/main/research-demos/owner.macos.integration.test.ts",
       "src/main/replay-viewer/recorded-resource-context-menu.integration.test.ts",
-      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions"],

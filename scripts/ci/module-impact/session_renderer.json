@@ -425,7 +425,8 @@
       "src/main/research-demos/owner.macos.integration.test.ts",
       "src/renderer/replay-viewer/browser-recording.integration.test.ts",
       "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
-      "src/renderer/replay-viewer/research-browser.integration.test.ts"
+      "src/renderer/replay-viewer/research-browser.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["renderer_state"],

@@ -505,7 +505,9 @@
       "src/main/browser-recordings/owner.test.ts",
       "src/main/run-observation/media-collector.test.ts",
       "src/main/project-recordings/recorder.test.ts",
-      "src/main/observation-desktop/bridge.test.ts"
+      "src/main/observation-desktop/bridge.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

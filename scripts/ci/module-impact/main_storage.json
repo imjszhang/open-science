@@ -891,7 +891,10 @@
       "src/main/research-demos/inspection.test.ts",
       "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
-      "src/main/notebook/managed-execution-service.macos.integration.test.ts"
+      "src/main/notebook/managed-execution-service.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/notebook/research-acceptance.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

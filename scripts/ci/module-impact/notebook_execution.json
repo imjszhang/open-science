@@ -1107,7 +1107,9 @@
       "src/main/research-runs/ipc.test.ts",
       "src/renderer/src/pages/workspace/NotebookPreview.gate.render.test.tsx",
       "src/main/replay-viewer/desktop-embed.integration.test.ts",
-      "src/main/notebook/managed-execution-service.macos.integration.test.ts"
+      "src/main/notebook/managed-execution-service.macos.integration.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["notebook_network_sandbox", "windows_sensitive"],

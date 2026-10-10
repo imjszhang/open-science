@@ -583,7 +583,8 @@
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
       "src/renderer/src/pages/workspace/replay/ReplayResearchLayout.test.tsx",
       "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

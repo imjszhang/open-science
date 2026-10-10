@@ -588,7 +588,9 @@
       "src/main/replay-viewer/assets.test.ts",
       "src/renderer/replay-viewer/browser-recording-transport.integration.test.ts",
       "src/renderer/replay-viewer/browser-recording.integration.test.ts",
-      "src/renderer/replay-viewer/browser.integration.test.ts"
+      "src/renderer/replay-viewer/browser.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

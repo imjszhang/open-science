@@ -284,7 +284,8 @@
       "src/main/index-startup-failure.test.ts",
       "src/main/runtime-electron-wiring.test.ts",
       "src/main/index-fatal-errors.test.ts",
-      "src/main/composition/handoff.test.ts"
+      "src/main/composition/handoff.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

@@ -377,7 +377,8 @@
       "src/main/session-package/headless.test.ts",
       "src/main/run-observation/capture-package.integration.test.ts",
       "src/main/run-observation/managed-coordinator.test.ts",
-      "src/main/research-demos/owner.macos.integration.test.ts"
+      "src/main/research-demos/owner.macos.integration.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],
