@@ -1001,7 +1001,6 @@
       "src/main/artifacts/prepared-literature-sidecar.test.ts",
       "src/main/acp/create-session-workflow.test.ts",
       "src/main/artifacts/provenance-reproducibility-projection.test.ts",
-      "src/main/artifacts/reproduction-preflight.test.ts",
       "src/main/artifacts/ro-crate-export.test.ts",
       "src/renderer/src/pages/workspace/artifact-reproducibility-start.test.tsx",
       "src/renderer/src/pages/workspace/artifact-environment-lock-store.test.ts",
@@ -1289,7 +1288,8 @@
       "src/main/notebook/environment-capture.contract.test.ts",
       "src/main/notebook/environment-startup.contract.test.ts",
       "src/main/notebook/environment-restoration-sandbox.contract.test.ts",
-      "src/main/notebook/environment-process.contract.test.ts"
+      "src/main/notebook/environment-process.contract.test.ts",
+      "src/main/artifacts/reproducibility-host.test.ts"
     ]
   },
   "capabilityOverlays": [],

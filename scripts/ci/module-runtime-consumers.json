@@ -177,5 +177,8 @@
     "src/main/projects/project-owned-data.catalog.architecture.test.ts"
   ],
   "src/shared/settings.ts": ["cli/connector-contract.test.ts"],
-  "packages/open-science/index.d.ts": ["cli/connector-contract.test.ts"]
+  "packages/open-science/index.d.ts": ["cli/connector-contract.test.ts"],
+  "packages/reproducibility/src/contracts.ts": ["scripts/electron-vite-config.test.ts"],
+  "packages/reproducibility/src/comparison-contracts.ts": ["scripts/electron-vite-config.test.ts"],
+  "packages/reproducibility/src/execution-context.ts": ["scripts/electron-vite-config.test.ts"]
 }

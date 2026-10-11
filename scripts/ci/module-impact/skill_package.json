@@ -90,10 +90,7 @@
     "packages/skills/src/sources.ts",
     "packages/skills/src/projection.ts"
   ],
-  "consumerModules": [
-    "user_skills_repository",
-    "skill_marketplace"
-  ],
+  "consumerModules": ["user_skills_repository", "skill_marketplace"],
   "testFiles": {
     "owner": [
       "packages/skills/src/agent-home-skill-catalog.test.ts",
@@ -309,7 +306,6 @@
       "src/main/artifacts/repository.characterization.test.ts",
       "src/main/artifacts/repository.rollback.test.ts",
       "src/main/artifacts/repository.test.ts",
-      "src/main/artifacts/reproduction-preflight.test.ts",
       "src/main/artifacts/resumed-finalization-ownership.test.ts",
       "src/main/artifacts/reviewer-turn-file-evidence-reader.test.ts",
       "src/main/artifacts/ro-crate-export.test.ts",
@@ -1445,13 +1441,10 @@
       "src/main/notebook/environment-startup.contract.test.ts",
       "src/main/notebook/environment-restoration-sandbox.contract.test.ts",
       "src/main/notebook/environment-process.contract.test.ts",
-      "cli/connector-contract.test.ts"
+      "cli/connector-contract.test.ts",
+      "src/main/artifacts/reproducibility-host.test.ts"
     ]
   },
-  "capabilityOverlays": [
-    "windows_sensitive",
-    "e2e_regressions",
-    "e2e_delegation"
-  ],
+  "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
   "fallbackCapability": "main_runtime"
 }
