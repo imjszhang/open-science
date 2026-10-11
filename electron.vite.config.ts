@@ -1,3 +1,4 @@
+import { windowsSigningBuildDefines } from './scripts/windows-signing-policy.mjs'
 import { createRequire } from 'node:module'
 import { resolve } from 'path'
 import { nativeLocaleAssets } from './scripts/native-locale-assets'
@@ -19,6 +20,7 @@ export default defineConfig(({ command }) => ({
     plugins: [nativeLocaleAssets()],
     define: {
       __OPEN_SCIENCE_NATIVE_LOCALE_DIRECTORY__: JSON.stringify('native-locales'),
+      ...windowsSigningBuildDefines(process.env),
       ...wsl2BuildDefines(process.platform, command === 'serve', process.env)
     },
     build: {
@@ -35,7 +37,7 @@ export default defineConfig(({ command }) => ({
         include: [
           /node_modules/,
           /packages[\\/](?:connector-(?:core|mcp-client)|diagnostics|skills)[\\/]dist/,
-          /packages[\\/]notebook-analysis[\\/]dist/
+          /packages[\\/](?:notebook-analysis|environment)[\\/]dist/
         ]
       },
       rollupOptions: {
@@ -60,7 +62,8 @@ export default defineConfig(({ command }) => ({
               '@aipoch/connector-mcp-client/oauth-redirect',
               '@aipoch/diagnostics',
               '@aipoch/skills/document',
-              '@aipoch/notebook-analysis/contracts'
+              '@aipoch/notebook-analysis/contracts',
+              '@aipoch/environment/contracts'
             ],
             entries: [
               '*.html',
@@ -112,7 +115,7 @@ export default defineConfig(({ command }) => ({
         include: [
           /node_modules/,
           /packages[\\/](?:connector-(?:core|mcp-client)|diagnostics|skills)[\\/]dist/,
-          /packages[\\/]notebook-analysis[\\/]dist/
+          /packages[\\/](?:notebook-analysis|environment)[\\/]dist/
         ]
       },
       rollupOptions: {
