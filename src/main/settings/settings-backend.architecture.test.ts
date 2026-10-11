@@ -541,8 +541,7 @@ describe('Settings backend ownership architecture', () => {
       'src/main/settings/vision-model-owner.ts',
       'src/main/settings/xai-provider-account-owner.ts',
       'src/main/skills/catalog.ts',
-      'src/main/specialist/package/service.ts',
-      'src/main/specialist/package/transaction.ts',
+      'src/main/specialist/package/environment.ts',
       'src/main/storage/initialize-location.ts'
     ])
     expect(importersOf(settingsPaths.recordCodec)).toEqual([
@@ -793,7 +792,7 @@ describe('Settings backend ownership architecture', () => {
       'src/main/composition/settings-bootstrap.ts',
       'src/main/settings/compute-grant-port.ts',
       'src/main/settings/service.ts',
-      'src/main/specialist/package/transaction.ts',
+      'src/main/specialist/package/environment.ts',
       'src/main/storage/initialize-location.ts'
     ])
     const computeIpc = readSource(resolve(projectRoot, 'src/main/compute/ipc.ts'))
@@ -1086,7 +1085,6 @@ describe('Settings backend ownership architecture', () => {
     ])
     expect(manifest.modules.settings_service_facade.testFiles.consumer).toEqual([
       'src/main/composition/notebook-environment.test.ts',
-      'packages/open-science/cli.test.ts',
       'src/main/acp/backend-generation-owner.test.ts',
       'src/main/acp/runtime-provider-session-composition.test.ts',
       'src/main/acp/task-agent-port.test.ts',
@@ -1132,7 +1130,6 @@ describe('Settings backend ownership architecture', () => {
       'src/main/composition/reviewer.test.ts',
       'src/main/session-persistence/runtime-session-owner.test.ts',
       'src/main/session-plan/adversarial-session-plan.test.ts',
-      'packages/open-science/cli.test.ts',
       'src/main/acp/artifact-code-reconstruction-runner.test.ts',
       'src/main/acp/backend-generation-owner.test.ts',
       'src/main/acp/provider-prompt-executor.test.ts',

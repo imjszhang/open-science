@@ -1,7 +1,7 @@
+import { fixtureSkillParser } from '../../test/fixtures'
 import { describe, expect, it } from 'vitest'
-
-import type { SpecialistPackageCatalogSnapshot } from '../../../shared/specialist-package'
-import { validateSpecialistPackage } from './validator'
+import type { SpecialistPackageCatalogSnapshot } from '../archive-contracts'
+import { validateSpecialistPackage as validatePackage } from '../package/validator'
 
 const encoder = new TextEncoder()
 const overlongSkillName = 'a'.repeat(65)
@@ -49,6 +49,31 @@ const validSpecialist = {
 }
 
 describe('validateSpecialistPackage', () => {
+  it.each([undefined, fixtureSkillParser])(
+    'rejects bundled Skills in builtin contributions regardless of parser injection (%s)',
+    (parser) => {
+      const result = validatePackage(
+        packageFiles(validManifest, validSpecialistJson, [
+          {
+            path: 'skills/analysis/SKILL.md',
+            bytes: encoder.encode('---\nname: analysis\n---\nReview evidence.')
+          }
+        ]),
+        catalog,
+        'builtin',
+        parser
+      )
+      expect(result.plan).toBeUndefined()
+      expect(result.preview.installable).toBe(false)
+      expect(result.preview.diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: 'builtin.bundled-skills-forbidden',
+          severity: 'error'
+        })
+      )
+    }
+  )
+
   it('accepts only application metadata in manifest and author content in specialist.json', () => {
     const result = validateSpecialistPackage(
       packageFiles(validManifest, validSpecialistJson),
@@ -612,3 +637,9 @@ describe('validateSpecialistPackage', () => {
     })
   })
 })
+
+function validateSpecialistPackage(
+  ...args: Parameters<typeof validatePackage>
+): ReturnType<typeof validatePackage> {
+  return validatePackage(args[0], args[1], args[2], fixtureSkillParser)
+}
