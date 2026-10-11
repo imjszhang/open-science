@@ -5,30 +5,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { environmentPackageVerificationPlan } from './ci/package-test-impact.mjs'
+import { familyVerificationPlan, isolatedPackageEnvironment } from './package-verification-plan.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const npmCli = process.env.npm_execpath
 if (!npmCli) throw new Error('Run through npm run check:environment-package.')
-const ci = process.argv.includes('--ci')
-const selected =
-  ci && process.env.OPEN_SCIENCE_CI_SELECTED_PACKAGE_ROOTS
-    ? JSON.parse(process.env.OPEN_SCIENCE_CI_SELECTED_PACKAGE_ROOTS)
-    : undefined
-const excluded =
-  ci && process.env.OPEN_SCIENCE_CI_EXCLUDED_PACKAGE_ROOTS
-    ? JSON.parse(process.env.OPEN_SCIENCE_CI_EXCLUDED_PACKAGE_ROOTS)
-    : undefined
-const plan = environmentPackageVerificationPlan(selected, excluded)
+const plan = familyVerificationPlan(['diagnostics', 'environment'])
 console.log('Environment package verification:', JSON.stringify(plan))
-if (plan.builds.length === 0) process.exit(0)
+if (!plan.tests.includes('environment')) process.exit(0)
 const temporary = mkdtempSync(join(tmpdir(), 'environment-package-'))
 const offline = process.argv.includes('--offline') ? ['--offline'] : []
 const env = {
-  ...process.env,
-  NODE_PATH: '',
-  NODE_OPTIONS: '',
-  npm_config_cache: process.env.npm_config_cache ?? join(temporary, 'cache')
+  ...isolatedPackageEnvironment(),
+  ...(!offline.length
+    ? { npm_config_cache: process.env.npm_config_cache ?? join(temporary, 'cache') }
+    : {})
 }
 const run = (args, cwd) => execFileSync(process.execPath, args, { cwd, env, stdio: 'inherit' })
 const npm = (args, cwd) => run([npmCli, ...args], cwd)
@@ -61,7 +52,8 @@ try {
     )
     if (name === 'environment') {
       npm(['run', 'typecheck'], directory)
-      if (!process.argv.includes('--skip-tests')) npm(['test'], directory)
+      if (plan.tests.includes(name) && !process.argv.includes('--skip-tests'))
+        npm(['test'], directory)
     }
     npm(['pack', '--pack-destination', temporary], directory)
     const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
