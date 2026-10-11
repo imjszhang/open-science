@@ -776,3 +776,43 @@ it('excludes a figure reference continuing a double-spaced manuscript paragraph'
   ).fontSize += 2
   expect(findCaptionCandidates([differentFont])).toHaveLength(1)
 })
+
+it.each([
+  'Fig. 1 D illustrates the measured response.',
+  'Fig. 1 A), can be assigned to the initial state.',
+  'Fig. 1 C. The benefit of this model is a simpler fit.',
+  'Fig. 4 A is explained by the fitted parameters.',
+  'Figure 2 b shows the observed values.'
+])('rejects a separated panel letter before a narrative verb: %s', (text) => {
+  expect(captionKind(text)).toBeUndefined()
+})
+
+it.each([
+  'Figure 1 A comparison of the measured responses.',
+  'Figure 2 D: Measured response.',
+  'Figure 3. A shows the measured response.'
+])('preserves noun titles and punctuated captions: %s', (text) => {
+  expect(captionKind(text)).toBe('figure')
+})
+
+it.each([
+  'Figure 1 A review of the workflow.',
+  'Figure 1 A display of the measured responses.',
+  'Figure 1 A measure of uncertainty.',
+  'Table 1 A list of model parameters.',
+  'Figure 1 A review on model performance.',
+  'Table 1 A report on measured values.',
+  'Figure 1 A display showing the recorded values.',
+  'Figure 1 A contrast between the observed groups.',
+  'Figure 1 A complement to the standard model.',
+  'Figure 1 a complement to the standard model.'
+])('preserves article-led noun titles: %s', (text) => {
+  expect(captionKind(text)).toBe(text.startsWith('Table') ? 'table' : 'figure')
+})
+
+it.each(['reviews', 'displays', 'measures', 'lists', 'reports', 'shows', 'complements', 'is'])(
+  'still rejects a finite verb after panel A: %s',
+  (verb) => {
+    expect(captionKind(`Figure 1 A ${verb} the measured responses.`)).toBeUndefined()
+  }
+)
