@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { StrictMode } from 'react'
+import { LITERATURE_IMPORT_IDENTITY_CONFLICT } from '@aipoch/literature-library/contracts'
+import { literatureItemInputSchema } from '@aipoch/literature-library/item'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import {
-  literatureItemInputSchema,
-  LITERATURE_IMPORT_IDENTITY_CONFLICT
-} from '../../../../../shared/literature'
 import { LiteraturePdfBatchImportDialog } from './LiteraturePdfBatchImportDialog'
 
 const mocks = vi.hoisted(() => ({ extract: vi.fn(), complete: vi.fn(), stage: vi.fn() }))
@@ -14,7 +12,7 @@ vi.mock('./literature-pdf-metadata', async (importOriginal) => ({
   extractLiteraturePdfDraft: mocks.extract,
   completeLiteraturePdfDraft: mocks.complete
 }))
-vi.mock('../../workspace/composer-upload-transfer', () => ({ stageComposerFile: mocks.stage }))
+vi.mock('@/lib/upload-transfer', () => ({ stageUploadFile: mocks.stage }))
 const transact = vi.fn()
 const importPdf = vi.fn()
 const deleteUpload = vi.fn()

@@ -1,20 +1,21 @@
-import { createServer, type Server } from 'node:http'
-import { readFile, readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
-import { createHash } from 'node:crypto'
-import type { ElectronApplication, Page } from 'playwright'
+import { literatureItemInputSchema } from '@aipoch/literature-library/contracts'
 import { expect } from '@playwright/test'
+import { createHash } from 'node:crypto'
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { createServer, type Server } from 'node:http'
+import { join } from 'node:path'
 import {
-  PDFDocument,
   PDFDict,
+  PDFDocument,
   PDFName,
   StandardFonts,
   concatTransformationMatrix,
   degrees,
   rgb
 } from 'pdf-lib'
-import { literatureItemInputSchema } from '../src/shared/literature'
+import type { ElectronApplication, Page } from 'playwright'
 import { test } from './fixtures/electron-app'
+import { openAllReferences } from './fixtures/library'
 
 const openReadingView = async (page: Page): Promise<void> => {
   const trigger = page.getByRole('button', { name: 'Reading view', exact: true })
@@ -365,8 +366,7 @@ for (const variant of [
       },
       { item, bytes }
     )
-    await page.getByRole('button', { name: 'Library', exact: true }).click()
-    await page.getByRole('button', { name: 'All references', exact: true }).click()
+    await openAllReferences(page)
     await page.getByRole('button', { name: 'Preview paired-reading.pdf', exact: true }).click()
     await page.getByRole('button', { name: 'Full-text translation', exact: true }).click()
     await page.getByRole('button', { name: 'Prepare full text', exact: true }).click()
@@ -775,8 +775,7 @@ for (const variant of [
       const promptsBeforeResume = (await app.readFakeAgentPrompts()).filter((entry) =>
         entry.prompt.includes('PAIR_PDF_ACCEPTANCE')
       ).length
-      await restoredPage.getByRole('button', { name: 'Library', exact: true }).click()
-      await restoredPage.getByRole('button', { name: 'All references', exact: true }).click()
+      await openAllReferences(restoredPage)
       await restoredPage
         .getByRole('button', { name: 'Preview paired-reading.pdf', exact: true })
         .click()
@@ -1617,8 +1616,7 @@ for (const variant of [
       const savedPdfs = await cacheSnapshot()
       expect(savedPdfs.length).toBeGreaterThan(0)
       const resumedPage = await app.restart()
-      await resumedPage.getByRole('button', { name: 'Library', exact: true }).click()
-      await resumedPage.getByRole('button', { name: 'All references', exact: true }).click()
+      await openAllReferences(resumedPage)
       await resumedPage
         .getByRole('button', { name: 'Preview paired-reading.pdf', exact: true })
         .click()

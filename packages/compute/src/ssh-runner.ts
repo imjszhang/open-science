@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { platform } from 'node:os'
 import { join } from 'node:path'
@@ -121,7 +121,10 @@ export const readEffectiveConfig = async (
   const safeAlias = assertSafeSshAlias(alias)
   const execFileAsync = promisify(execFile)
   try {
-    const { stdout } = await execFileAsync(sshBinary, ['-G', safeAlias], { timeout: 5000 })
+    const { stdout } = await execFileAsync(sshBinary, ['-G', safeAlias], {
+      timeout: 5000,
+      windowsHide: true
+    })
     return parseSshG(stdout)
   } catch {
     return {}
@@ -298,10 +301,10 @@ export class SystemSshRunner implements SshRunner {
       let settled = false
       let observedExitCode: number | null = null
 
-      const child = execFile(target.sshBinary, args, {
-        timeout: 0,
-        encoding: 'buffer',
-        env: opts.env
+      // Stream directly: execFile also buffers internally and kills output above its maxBuffer.
+      const child = spawn(target.sshBinary, args, {
+        env: opts.env,
+        windowsHide: true
       })
 
       let timeoutTimer: NodeJS.Timeout | undefined

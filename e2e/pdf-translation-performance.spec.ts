@@ -1,14 +1,15 @@
-import { createServer } from 'node:http'
-import { cpus, loadavg, totalmem } from 'node:os'
+import { literatureItemInputSchema } from '@aipoch/literature-library/contracts'
+import { createCanvas } from '@napi-rs/canvas'
+import { expect } from '@playwright/test'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, readFile, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { cpus, loadavg, totalmem } from 'node:os'
 import { dirname, join } from 'node:path'
-import { expect } from '@playwright/test'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
-import { createCanvas } from '@napi-rs/canvas'
-import { test } from './fixtures/electron-app'
 import { createProjectDbClient } from '../src/main/projects/prisma-client'
-import { literatureItemInputSchema } from '../src/shared/literature'
+import { test } from './fixtures/electron-app'
+import { openAllReferences } from './fixtures/library'
 
 // Opt-in: built Electron, real renderer/parser/IPC/checkpoint/PDFium worker, isolated fixture roots.
 // A deterministic localhost provider measures orchestration/storage/rendering, not model quality.
@@ -252,8 +253,7 @@ for (const concurrency of [1, 2, 4] as const) {
         },
         { itemId, transferId }
       )
-      await page.getByRole('button', { name: 'Library', exact: true }).click()
-      await page.getByRole('button', { name: 'All references', exact: true }).click()
+      await openAllReferences(page)
       await page.getByRole('button', { name: 'Preview performance.pdf', exact: true }).click()
       await page.getByRole('button', { name: 'Full-text translation', exact: true }).click()
       const panel = page.locator('[data-pdf-translation-sidebar]')

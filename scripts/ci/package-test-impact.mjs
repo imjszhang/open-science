@@ -5,8 +5,80 @@ import { fileURLToPath } from 'node:url'
 
 export const packageTestRegistryPath = 'scripts/ci/package-test-boundaries.json'
 const rootPattern = /^packages\/[a-z0-9][a-z0-9-]*$/
-const globalInput =
-  /^(?:package(?:-lock)?\.json$|\.npmrc$|\.nvmrc$|(?:vitest|vite|electron|tsconfig)[^/]*|test\/|scripts\/|\.github\/|patches\/|build\/|resources\/)/
+// These inputs can change package compilation, discovery or the trusted package-test graph.
+// Keep this list explicit: unrelated scripts and regression data must not fan out every package.
+const packageGlobalInput =
+  /^(?:package(?:-lock)?\.json$|\.npmrc$|\.nvmrc$|(?:vitest|vite|electron|tsconfig)[^/]*|test\/config\/|patches\/|build\/|resources\/|scripts\/(?:build-dev-packages|check-packages|check-package-isolation|check-(?:connector|diagnostics|environment|notebook)-packages|package-verification-plan)(?:\.[^/]+)?$|scripts\/ci\/(?:npm-ci|package-test-|module-test-impact\.)|\.github\/actions\/select-package-tests\/|\.github\/workflows\/(?:package-test-policy-dry-run|pr-gate)\.yml$)/
+
+// Fixture records and unrelated scripts are test evidence for another lane. They do not alter
+// the independently published package contracts, so changing them must not run every package.
+const packageExemptInput = /^(?:test\/fixtures\/|scripts\/)/
+
+// These packages run through module/host contracts and dedicated platform or CLI lanes.
+// They are downstream of independent libraries, never inputs to those libraries' suites.
+export const dedicatedPackageTestRoots = [
+  'packages/notebook-network-sandbox',
+  'packages/open-science',
+  'packages/credential-identity-probe-native',
+  'packages/process-tree-native',
+  'packages/safe-file-publisher-native'
+]
+
+// These are consumer scenarios, not another dependency graph. Prerequisites come from the registry.
+export const verificationFamilies = [
+  { script: 'check:resilient-download-package', packages: ['resilient-download'] },
+  { script: 'check:durable-files-package', packages: ['durable-files', 'skills', 'specialists'] },
+  {
+    script: 'check:connector-packages',
+    packages: ['connector-core', 'connector-builtins', 'connector-mcp-client']
+  },
+  { script: 'check:diagnostics-package', packages: ['diagnostics'] },
+  { script: 'check:environment-package', packages: ['environment'] },
+  { script: 'check:compute-package', packages: ['compute'] },
+  { script: 'check:reproducibility-package', packages: ['reproducibility'] },
+  {
+    script: 'check:notebook-packages',
+    packages: ['notebook-syntax', 'notebook-code-risk', 'notebook-analysis']
+  },
+  {
+    script: 'check:package-isolation',
+    packages: [
+      'pdf-structure',
+      'pdf-translation',
+      'literature-citations',
+      'journal-catalog',
+      'literature-discovery',
+      'literature-screening',
+      'literature-library',
+      'literature-reading'
+    ]
+  }
+]
+
+// Installed consumers do not use host routing, Electron builds or browser/E2E configuration.
+const verificationSharedInput =
+  /^(?:package(?:-lock)?\.json$|\.npmrc$|\.nvmrc$|vitest[^/]*|tsconfig[^/]*|patches\/|scripts\/(?:(?:check-packages|package-verification-plan|build-dev-packages|build-packages)\.mjs$|ci\/(?:package-test-boundaries\.json$|(?:package-test-impact|npm-ci)\.mjs$))|\.github\/actions\/(?:select-package-tests|verify-packages)\/)/
+const verificationUnrelatedInput =
+  /^(?:src\/|docs\/|e2e\/|\.github\/|test\/(?:config|fixtures)\/|scripts\/runtime-archives\.mjs$|scripts\/ci\/windows-test-sequencer\.ts$|scripts\/ci\/(?:module-|classify-pr-|evaluate-pr-|check-module-|audit-module-|consumer-retirement)|(?:electron|vite\.)[^/]*|[^/]+\.md$)|\.test\.[cm]?[jt]sx?$/
+
+function verificationPaths(paths, roots) {
+  return paths.flatMap((path) => {
+    const family = verificationFamilies.find(({ script }) =>
+      [
+        `scripts/${script.replace(':', '-')}.mjs`,
+        `scripts/${script.replace(':', '-')}.test.ts`
+      ].includes(path)
+    )
+    if (family) {
+      // An older registry must not silently discard a newly registered verifier consumer.
+      return family.packages.every((name) => roots.includes(`packages/${name}`))
+        ? family.packages.map((name) => `packages/${name}/<installed-consumer-verifier>`)
+        : [path]
+    }
+    if (path.startsWith('packages/') || verificationSharedInput.test(path)) return [path]
+    return verificationUnrelatedInput.test(path) ? [] : [path]
+  })
+}
 
 export function validatePackageTestRegistry(registry) {
   if (registry?.schemaVersion !== 1 || !Array.isArray(registry.packages))
@@ -88,21 +160,34 @@ export function environmentPackageVerificationPlan(selectedRoots, excludedRoots)
     : { builds: ['diagnostics', 'environment'], tests: ['environment'] }
 }
 
-export function createPackageTestPlan(paths, registry) {
+export function createPackageTestPlan(paths, registry, { verification = false } = {}) {
   const { packages } = validatePackageTestRegistry(registry)
   const roots = packages.map((entry) => entry.root)
   const reasons = []
   const changed = new Set()
-  for (const path of paths) {
+  const inputs = verification ? verificationPaths(paths, roots) : paths
+  for (const path of inputs) {
     const owner = roots.find((root) => path.startsWith(root + '/'))
     if (owner) {
       changed.add(owner)
       reasons.push(`${path} -> ${owner}`)
-    } else if (globalInput.test(path) || !/^(?:src\/|docs\/|[^/]+\.md$)/.test(path)) {
+    } else if (packageGlobalInput.test(path)) {
       return {
         selected: roots,
         excluded: [],
-        reasons: [`${path} -> shared or unknown input -> all package tests`]
+        reasons: [`${path} -> package compilation, discovery or policy input -> all package tests`]
+      }
+    } else if (dedicatedPackageTestRoots.some((root) => path.startsWith(root + '/'))) {
+      reasons.push(`${path} -> dedicated module/host lane -> independent package suites excluded`)
+    } else if (!verification && packageExemptInput.test(path)) {
+      reasons.push(`${path} -> non-package test or script input -> package unit tests excluded`)
+    } else if (!/^(?:src\/|docs\/|[^/]+\.md$)/.test(path)) {
+      return {
+        selected: roots,
+        excluded: [],
+        reasons: [
+          `${path} -> shared or unknown input -> all ${verification ? 'installed consumers' : 'package tests'}`
+        ]
       }
     }
   }
@@ -118,9 +203,14 @@ export function createPackageTestPlan(paths, registry) {
       }
     }
   }
+  if (verification && inputs.length === 0)
+    reasons.push('no package or installed-consumer inputs changed')
   const excluded = roots.filter((root) => !changed.has(root))
   reasons.push(
-    ...excluded.map((root) => `${root} -> unchanged upstream -> package unit tests excluded`)
+    ...excluded.map(
+      (root) =>
+        `${root} -> unchanged upstream -> ${verification ? 'installed consumers' : 'package unit tests'} excluded`
+    )
   )
   return { selected: roots.filter((root) => changed.has(root)), excluded, reasons }
 }
@@ -154,7 +244,7 @@ export function packageTestPlanFromRevisions(
   base,
   head,
   trustedBase = base,
-  { cwd = process.cwd(), execute = execFileSync } = {}
+  { cwd = process.cwd(), execute = execFileSync, verification = false } = {}
 ) {
   const git = (...args) =>
     execute('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).toString()
@@ -196,7 +286,7 @@ export function packageTestPlanFromRevisions(
     paths.push(
       ...git('diff', '--name-only', '--no-renames', '-z', head, 'HEAD').split('\0').filter(Boolean)
     )
-    return createPackageTestPlan([...new Set(paths)], registry)
+    return createPackageTestPlan([...new Set(paths)], registry, { verification })
   } catch (error) {
     // Missing/invalid trusted policy or Git evidence may never skip tests.
     return {
@@ -216,9 +306,15 @@ export function runPackageTestCli(args = process.argv.slice(2), env = process.en
   const plan = packageTestPlanFromRevisions(
     value('--base'),
     value('--head'),
-    args.includes('--trusted-base') ? value('--trusted-base') : value('--base')
+    args.includes('--trusted-base') ? value('--trusted-base') : value('--base'),
+    { verification: args.includes('--verification') }
   )
   process.stdout.write(JSON.stringify(plan, null, 2) + '\n')
+  if (args.includes('--verification') && env.GITHUB_STEP_SUMMARY)
+    appendFileSync(
+      env.GITHUB_STEP_SUMMARY,
+      `## Installed package selection\n\nSelected: ${plan.selected.join(', ') || 'none'}\n\n${plan.reasons.map((reason) => `- ${reason}`).join('\n')}\n`
+    )
   if (args.includes('--github-env')) {
     if (!env.GITHUB_ENV) throw new Error('GITHUB_ENV is required')
     appendFileSync(

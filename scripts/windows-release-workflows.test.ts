@@ -204,7 +204,7 @@ describe('post-merge Windows validation', () => {
   it('prepares the bundled runtime before Windows consumers and snapshot publication', () => {
     const consumers = [
       ['pr-gate.yml', 'windows_core', 'Test Windows notebook shell behavior'],
-      ['pr-gate.yml', 'windows_e2e_setup', 'Pack E2E setup'],
+      ['pr-gate.yml', 'windows_e2e', 'Run mainline journeys'],
       ['windows-e2e-regression.yml', 'windows_e2e_setup', 'Pack E2E setup'],
       ['windows-full-test.yml', 'windows_dependencies', 'Pack dependencies'],
       ['runtime-resource-soak.yml', 'runtime_resource_soak', 'Record runtime resource profile']
@@ -819,7 +819,8 @@ describe('post-merge Windows validation', () => {
       'build',
       'package-smoke',
       'notarize-mac',
-      'cli-artifacts'
+      'cli-artifacts',
+      'linux-cli-packages'
     ])
     expect(nightly.jobs.build.uses).toBe('./.github/workflows/build.yml')
     expect(nightly.jobs['package-smoke']).toMatchObject({
@@ -1034,7 +1035,8 @@ if ($artifactSaveBase -eq $artifactSaveCommit) {
       'build',
       'package-smoke',
       'notarize-mac',
-      'cli-artifacts'
+      'cli-artifacts',
+      'linux-cli-packages'
     ])
     expect(
       findStep(release.jobs.publish, 'Aggregate release certification evidence').run

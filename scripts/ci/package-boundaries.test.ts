@@ -5,7 +5,12 @@ import ts from 'typescript'
 import { expect, it } from 'vitest'
 import { packageTestRegistrationViolations } from './package-test-policy.mjs'
 import { localPackageSourcePaths } from './local-package-exports.mjs'
-import { createPackageTestPlan, validatePackageTestRegistry } from './package-test-impact.mjs'
+import { loadModuleImpactManifest } from './load-module-impact.mjs'
+import {
+  createPackageTestPlan,
+  dedicatedPackageTestRoots,
+  validatePackageTestRegistry
+} from './package-test-impact.mjs'
 
 const registry = validatePackageTestRegistry(
   JSON.parse(readFileSync('scripts/ci/package-test-boundaries.json', 'utf8'))
@@ -35,6 +40,12 @@ for (const entry of manifests) {
       ...entry.manifest.optionalDependencies
     }
     const development = { ...production, ...entry.manifest.devDependencies }
+    for (const [name, specifier] of Object.entries(production)) {
+      // Consumer installs supply unpublished siblings as tarballs. A file: declaration can
+      // accidentally pass that setup while making the original archive depend on repo layout.
+      if (/^(?:file:|link:|workspace:|\.{0,2}\/|[A-Za-z]:[\\/])/.test(String(specifier)))
+        violations.push(`${entry.manifest.name} -> ${name}: non-portable dependency ${specifier}`)
+    }
     for (const file of files(entry.root).filter((path) => /\.[cm]?[jt]sx?$/.test(path))) {
       const runtime = /\/(src|resources)\//.test(file) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)
       const declared = runtime ? production : development
@@ -243,39 +254,48 @@ it('local module and affected plans obey the same downstream package direction a
   expect(plan.testFiles.some((path) => path.startsWith('packages/pdf-structure/'))).toBe(false)
 })
 
-it('host-only selective plans never include package-owned unit suites', async () => {
-  const { loadModuleImpactManifest } = await import('./load-module-impact.mjs')
-  const { createAffectedTestPlan, createModuleTestPlan } = await import('./module-test-impact.mjs')
-  const manifest = loadModuleImpactManifest()
-  let checked = 0
-  for (const [id, module] of Object.entries(manifest.modules) as [
-    string,
-    { ownerPaths: string[] }
-  ][]) {
-    if (module.ownerPaths.some((path) => path.startsWith('packages/'))) continue
-    const source = module.ownerPaths.find(
-      (path) =>
-        path.startsWith('src/') && /\.[cm]?tsx?$/.test(path) && !/\.(test|spec)\./.test(path)
+const hostBoundaryManifest = loadModuleImpactManifest()
+const hostBoundaryCases = (
+  Object.entries(hostBoundaryManifest.modules) as [string, { ownerPaths: string[] }][]
+).flatMap(([id, module]) => {
+  if (module.ownerPaths.some((path) => path.startsWith('packages/'))) return []
+  const source = module.ownerPaths.find(
+    (path) => path.startsWith('src/') && /\.[cm]?tsx?$/.test(path) && !/\.(test|spec)\./.test(path)
+  )
+  return source ? [{ id, source }] : []
+})
+
+it('includes host modules with selective test plans', async () => {
+  const { createModuleTestPlan } = await import('./module-test-impact.mjs')
+  expect(
+    hostBoundaryCases.some(
+      ({ id }) => createModuleTestPlan(id, hostBoundaryManifest).mode === 'selective'
     )
-    if (!source) continue
+  ).toBe(true)
+})
+
+// Each module keeps its own timeout as the ownership manifest grows.
+it.each(hostBoundaryCases)(
+  'host-only selective plans never include package-owned unit suites: $id',
+  async ({ id, source }) => {
+    const { createAffectedTestPlan, createModuleTestPlan } =
+      await import('./module-test-impact.mjs')
     for (const plan of [
-      createModuleTestPlan(id, manifest),
+      createModuleTestPlan(id, hostBoundaryManifest),
       createAffectedTestPlan(
         [{ path: source, status: 'modified' }],
         { status: 'not-requested', testFiles: [] },
-        manifest
+        hostBoundaryManifest
       )
     ]) {
       if (plan.mode !== 'selective') continue
-      checked += 1
       expect(
         plan.testFiles.filter((path: string) => path.startsWith('packages/')),
         `${id}: ${source}`
       ).toEqual([])
     }
   }
-  expect(checked).toBeGreaterThan(0)
-})
+)
 
 it('host source edits never select unchanged upstream PDF package implementation tests', async () => {
   const { loadModuleImpactManifest } = await import('./load-module-impact.mjs')
@@ -391,7 +411,15 @@ it('selects durable file consumers downstream without testing unchanged prerequi
     ['packages/specialists/src/repository.ts', ['packages/specialists']],
     ['src/main/settings/document-store.ts', []],
     ['src/main/artifacts/repository.ts', []],
-    ['packages/journal-catalog/src/index.ts', ['packages/journal-catalog']]
+    [
+      'packages/journal-catalog/src/index.ts',
+      ['packages/journal-catalog', 'packages/literature-library']
+    ],
+    ['packages/literature-library/src/library.ts', ['packages/literature-library']],
+    ['packages/literature-reading/src/reader.ts', ['packages/literature-reading']],
+    ['src/main/literature/catalog.ts', []],
+    ['src/main/literature/document-reader.ts', []],
+    ['src/renderer/src/pages/literature/workflows/useLiteratureMetadata.ts', []]
   ] as const
   for (const [path, selected] of cases) {
     const packagePlan = createPackageTestPlan([path], registry)
@@ -503,5 +531,52 @@ it('routes download package changes downstream and host adapters without unchang
     })
     expect(invocations.flat()).toContain(test)
     expect(invocations.flat().some((value) => value.startsWith(packageRoot + '/'))).toBe(false)
+  }
+})
+
+// Dedicated roots are safe exclusions only while no independent library consumes them.
+it('independent packages do not depend on dedicated host packages', () => {
+  const names = dedicatedPackageTestRoots.map(
+    (root) => JSON.parse(readFileSync(`${root}/package.json`, 'utf8')).name
+  )
+  for (const { manifest } of manifests) {
+    const dependencies = {
+      ...manifest.dependencies,
+      ...manifest.devDependencies,
+      ...manifest.peerDependencies,
+      ...manifest.optionalDependencies
+    }
+    for (const name of names)
+      expect(Object.hasOwn(dependencies, name), `${manifest.name} -> ${name}`).toBe(false)
+  }
+})
+
+it('dedicated package edits retain module evidence and platform overlays', async () => {
+  const { createAffectedTestPlan } = await import('./module-test-impact.mjs')
+  const { loadModuleImpactManifest } = await import('./load-module-impact.mjs')
+  const manifest = loadModuleImpactManifest()
+  for (const root of dedicatedPackageTestRoots) {
+    const owner = Object.values(manifest.modules).find((module) =>
+      module.ownerPaths.some((path) => path.startsWith(root + '/'))
+    )!
+    const path = owner.ownerPaths.find(
+      (path) =>
+        path.startsWith(root + '/') &&
+        /\.(?:[cm]?[jt]s|cc|rs|swift)$/.test(path) &&
+        !/\.(test|spec)\./.test(path)
+    )!
+    const plan = createAffectedTestPlan(
+      [{ path, status: 'modified' }],
+      { status: 'not-requested', testFiles: [] },
+      manifest
+    )
+    expect(plan.mode, root).toBe('selective')
+    expect(plan.testFiles.length, root).toBeGreaterThan(0)
+    expect(plan.testFiles, root).toEqual(expect.arrayContaining(owner.testFiles.owner))
+    expect(
+      plan.testFiles.filter((test) => manifests.some(({ root }) => test.startsWith(root + '/'))),
+      root
+    ).toEqual([])
+    expect(plan.capabilityOverlays, root).toEqual(expect.arrayContaining(owner.capabilityOverlays))
   }
 })

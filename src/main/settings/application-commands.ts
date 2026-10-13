@@ -1,5 +1,8 @@
+import { z } from 'zod'
+import { defineApplicationCommandContract } from '../../shared/application-command-contract'
+import { parseSettingsSnapshot } from '../../shared/settings'
 import { requireDesktopCaller } from '../caller-context'
-import type { PrivateDestinationRequest } from '../../shared/notebook-network'
+import type { PrivateDestinationRequest } from '../../shared/notebook-network-settings'
 import type {
   AppIconPreview,
   ClaudeInstallEvent,
@@ -287,7 +290,10 @@ const settingsCoreApplicationCommands = Object.freeze({
     'settings:get-settings',
     readonly [],
     StoreResult<'getSettingsView'>
-  >('settings:get-settings'),
+  >(
+    'settings:get-settings',
+    defineApplicationCommandContract(z.tuple([]), { parse: parseSettingsSnapshot })
+  ),
   getSkillDetail: defineApplicationCommand<
     'settings:get-skill-detail',
     readonly [id: string],

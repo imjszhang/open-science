@@ -731,6 +731,11 @@ describe('pull request change classification', () => {
     'scripts/ci/change-impact.json',
     'scripts/windows-signing-policy.mjs',
     'scripts/windows-signing-policy.test.ts',
+    'scripts/linux-cli-packages.mjs',
+    'scripts/linux-cli-packages.test.ts',
+    'scripts/publish-linux-cli-packages.mjs',
+    'scripts/publish-linux-cli-packages.test.ts',
+    'scripts/test-linux-cli-package.mjs',
     '.github/workflows/pr-gate.yml'
   ])('selects the declared full plan for global gate input %s', (path) => {
     const plan = classifyChanges([{ path, status: 'modified' }])
@@ -779,6 +784,7 @@ describe('pull request change classification', () => {
 
   it.each([
     'src/main/notebook/windows-shell.ts',
+    'src/main/settings/claude-cli-process.ts',
     'packages/notebook-code-risk/src/index.ts',
     'src/main/notebook/runtime-service.ts',
     'src/main/notebook/environment-resources.ts',

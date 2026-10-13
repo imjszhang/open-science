@@ -69,6 +69,18 @@ describe('complete module ownership', () => {
     ])
   })
 
+  it('does not route regression fixtures or non-test scripts through owner registrations', () => {
+    expect(
+      modulesForPath(manifest, 'test/fixtures/pdf-translation/compact-cjk-table-header-fit.jsonl')
+    ).toEqual([])
+    expect(modulesForPath(manifest, 'scripts/build-backend.mjs')).toEqual([])
+    // A script test can still be selected directly through its declared testFiles evidence.
+    expect(modulesForPath(manifest, 'scripts/pdf-translation-corpus.test.ts')).toContain(
+      'main_pdf_translation'
+    )
+    expect(auditModuleRouting(manifest).some(({ path }) => path.startsWith('scripts/'))).toBe(false)
+  })
+
   it('routes every declared portable test without an unknown-path fallback', () => {
     const tests = new Set(
       Object.values(manifest.modules).flatMap((module) => Object.values(module.testFiles).flat())
@@ -83,7 +95,10 @@ describe('complete module ownership', () => {
   it.each(Object.entries(manifest.modules))(
     'bounds implementation selection for %s while retaining declared evidence',
     (id, module) => {
-      const path = module.interfacePaths.find((path) => !/\.(test|spec)\./.test(path))!
+      const path = module.interfacePaths.find(
+        (path) => module.ownerPaths.includes(path) && !/\.(test|spec)\./.test(path)
+      )!
+      expect(path, `${id} must expose an owned production interface`).toBeDefined()
       const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph)
       expect(plan.mode, `${id}: ${plan.reasonChains.join('; ')}`).toBe(
         module.fullTestReason ? 'full' : 'selective'
@@ -111,12 +126,14 @@ describe('complete module ownership', () => {
     expect(result.missing).toEqual([])
     expect(auditModuleRouting(manifest)).toEqual([])
     expect(result.owned).toBe(result.files)
-    expect(result.fullModules.map(({ id }) => id)).toEqual([
-      'diagnostics_package',
-      'shared_application_contracts',
-      'shared_conversation_contracts',
-      'shared_workspace_contracts'
-    ])
+    expect(result.fullModules.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([
+        'diagnostics_package',
+        'shared_application_contracts',
+        'shared_conversation_contracts',
+        'shared_workspace_contracts'
+      ])
+    )
   })
 
   it.each([

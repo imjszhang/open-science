@@ -1,4 +1,11 @@
+import {
+  getDesktopRuntimeEpoch,
+  assertDesktopRuntimeWrite,
+  registerDesktopRecoveryReader,
+  useDesktopRuntimeRecoveryStore
+} from '@/stores/desktop-runtime-recovery-store'
 import { InlineNotice } from '@/components/ui/inline-notice'
+import { RefreshCw, TriangleAlert, Variable, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -9,14 +16,9 @@ import {
   type RefObject
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { RefreshCw, TriangleAlert, Variable, X } from 'lucide-react'
 
-import { usePreviewWorkbenchStore, type PreviewToolItem } from '@/stores/preview-workbench-store'
-import { useNotebookEnvStore } from '@/stores/notebook-env-store'
-import { useSettingsStore } from '@/stores/settings-store'
-import { useSessionStore } from '@/stores/session-store'
 import { ErrorNotice } from '@/components/error-notice'
-import { cn } from '@/lib/utils'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import {
   Select,
   SelectContent,
@@ -24,13 +26,18 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import { useNotebookEnvStore } from '@/stores/notebook-env-store'
+import { usePreviewWorkbenchStore, type PreviewToolItem } from '@/stores/preview-workbench-store'
+import { useSessionStore } from '@/stores/session-store'
+import { useSettingsStore } from '@/stores/settings-store'
 
+import { hasActiveRuntimeTarget, notebookGated } from '@/lib/notebook-provisioning'
+import { isCurrentInFlight } from '../../../../shared/in-flight-promise'
 import type {
   NotebookEnvironmentStatus,
   NotebookKernelKind,
-  NotebookLanguage,
   NotebookNamespaceSnapshot,
   NotebookNamespaceVariable,
   NotebookRunRecord,
@@ -38,18 +45,11 @@ import type {
   NotebookSessionReference,
   NotebookSessionState
 } from '../../../../shared/notebook'
-import { isCurrentInFlight } from '../../../../shared/in-flight-promise'
+import type { NotebookLanguage } from '../../../../shared/notebook-language-contract'
 import { resolveProjectId } from '../../../../shared/project-scope'
 import { EnvProvisionOverlay } from './EnvProvisionOverlay'
-import { shouldProvisionR } from './lazy-r'
-import { hasActiveRuntimeTarget, notebookGated } from './provisioning-view'
-import { NotebookCodeBlock } from './notebook-code'
-import { NotebookRunEvidence } from './NotebookRunEvidence'
-import { NotebookRunOutputs } from './NotebookRunOutputs'
-import { NotebookInputDataStrip } from './NotebookInputDataStrip'
 import { isCurrentSessionNotebookView } from './follow-notebook-scroll'
-import { useFollowScrollBottom } from './use-follow-scroll-bottom'
-import { useHorizontalScrollFade } from './use-horizontal-scroll-fade'
+import { shouldProvisionR } from './lazy-r'
 import {
   resolveRunErrorLine,
   environmentLabel,
@@ -60,13 +60,21 @@ import {
   resolveRunEnvironment,
   resolveRunKernelKind
 } from './notebook-cell-utils'
+import { NotebookCodeBlock } from './notebook-code'
+import { NotebookInputDataStrip } from './NotebookInputDataStrip'
+import { NotebookRunEvidence } from './NotebookRunEvidence'
+import { NotebookRunOutputs } from './NotebookRunOutputs'
 import {
   createNotebookFrameFilterOptions,
-  notebookFrameLabels,
   normalizeNotebookRootFrameRuns,
+  notebookFrameLabels,
+  pendingNotebookCode,
   projectNotebookRunsForFrame,
   type NotebookFrameFilterValue
 } from './session-notebook-projection'
+import { getToolExecutionPhase } from './tool-execution-phase'
+import { useFollowScrollBottom } from './use-follow-scroll-bottom'
+import { useHorizontalScrollFade } from './use-horizontal-scroll-fade'
 
 // Fixed tab order for the per-kernel switcher.
 const KERNEL_KIND_ORDER: NotebookKernelKind[] = ['python', 'r', 'repl', 'bash']
@@ -508,6 +516,8 @@ const TerminalInput = ({
 
 // Renders the notebook preview and keeps it synchronized with main-process runtime events.
 const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
+  const recoveryEpoch = useDesktopRuntimeRecoveryStore((state) => state.epoch)
+  const recoveryPhase = useDesktopRuntimeRecoveryStore((state) => state.phase)
   const { t } = useTranslation()
   const kernelScrollFadeRef = useHorizontalScrollFade<HTMLDivElement>()
   const environmentScrollFadeRef = useHorizontalScrollFade<HTMLDivElement>()
@@ -591,6 +601,8 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
 
   // Reads the latest notebook state from main, including its bounded recent run window.
   const loadNotebookState = useCallback(async (): Promise<boolean> => {
+    if (!['connected', 'reconciling'].includes(useDesktopRuntimeRecoveryStore.getState().phase))
+      return false
     if (stateLoadInFlight.current) {
       stateReloadQueued.current = true
       return stateLoadInFlight.current
@@ -602,9 +614,11 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
         do {
           stateReloadQueued.current = false
           const requested = latestNotebookRequest.current
+          const epoch = getDesktopRuntimeEpoch()
           try {
             const nextState = await window.api.notebook.state(requested.request)
 
+            if (epoch !== getDesktopRuntimeEpoch()) continue
             if (latestNotebookRequest.current.key === requested.key) {
               applyNotebookState(nextState)
               setActionError(null)
@@ -613,6 +627,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
               stateReloadQueued.current = true
             }
           } catch (error) {
+            if (epoch !== getDesktopRuntimeEpoch()) continue
             if (latestNotebookRequest.current.key === requested.key) {
               setActionError(getErrorMessage(error))
               succeeded = false
@@ -636,6 +651,18 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     }
   }, [applyNotebookState])
 
+  useEffect(
+    () =>
+      registerDesktopRecoveryReader(async () => {
+        if (!(await loadNotebookState())) {
+          // Content-local failures must not invalidate a healthy replacement attachment.
+          latestNotebookState.current = undefined
+          setNotebookState(undefined)
+        }
+      }),
+    [loadNotebookState]
+  )
+
   // Defer the initial state load until after the component has mounted.
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -645,7 +672,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [loadNotebookState, notebookRequestKey])
+  }, [loadNotebookState, notebookRequestKey, recoveryEpoch, recoveryPhase])
 
   // Reload whenever the shared runtime publishes a change for this notebook session.
   useEffect(() => {
@@ -658,9 +685,13 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
 
   const runs = notebookState?.runs ?? notebookState?.recentRuns ?? []
   const frameRuns = session ? normalizeNotebookRootFrameRuns(runs, session) : runs
+  const pendingCode = pendingNotebookCode(session, frameRuns)
   const frameOptions = createNotebookFrameFilterOptions(
     frameRuns,
-    session ? notebookFrameLabels(session, t) : {}
+    session ? notebookFrameLabels(session, t) : {},
+    undefined,
+    false,
+    pendingCode[0]?.frameId
   )
   const effectiveFrameFilter = frameOptions.some((option) => option.value === frameFilter)
     ? frameFilter
@@ -669,8 +700,22 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     ? projectNotebookRunsForFrame(frameRuns, effectiveFrameFilter)
     : []
 
-  // Kernels appear only after producing a run in the current projected history.
-  const kindsWithRuns = new Set(projectedRuns.map(resolveRunKernelKind))
+  const framePendingCode = pendingCode.filter(
+    (entry) => `frame:${entry.frameId}` === effectiveFrameFilter
+  )
+  const pendingKernelKind = (language: string | undefined): NotebookKernelKind =>
+    language === 'javascript'
+      ? 'repl'
+      : language === 'r'
+        ? 'r'
+        : language === 'bash' || language === 'powershell'
+          ? 'bash'
+          : 'python'
+  // Received code can make a kernel tab visible before its first Run is admitted.
+  const kindsWithRuns = new Set([
+    ...projectedRuns.map(resolveRunKernelKind),
+    ...framePendingCode.map((entry) => pendingKernelKind(entry.code.language))
+  ])
   const visibleKinds = KERNEL_KIND_ORDER.filter((kind) => kindsWithRuns.has(kind))
   const effectiveActiveKind = visibleKinds.includes(activeKind)
     ? activeKind
@@ -835,6 +880,11 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     activeEnvName !== undefined &&
     executionEnvironment !== undefined &&
     activeEnvName !== executionEnvironment
+  const visiblePendingCode = isHistoricalEnvironmentView
+    ? []
+    : framePendingCode.filter(
+        (entry) => pendingKernelKind(entry.code.language) === effectiveActiveKind
+      )
   const isSubmitting = submittingTarget !== undefined
   const isSelectedKernelRunning =
     (submittingTarget !== undefined && submittingTarget === selectedTarget) ||
@@ -878,6 +928,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
       return
     }
 
+    const epoch = getDesktopRuntimeEpoch()
     const requestId = ++namespaceRequestId.current
     const hasCurrentSnapshot =
       namespaceSnapshot !== undefined &&
@@ -896,7 +947,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
         environment: activeEnvName,
         includePrivate: showPrivateVariables
       })
-      if (namespaceRequestId.current !== requestId) return
+      if (namespaceRequestId.current !== requestId || epoch !== getDesktopRuntimeEpoch()) return
       if (result.status === 'unavailable') {
         setNamespaceSnapshot(undefined)
         setNamespaceStatus('unavailable')
@@ -906,7 +957,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
       setNamespaceSnapshot(result)
       setNamespaceStatus('ready')
     } catch (error) {
-      if (namespaceRequestId.current !== requestId) return
+      if (namespaceRequestId.current !== requestId || epoch !== getDesktopRuntimeEpoch()) return
       setNamespaceError(getErrorMessage(error))
       setNamespaceStatus('error')
     }
@@ -940,7 +991,8 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
       namespaceLoadKey.current = undefined
       return
     }
-    const loadKey = `${selectedTarget ?? ''}:${showPrivateVariables}`
+    if (recoveryPhase !== 'connected') return
+    const loadKey = `${recoveryEpoch}:${selectedTarget ?? ''}:${showPrivateVariables}`
     if (namespaceLoadKey.current === loadKey) return
     namespaceLoadKey.current = loadKey
     namespaceRefreshQueued.current = false
@@ -951,6 +1003,8 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     isNamespaceLost,
     selectedTarget,
     showPrivateVariables,
+    recoveryEpoch,
+    recoveryPhase,
     showVariables,
     terminalInputFocused
   ])
@@ -1015,6 +1069,7 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
 
   // Sends terminal code through the same notebook interpreter and history path as agent code.
   const submitTerminalCode = async (): Promise<void> => {
+    const epoch = getDesktopRuntimeEpoch()
     const code = terminalCode.trim()
 
     if (!code || !activeDataLanguage || !activeEnvName || isHistoricalEnvironmentView) {
@@ -1026,7 +1081,9 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
     setActionError(null)
 
     try {
+      assertDesktopRuntimeWrite(epoch)
       if (stateLoadInFlight.current && !(await stateLoadInFlight.current)) return
+      assertDesktopRuntimeWrite(epoch)
       const executionState = latestNotebookState.current
       if (executionState?.activeWrite || executionState?.activeRunId) return
 
@@ -1119,6 +1176,27 @@ const NotebookPreview = ({ item }: NotebookPreviewProps): React.JSX.Element => {
             </div>
           )
         })}
+        {visiblePendingCode.map(({ activity, code }) => (
+          <div key={activity.id} data-testid="notebook-pending-code">
+            <div role="status" className="px-3 py-2 text-xs text-text-300">
+              {getToolExecutionPhase(activity, session?.runtimeContext?.permission) ===
+              'awaiting-approval'
+                ? t('Needs approval')
+                : t('Code received; waiting for execution details.')}
+            </div>
+            <NotebookCodeBlock code={code.text} language={code.language} />
+            {code.truncated ? (
+              <p className="px-3 py-2 text-xs text-text-300">
+                {t('Arguments were truncated for display.')}
+              </p>
+            ) : null}
+          </div>
+        ))}
+        {visibleRuns.length === 0 && visiblePendingCode.length === 0 ? (
+          <div role="status" className="px-4 py-6 text-sm text-text-300">
+            {isLoading ? t('Loading notebook…') : t('No code has run in this view yet.')}
+          </div>
+        ) : null}
       </div>
     </div>
   )

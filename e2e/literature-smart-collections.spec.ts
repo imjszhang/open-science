@@ -1,13 +1,14 @@
 import type { SmartCollectionView } from '@aipoch/literature-screening/contracts'
 import { expect } from '@playwright/test'
 import { test } from './fixtures/electron-app'
+import { openAllReferences } from './fixtures/library'
 
 test('retries a disconnected batch and resumes it after restart without repeating saved papers', async ({
   app
 }, testInfo) => {
   test.setTimeout(180_000)
   const { createServer } = await import('node:http')
-  const { literatureItemInputSchema } = await import('../src/shared/literature')
+  const { literatureItemInputSchema } = await import('@aipoch/literature-library/contracts')
   const requests: string[] = []
   let offline = true
   const service = createServer(async (request, response) => {
@@ -175,8 +176,7 @@ test('creates a smart collection without a model and preserves the setup path', 
 }, testInfo) => {
   const page = await app.completeOnboarding()
   await page.evaluate(() => window.api.locale.setPreference({ preference: 'en' }))
-  await page.getByRole('button', { name: 'Library', exact: true }).click()
-  await page.getByRole('button', { name: 'All references', exact: true }).click()
+  await openAllReferences(page)
   await page.getByRole('button', { name: 'New collection', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('switch', { name: 'Smart collection', exact: true }).check()
@@ -296,8 +296,7 @@ test('opens the Library table named by a smart collection scope', async ({ app }
     }
   })
   await page.reload()
-  await page.getByRole('button', { name: 'Library', exact: true }).click()
-  await page.getByRole('button', { name: 'All references', exact: true }).click()
+  await openAllReferences(page)
 
   for (const [rule, scope, destination] of [
     ['Library rule', 'All references', 'All references'],
@@ -325,7 +324,7 @@ test('reviews classified papers in the library table using a local fixture servi
 }, testInfo) => {
   test.setTimeout(240_000)
   const { createServer } = await import('node:http')
-  const { literatureItemInputSchema } = await import('../src/shared/literature')
+  const { literatureItemInputSchema } = await import('@aipoch/literature-library/contracts')
   let failClassification = false
   const classifiedInputs: string[] = []
   let holdAfter = 0

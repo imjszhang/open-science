@@ -16,10 +16,6 @@
     "src/main/literature/citation-document.ts",
     "src/main/literature/document-reader.test.ts",
     "src/main/literature/document-reader.ts",
-    "src/main/literature/duplicate-metadata.test.ts",
-    "src/main/literature/duplicate-metadata.ts",
-    "src/main/literature/duplicates.test.ts",
-    "src/main/literature/duplicates.ts",
     "src/main/literature/export-roundtrip.test.ts",
     "src/main/literature/full-text-finder.test.ts",
     "src/main/literature/full-text-index.test.ts",
@@ -30,7 +26,6 @@
     "src/main/literature/mcp-server.test.ts",
     "src/main/literature/mcp-server.ts",
     "src/main/literature/migration-writers.test.ts",
-    "src/main/literature/migrations/index-0001.ts",
     "src/main/literature/pdf-attachment-reliability.test.ts",
     "src/main/literature/pdf-context.ts",
     "src/main/literature/pdf-elements-mcp.test.ts",
@@ -65,7 +60,8 @@
     "src/main/literature/citation-errors.ts",
     "src/main/literature/discovery-adapters.ts",
     "src/main/literature/screening-adapter.ts",
-    "src/main/literature/screening-store.ts"
+    "src/main/literature/screening-store.ts",
+    "src/main/literature/discovery-contract.ts"
   ],
   "interfacePaths": [
     "src/main/literature/command-owner.ts",
@@ -103,8 +99,6 @@
       "src/main/literature/catalog.test.ts",
       "src/main/literature/citation-document.test.ts",
       "src/main/literature/document-reader.test.ts",
-      "src/main/literature/duplicate-metadata.test.ts",
-      "src/main/literature/duplicates.test.ts",
       "src/main/literature/export-roundtrip.test.ts",
       "src/main/literature/full-text-finder.test.ts",
       "src/main/literature/full-text-index.test.ts",
@@ -428,7 +422,10 @@
       "src/main/desktop-native-electron.test.ts",
       "src/main/session-plan/session-plan-turn-outcome.test.ts",
       "src/main/acp/specialist-switch-recovery.integration.test.ts",
-      "src/main/agents/production-completion-handoff.test.ts"
+      "src/main/agents/production-completion-handoff.test.ts",
+      "src/main/desktop-runtime-backpressure.integration.test.ts",
+      "src/main/desktop-runtime-transport-diagnostics.test.ts",
+      "src/main/node-entry.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

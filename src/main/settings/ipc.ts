@@ -1,7 +1,7 @@
 import type { SettingsFileCommands } from './file-commands'
 import { callerContextForEvent } from '../caller-context'
 import { callerLeaseForEvent } from '../caller-lifecycle'
-import type { PrivateDestinationRequest } from '../../shared/notebook-network'
+import type { PrivateDestinationRequest } from '../../shared/notebook-network-settings'
 import { ipcMainHandle } from '../ipc-handler-registry'
 
 import {
@@ -132,7 +132,6 @@ const registerSettingsIpcHandlers = ({
   fileCommands
 }: SettingsIpcOptions): void => {
   ipcMainHandle('settings:get-preflight', () => service.getPreflight())
-  ipcMainHandle('settings:get-settings', () => snapshotCommits.readCurrentSnapshot())
   ipcMainHandle('settings:encryption-available', () => service.isEncryptionAvailable())
   ipcMainHandle('settings:npm-available', () => service.isNpmAvailable())
   ipcMainHandle('settings:check-environment', () =>
