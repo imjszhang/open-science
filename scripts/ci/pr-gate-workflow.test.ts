@@ -898,6 +898,7 @@ describe('PR Gate workflow', () => {
         env: {
           ...process.env,
           PREFLIGHT_RESULT: 'success',
+          REGISTRATION_RESULT: 'success',
           RUNTIME_REQUIRED: 'false',
           RUNTIME_RESULT: 'skipped',
           PACKAGE_RESULT: 'skipped',
@@ -2317,6 +2318,7 @@ it.each(['failure', 'cancelled', 'skipped', ''])(
         env: {
           ...process.env,
           PREFLIGHT_RESULT: 'success',
+          REGISTRATION_RESULT: 'success',
           EVENT_NAME: 'merge_group',
           RUNTIME_REQUIRED: 'true',
           RUNTIME_RESULT: 'success',

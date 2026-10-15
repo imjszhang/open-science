@@ -124,6 +124,38 @@ reply/failure waits and scenario-specific assertions in the caller. The explicit
 `activatePermissionDecisionViaDom` preserves an existing Windows overlay workaround for permission
 state tests; it must not replace real pointer activation in hit-testing or accessibility journeys.
 
+## Fast impact-registration gate
+
+After dependencies are installed, run this fixed registration suite from the repository root:
+
+```bash
+npx vitest run --config scripts/ci/vitest.registration.config.ts
+```
+
+It checks module schema and path references, exact source/test ownership, test consumer evidence
+(including declared runtime-loading edges), package dependency registration, classifier invariants
+and platform/core-check selection. This includes the Windows source-signal check that otherwise
+could be missed by selective test execution. The explicit inventory is independent of
+`change-impact.json` and module registration data; it does not run application behavior tests.
+
+PR Gate runs it in the independent **Impact registration** job on every PR and merge group,
+including documentation-only and full-fallback plans. The job installs the locked parsing/test
+toolchain with lifecycle scripts disabled, as CI Integrity does; this is not an application
+installation. The dedicated Vitest config needs no app setup, Prisma generation, package build,
+Electron or browser launch. The final PR Gate requires success even if affected tests would not
+select these suites. Failure, cancellation, skipping or a missing result blocks admission.
+
+The gate catches violations of the existing registration rules. It cannot infer arbitrary IPC,
+events or filesystem relationships; those still require the explicit contracts described below.
+Behavior tests and trusted-base Integrity preservation checks remain separate requirements.
+
+The workflow, fixed inventory and assertions execute from the candidate checkout. They are
+protected CI policy under `/scripts/ci/` and `/.github/workflows/`, requiring CI-owner approval;
+new commits dismiss stale approvals under the main-branch ruleset. Independence here means that
+registration data cannot select or skip its own checks. Changes to the checking policy itself use
+the existing [CI control-plane approval](ci.md#ci-control-plane-approval) process, while trusted-base
+Integrity continues to validate registration data and preservation rules.
+
 ## Module-impact registration
 
 Module registration is part of the same change as the source and tests, not a follow-up after CI
