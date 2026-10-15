@@ -22,9 +22,7 @@
     "src/renderer/src/lib/startup-issue.test.ts",
     "src/renderer/src/lib/startup-issue.ts",
     "src/renderer/src/lib/streaming-metrics.ts",
-    "src/renderer/src/lib/storage-error.ts",
-    "src/renderer/src/lib/research-project-entry.ts",
-    "src/renderer/src/lib/research-project-entry.test.ts"
+    "src/renderer/src/lib/storage-error.ts"
   ],
   "interfacePaths": [
     "src/renderer/src/lib/interface-scale.ts",
@@ -50,8 +48,7 @@
     "src/renderer/src/lib/theme.ts",
     "src/renderer/src/lib/utils.ts",
     "src/renderer/src/lib/wsl-support-handoff.ts",
-    "src/renderer/src/lib/session-fork.ts",
-    "src/renderer/src/lib/research-project-entry.ts"
+    "src/renderer/src/lib/session-fork.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -66,8 +63,7 @@
       "src/renderer/src/lib/reviewer-submission-presentation.test.ts",
       "src/renderer/src/lib/session-package-import.test.ts",
       "src/renderer/src/lib/specialist-diagnostics.test.ts",
-      "src/renderer/src/lib/startup-issue.test.ts",
-      "src/renderer/src/lib/research-project-entry.test.ts"
+      "src/renderer/src/lib/startup-issue.test.ts"
     ],
     "contract": [],
     "consumer": [
@@ -574,7 +570,11 @@
       "src/renderer/src/pages/workspace/replay/ReplayPanel.layout.test.tsx",
       "src/renderer/src/pages/workspace/replay/ReplayResearchLayout.test.tsx",
       "src/renderer/src/pages/workspace/replay/use-replay-executions.test.tsx",
-      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx"
+      "src/renderer/src/pages/workspace/replay/use-research-replay-layout.test.tsx",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/application-command-wiring.test.ts",
+      "src/main/node-entry.test.ts",
+      "src/renderer/src/lib/research-project-entry.test.ts"
     ]
   },
   "capabilityOverlays": [],

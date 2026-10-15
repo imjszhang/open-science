@@ -920,7 +920,9 @@
       "src/main/research-demos/ipc.test.ts",
       "src/main/notebook/managed-execution-service.macos.integration.test.ts",
       "src/main/notebook/offline-plan-admission.test.ts",
-      "src/main/research-demos/inspection.test.ts"
+      "src/main/research-demos/inspection.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

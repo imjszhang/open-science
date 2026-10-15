@@ -993,6 +993,8 @@ async function startDesktop(): Promise<void> {
       startedProcess: launch.startedProcess,
       connect: attach,
       activate: async (candidate, signal, readyForSnapshots) => {
+        await observationNative.close()
+        signal.throwIfAborted()
         preview?.dispose()
         notifications.dispose()
         client = candidate
@@ -1074,6 +1076,7 @@ async function startDesktop(): Promise<void> {
       },
       discard: (candidate) => {
         if (client !== candidate) return
+        void observationNative.close()
         preview?.dispose()
         notifications.dispose()
         relay?.uninstall()
@@ -1380,6 +1383,7 @@ async function startDesktop(): Promise<void> {
       shutdownLease?.release()
       shutdownLease = undefined
       client?.close()
+      await observationNative.close()
       preview?.dispose()
       notifications.dispose()
       relay?.uninstall()
@@ -1399,6 +1403,9 @@ async function startDesktop(): Promise<void> {
       startedBackend = launch.startedProcess
       client = await attach()
       notifications = makeNotifications()
+      observationNative = createDesktopObservationNativeHandler({
+        documentFor: (id) => relay?.documentFor(id)
+      })
       await verifyDesktopRecoveryReadiness(client, config)
       runtimeStopped = false
       updateCommitted = false

@@ -1425,7 +1425,9 @@
       "src/renderer/src/stores/research-run-store.test.ts",
       "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
       "src/main/research-runs/inspection.test.ts",
-      "src/main/research-runs/ipc.test.ts"
+      "src/main/research-runs/ipc.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": [],

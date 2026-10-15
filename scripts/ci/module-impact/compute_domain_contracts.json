@@ -1098,7 +1098,9 @@
       "src/main/research-replay/observation-selection.test.ts",
       "src/main/research-replay/service.test.ts",
       "src/main/research-runs/inspection.test.ts",
-      "src/main/research-runs/ipc.test.ts"
+      "src/main/research-runs/ipc.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],

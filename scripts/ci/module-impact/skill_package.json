@@ -1376,7 +1376,6 @@
       "src/main/update/installation-artifact.test.ts",
       "src/main/update/installation-occupancy.test.ts",
       "src/main/update/installation-preparation.test.ts",
-      "src/renderer/src/pages/workspace/session-replay-progress-writer.test.ts",
       "src/shared/session-replay.test.ts",
       "src/renderer/src/pages/workspace/workspace-discussion-navigation.test.ts",
       "src/renderer/src/pages/workspace/ResearchWorkspaceHeader.test.tsx",
@@ -1423,7 +1422,6 @@
       "src/main/replay-viewer/http-host.integration.test.ts",
       "src/main/browser-recordings/external-port.test.ts",
       "src/main/observation-desktop/bridge.test.ts",
-      "src/main/run-observation-external-port.test.ts",
       "src/main/browser-recordings/owner.test.ts",
       "src/main/run-observation/media-collector.test.ts",
       "src/main/project-recordings/recorder.test.ts",
@@ -1490,7 +1488,10 @@
       "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
       "src/main/research-runs/inspection.test.ts",
       "src/main/research-runs/ipc.test.ts",
-      "src/renderer/src/lib/research-project-entry.test.ts"
+      "src/renderer/src/lib/research-project-entry.test.ts",
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/runtime-view/tuanzi.macos.integration.test.ts",
+      "src/main/notebook/host-artifacts-service.test.ts"
     ]
   },
   "capabilityOverlays": ["windows_sensitive", "e2e_regressions", "e2e_delegation"],
