@@ -526,6 +526,7 @@ const sendIntentKeys = [
   'pendingPdfContextAttachmentIds',
   'pendingPdfContextVersions',
   'discussionFocus',
+  'researchMembership',
   'parts',
   'specialistId',
   'enabledComputeHosts',
@@ -535,6 +536,7 @@ const sendIntentKeys = [
   'autoReviewEnabled',
   'delegationPolicy',
   'preserveSelection',
+  'isOriginCurrent',
   'setupSessionToken'
 ] as const
 const ownerDependencyNames = (path: string): string[] => {
