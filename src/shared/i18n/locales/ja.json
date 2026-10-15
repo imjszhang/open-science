@@ -7718,6 +7718,7 @@
     "View referenced evidence": "参照したエビデンスを表示",
     "Send to start a discussion. The original record stays unchanged.": "送信するとディスカッションが始まります。元の記録は変更されません。",
     "Loading recording…": "録画を読み込み中…",
-    "Loading recorded footage…": "録画映像を読み込み中…"
+    "Loading recorded footage…": "録画映像を読み込み中…",
+    "Search incomplete. Some pages could not be read.": "検索は不完全です。一部のページを読み取れませんでした。"
   }
 }
