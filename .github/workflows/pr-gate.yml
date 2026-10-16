@@ -182,6 +182,12 @@ jobs:
           if git cat-file -e "${BASE_SHA}:scripts/ci/module-ownership-paths.mjs" 2>/dev/null; then
             git show "${BASE_SHA}:scripts/ci/module-ownership-paths.mjs" > "$trusted_dir/module-ownership-paths.mjs"
           fi
+          # Derived evidence stays JSON-only in preflight; Integrity recomputes it from Git blobs.
+          for file in module-derived-consumers.mjs module-derived-consumers.json; do
+            if git cat-file -e "${BASE_SHA}:scripts/ci/$file" 2>/dev/null; then
+              git show "${BASE_SHA}:scripts/ci/$file" > "$trusted_dir/$file"
+            fi
+          done
           # Older trusted bases predate the loader; retain their original classifier.
           if git cat-file -e "${BASE_SHA}:scripts/ci/package-test-impact.mjs" 2>/dev/null; then
             git show "${BASE_SHA}:scripts/ci/package-test-impact.mjs" > "$trusted_dir/package-test-impact.mjs"
@@ -1001,7 +1007,12 @@ jobs:
           node-version: 24
           cache: npm
       - name: Install application dependencies
+        env:
+          # Notebook isolation uses bundled CPU binaries, not optional NuGet GPU providers.
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: node scripts/ci/npm-ci.mjs
+      - name: Verify ONNX native loading
+        run: node -e "require('onnxruntime-node')"
       - name: Install Linux sandbox dependency
         shell: bash
         env:
