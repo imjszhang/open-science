@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorNotice } from '@/components/error-notice'
+import { useNavigationStore } from '@/stores/navigation-store'
 import { useSessionStore } from '@/stores/session-store'
 import { usePreviewWorkbenchStore, type PreviewToolItem } from '@/stores/preview-workbench-store'
 import { sessionReplayKey, useSessionReplayStore } from '@/stores/session-replay-store'
@@ -29,6 +30,21 @@ type LoadedReplay = {
   view?: ReplayViewState
   writer: SessionReplayProgressWriter
   attempt: number
+}
+
+const discussionNavigationGuard = (signal: AbortSignal): (() => boolean) => {
+  const navigation = useNavigationStore.getState()
+  const selectedSessionId = useSessionStore.getState().selectedSessionId
+  return () => {
+    const current = useNavigationStore.getState()
+    return (
+      !signal.aborted &&
+      current.view === navigation.view &&
+      current.activeProjectId === navigation.activeProjectId &&
+      current.explicitNavigationRevision === navigation.explicitNavigationRevision &&
+      useSessionStore.getState().selectedSessionId === selectedSessionId
+    )
+  }
 }
 
 const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Element => {
@@ -128,10 +144,13 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     setDiscussionPending(true)
     setDiscussionError(undefined)
     const captured = structuredClone(context)
+    // Fullscreen exit is asynchronous too: a newer conversation navigation supersedes this Ask
+    // even when the same source preview remains mounted in the workspace.
+    const current = discussionNavigationGuard(abort.signal)
     const open = async (): Promise<boolean> => {
       const exiting = exitResearchReplayFullscreen()
       if (exiting) await exiting
-      if (abort.signal.aborted) return false
+      if (!current()) return true
       return openResearchDiscussion(captured, abort.signal)
     }
     void open()
@@ -139,7 +158,7 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
         if (!accepted) throw new Error('Discussion unavailable')
       })
       .catch(() => {
-        if (!abort.signal.aborted)
+        if (current())
           setDiscussionError(t('Could not open the research discussion. Please retry.'))
       })
       .finally(() => {
@@ -155,14 +174,15 @@ const SessionReplayContent = ({ item, isActive = true }: Props): React.JSX.Eleme
     const captured = structuredClone(context)
     const abort = new AbortController()
     discussionRequest.current = abort
+    const current = discussionNavigationGuard(abort.signal)
     const open = async (): Promise<void> => {
       const exiting = exitResearchReplayFullscreen()
       if (exiting) await exiting
-      if (!abort.signal.aborted) setDiscussionCapture(captured)
+      if (current()) setDiscussionCapture(captured)
     }
     void open()
       .catch(() => {
-        if (!abort.signal.aborted)
+        if (current())
           setDiscussionError(t('Could not open the research discussion. Please retry.'))
       })
       .finally(() => {

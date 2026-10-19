@@ -598,6 +598,81 @@ describe('SessionReplayPreview lifecycle', () => {
     }
   })
 
+  it.each([
+    ['question', 'session'],
+    ['chooser', 'session'],
+    ['question', 'navigation'],
+    ['chooser', 'navigation']
+  ] as const)(
+    'cancels the fullscreen %s when %s changes before exit completes',
+    async (action, change) => {
+      useNavigationStore.setState({
+        view: 'workspace',
+        activeProjectId: 'project',
+        explicitNavigationRevision: 1
+      })
+      useSessionStore.getState().selectSession('source')
+      let finish!: () => void
+      const full = document.createElement('div')
+      full.dataset.replayPresentation = 'research'
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => full })
+      Object.defineProperty(document, 'exitFullscreen', {
+        configurable: true,
+        value: () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      })
+      try {
+        render(<SessionReplayPreview item={item()} />)
+        await screen.findByTestId('replay-panel')
+        const capture = {
+          projectId: 'project',
+          sourceSessionId: 'source',
+          sourceTitle: 'Study',
+          fingerprint: 'hash',
+          branchId: 'main',
+          stepId: step.id,
+          stepOffsetMs: 123,
+          evidence: [],
+          excerpt: 'Superseded question'
+        }
+        act(() =>
+          action === 'question'
+            ? props().onAskStep(capture)
+            : props().onChooseConversation?.(capture)
+        )
+        // The source preview stays mounted while its conversation destination changes.
+        // A new navigation can also return to the same Session before fullscreen exits.
+        act(() => {
+          if (change === 'session') useSessionStore.getState().selectSession('other')
+          else useNavigationStore.getState().recordUserNavigation()
+        })
+        await act(async () => finish())
+        expect(mocks.discuss).not.toHaveBeenCalled()
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(props().discussionPending).toBe(false)
+        expect(useSessionStore.getState().selectedSessionId).toBe(
+          change === 'session' ? 'other' : 'source'
+        )
+        expect(
+          screen.queryByText('Could not open the research discussion. Please retry.')
+        ).toBeNull()
+
+        // Superseding the old action must release its request slot for another explicit Ask.
+        Object.defineProperty(document, 'fullscreenElement', {
+          configurable: true,
+          value: null
+        })
+        await act(async () => props().onAskStep(capture))
+        expect(mocks.discuss).toHaveBeenCalledTimes(1)
+      } finally {
+        Reflect.deleteProperty(document, 'fullscreenElement')
+        Reflect.deleteProperty(document, 'exitFullscreen')
+      }
+    }
+  )
+
   it('loads paused history and forwards active visibility changes', async () => {
     const mounted = render(<SessionReplayPreview item={item()} />)
     await screen.findByTestId('replay-panel')
