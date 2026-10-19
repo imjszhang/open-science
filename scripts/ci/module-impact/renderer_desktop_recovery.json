@@ -291,7 +291,19 @@
       "src/renderer/replay-viewer/research-client.test.ts",
       "src/renderer/replay-viewer/research-viewer.test.tsx",
       "src/renderer/src/pages/workspace/previews/renderers/PlanJsonPreview.recorded.test.tsx",
-      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx"
+      "src/renderer/src/pages/workspace/replay/ResearchDemoPanel.test.tsx",
+      "src/renderer/src/components/global-search/search-loading.test.tsx",
+      "src/renderer/src/pages/literature/LiteratureSources.test.tsx",
+      "src/renderer/src/pages/literature/collections/CollectionEditorDialog.test.tsx",
+      "src/renderer/src/pages/literature/literature-localization.render.test.tsx",
+      "src/renderer/src/pages/literature/useLiteratureChanges.test.tsx",
+      "src/renderer/src/pages/workspace/ArtifactLiteratureDetailDialog.test.tsx",
+      "src/renderer/src/pages/workspace/ArtifactSourcesPanel.test.tsx",
+      "src/renderer/src/pages/workspace/previews/LibraryInboxPreview.test.tsx",
+      "src/renderer/src/pages/workspace/previews/LibraryPreview.test.tsx",
+      "src/renderer/src/pages/literature/JournalManager.render.test.tsx",
+      "src/renderer/src/pages/literature/JournalAttributes.render.test.tsx",
+      "src/renderer/src/pages/literature/journals/JournalAlignment.render.test.tsx"
     ]
   },
   "consumerModules": [],

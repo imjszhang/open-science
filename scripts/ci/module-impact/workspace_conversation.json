@@ -74,7 +74,9 @@
     "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
     "src/renderer/src/pages/workspace/research-run-request.ts",
     "src/renderer/src/pages/workspace/use-research-run-launcher.tsx",
-    "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
+    "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
+    "src/renderer/src/pages/workspace/agent-authentication-error.ts",
+    "src/renderer/src/pages/workspace/agent-authentication-error.test.ts"
   ],
   "interfacePaths": [
     "src/renderer/src/pages/workspace/ComposerMessageQueue.tsx",
@@ -151,7 +153,8 @@
       "src/renderer/src/pages/workspace/TurnOutcomeNotice.test.tsx",
       "src/renderer/src/pages/workspace/SessionHeaderMenu.test.tsx",
       "src/renderer/src/pages/workspace/ResearchRunLauncher.test.tsx",
-      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx"
+      "src/renderer/src/pages/workspace/use-research-run-launcher.test.tsx",
+      "src/renderer/src/pages/workspace/agent-authentication-error.test.ts"
     ],
     "contract": [
       "src/renderer/src/pages/workspace/DownloadSessionArtifactsDialog.interaction.test.tsx",

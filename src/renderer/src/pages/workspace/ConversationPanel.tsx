@@ -1040,17 +1040,19 @@ const ConversationPanel = ({
   const authenticationRequired = [
     actionError,
     composerError,
+    currentTurnOutcome?.outcome.kind === 'failed' ? currentTurnOutcome.outcome.error : undefined,
     showLegacyRunError ? legacyDisplayState?.error : undefined
   ].some(isAgentAuthenticationRequired)
-  const resolvedActionError =
-    (isClaudeCliCompatibilityError(actionError ?? '')
-      ? t(
-          'The installed Claude Code CLI is incompatible or its version could not be verified. Update Claude Code to 2.1.118 or later, then re-detect it in Settings.'
-        )
-      : undefined) ??
-    localizeImageAnnotationSourceError(actionError, t) ??
-    localizeVisionRunFailure(actionError, t) ??
-    actionError
+  const resolvedActionError = isAgentAuthenticationRequired(actionError)
+    ? undefined
+    : ((isClaudeCliCompatibilityError(actionError ?? '')
+        ? t(
+            'The installed Claude Code CLI is incompatible or its version could not be verified. Update Claude Code to 2.1.118 or later, then re-detect it in Settings.'
+          )
+        : undefined) ??
+      localizeImageAnnotationSourceError(actionError, t) ??
+      localizeVisionRunFailure(actionError, t) ??
+      actionError)
   let resumeErrorDescription = resolvedActionError
   if (resumeDiagnostic && resolvedActionError) {
     if (/timed out/i.test(resumeDiagnostic.detail)) {
@@ -1083,7 +1085,9 @@ const ConversationPanel = ({
     isUnsupportedCodexAcpVersionError(legacyDisplayState?.error) ||
     isCodexCliCompatibilityError(legacyDisplayState?.error)
   const showLegacyRunErrorRow =
-    showLegacyRunError && (!showSessionRecovery || hasUnsupportedCodexRunError)
+    !isAgentAuthenticationRequired(legacyDisplayState?.error) &&
+    showLegacyRunError &&
+    (!showSessionRecovery || hasUnsupportedCodexRunError)
   const showCodexSettings =
     isUnsupportedCodexAcpVersionError(actionError) ||
     isCodexCliCompatibilityError(actionError) ||
@@ -1776,7 +1780,11 @@ const ConversationPanel = ({
                     )}
                   />
                 ) : null}
-                {currentTurnOutcome ? (
+                {currentTurnOutcome &&
+                !(
+                  currentTurnOutcome.outcome.kind === 'failed' &&
+                  isAgentAuthenticationRequired(currentTurnOutcome.outcome.error)
+                ) ? (
                   <TurnOutcomeNotice
                     promptMessageId={currentTurnOutcome.promptMessageId}
                     outcome={currentTurnOutcome.outcome}
@@ -1824,7 +1832,8 @@ const ConversationPanel = ({
                       onClick: () => openSettingsToPanel('model')
                     }}
                   />
-                ) : activeSession?.compacting ? (
+                ) : null}
+                {activeSession?.compacting ? (
                   // Auto-recovery after a request-size overflow: a neutral note, not the red error box,
                   // while the agent context is reset and the conversation is replayed as text.
                   <div className="mb-2 flex items-center gap-2 rounded-lg border border-border-200 bg-bg-200 px-3 py-2 text-[12px] leading-5 text-text-300">

@@ -11,7 +11,7 @@ import type { SecureStorageCipher } from '../secure-storage'
 const PROTECTED_PREFIX = 'open-science:protected:v1:'
 const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
 
-type CredentialCiphertext =
+export type CredentialCiphertext =
   | { kind: 'application'; value: Buffer }
   | { kind: 'cookie'; value: Buffer; hostKey: string; databaseVersion: number }
 
