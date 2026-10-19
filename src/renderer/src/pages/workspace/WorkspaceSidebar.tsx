@@ -181,7 +181,6 @@ type WorkspaceSidebarViewProps = WorkspaceSidebarProps & {
 
 type SessionRowCallbacks = Pick<
   WorkspaceSidebarViewProps,
-  | 'onOpenSession'
   | 'onPreviewSession'
   | 'onRenameSession'
   | 'onRenameSessionTitle'
@@ -201,10 +200,18 @@ type SessionRowCallbacks = Pick<
   | 'onArchiveSession'
   | 'onDeleteSession'
   | 'onSessionActionsOpenChange'
->
+> & {
+  onOpenSession: (
+    sessionId: string,
+    clickDetail?: number,
+    researchSource?: ResearchMembership
+  ) => void
+  onSessionContextMenu?: () => void
+}
 
 const sessionRowCallbacks = ({
   onOpenSession,
+  onOpenResearch,
   onPreviewSession,
   onRenameSession,
   onRenameSessionTitle,
@@ -225,7 +232,8 @@ const sessionRowCallbacks = ({
   onDeleteSession,
   onSessionActionsOpenChange
 }: WorkspaceSidebarViewProps): SessionRowCallbacks => ({
-  onOpenSession,
+  onOpenSession: (sessionId, _clickDetail, researchSource) =>
+    researchSource ? onOpenResearch?.(researchSource) : onOpenSession(sessionId),
   onPreviewSession,
   onRenameSession,
   onRenameSessionTitle,
@@ -529,7 +537,7 @@ type SessionRowProps = {
     onToggle?: () => void
     activityStatus?: SessionStatus
   }
-  onOpenResearch?: () => void
+  researchSource?: ResearchMembership
 }
 
 // Keep the costly action-menu and hover-preview subtree stable when the page rerenders for a
@@ -563,7 +571,7 @@ const SessionRow = memo(function SessionRow({
   canAssignResearch = false,
   actions,
   researchToggle,
-  onOpenResearch
+  researchSource
 }: SessionRowProps): React.JSX.Element {
   const indicatorStatus = researchToggle?.activityStatus ?? presentedStatus
   const sessionActionInvocation: SessionActionInvocation = { session, presentedStatus }
@@ -634,7 +642,7 @@ const SessionRow = memo(function SessionRow({
       }
       className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left after:absolute after:inset-0 after:rounded-[inherit]"
       aria-current={isActive ? 'page' : undefined}
-      aria-label={onOpenResearch ? session.title : undefined}
+      aria-label={researchSource ? session.title : undefined}
       aria-keyshortcuts={
         [
           shortcutNumber ? `${isMac ? 'Meta' : 'Control'}+${shortcutNumber}` : undefined,
@@ -643,7 +651,10 @@ const SessionRow = memo(function SessionRow({
           .filter(Boolean)
           .join(' ') || undefined
       }
-      onClick={() => (onOpenResearch ? onOpenResearch() : actions.onOpenSession(session.id))}
+      onClick={(event) => actions.onOpenSession(session.id, event.detail, researchSource)}
+      onDoubleClick={() => {
+        if (canMutateConversations) actions.onRenameSession(session)
+      }}
     >
       <span
         className="relative inline-flex size-3 shrink-0 items-center justify-center"
@@ -707,6 +718,7 @@ const SessionRow = memo(function SessionRow({
   const row = (
     <ActionMenuTarget<SessionActionId, SessionActionInvocation>
       targetId={`${SESSION_ACTION_TARGET_PREFIX}${session.id}`}
+      onContextMenu={actions.onSessionContextMenu}
       identityKey={sessionActionIdentityKey}
       catalog={SESSION_ACTION_CATALOG}
       recipe={SESSION_ACTION_RECIPE}
@@ -951,7 +963,7 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
               }
             : undefined
         }
-        onOpenResearch={group ? () => props.onOpenResearch?.(group.source) : undefined}
+        researchSource={group?.source}
       />
     )
   }
@@ -1525,6 +1537,15 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
     setAssigningSession(undefined)
   }
   const mounted = useRef(true)
+  const pendingOpen = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelPendingOpen = useCallback(() => {
+    clearTimeout(pendingOpen.current)
+    pendingOpen.current = undefined
+  }, [])
+  useLayoutEffect(
+    () => cancelPendingOpen,
+    [props.mobileMode, props.isMobileOpen, cancelPendingOpen]
+  )
   useEffect(() => {
     mounted.current = true
     return () => {
@@ -1567,14 +1588,38 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
     }
   }
   const latestCallbacks = useRef(callbacks)
+  const latestProps = useRef(props)
   useLayoutEffect(() => {
     latestCallbacks.current = callbacks
+    latestProps.current = props
   })
   const rowActions = useMemo<SessionRowCallbacks>(
     () => ({
-      onOpenSession: (sessionId) => latestCallbacks.current.onOpenSession(sessionId),
+      onSessionContextMenu: cancelPendingOpen,
+      onOpenSession: (sessionId, clickDetail = 0, researchSource) => {
+        cancelPendingOpen()
+        if (latestProps.current.mobileMode && clickDetail > 0) {
+          // Opening closes the mobile sidebar and makes it inert. Keep it interactive
+          // briefly so a second pointer click can reach the existing editor action.
+          pendingOpen.current = setTimeout(() => {
+            pendingOpen.current = undefined
+            const session = latestProps.current.sessions.find((row) => row.id === sessionId)
+            if (
+              session &&
+              (!researchSource || sameResearch(importedResearchSource(session), researchSource))
+            ) {
+              latestCallbacks.current.onOpenSession(sessionId, 0, researchSource)
+            }
+          }, 300)
+        } else {
+          latestCallbacks.current.onOpenSession(sessionId, 0, researchSource)
+        }
+      },
       onPreviewSession: (sessionId) => latestCallbacks.current.onPreviewSession?.(sessionId),
-      onRenameSession: (session) => latestCallbacks.current.onRenameSession(session),
+      onRenameSession: (session) => {
+        cancelPendingOpen()
+        latestCallbacks.current.onRenameSession(session)
+      },
       onRenameSessionTitle: (session, title, expectedTitle) =>
         latestCallbacks.current.onRenameSessionTitle?.(session, title, expectedTitle),
       onDownloadArtifacts: (session) => latestCallbacks.current.onDownloadArtifacts(session),
@@ -1600,10 +1645,12 @@ const WorkspaceSidebarConnectedView = (props: WorkspaceSidebarViewProps): React.
       onTogglePin: (session) => latestCallbacks.current.onTogglePin(session),
       onArchiveSession: (session) => latestCallbacks.current.onArchiveSession?.(session),
       onDeleteSession: (session) => latestCallbacks.current.onDeleteSession(session),
-      onSessionActionsOpenChange: (sessionId, open) =>
+      onSessionActionsOpenChange: (sessionId, open) => {
+        if (open) cancelPendingOpen()
         latestCallbacks.current.onSessionActionsOpenChange?.(sessionId, open)
+      }
     }),
-    []
+    [cancelPendingOpen]
   )
   return (
     <>

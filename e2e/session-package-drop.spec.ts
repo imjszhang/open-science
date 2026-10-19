@@ -5,7 +5,7 @@ import { test } from './fixtures/electron-app'
 import { createProjectViaUi } from './fixtures/project'
 import { submitPromptViaUi } from './fixtures/conversation'
 
-test('drops a native package into the current Project without adding an attachment', async ({
+test('drops native packages into Workspace and Home using the existing import flow', async ({
   app
 }, testInfo) => {
   await app.completeOnboarding()
@@ -20,7 +20,7 @@ test('drops a native package into the current Project without adding an attachme
   await page.getByRole('menuitem', { name: 'Export', exact: true }).hover()
   await page.getByRole('menuitem', { name: 'Export Session package', exact: true }).click()
   const exporting = page.getByRole('dialog', { name: 'Export Session package', exact: true })
-  await exporting.getByRole('button', { name: 'Export', exact: true }).click()
+  await exporting.getByRole('button', { name: 'Choose save location…', exact: true }).click()
   await expect(exporting.getByRole('button', { name: 'Show in folder' })).toBeVisible()
   await exporting.getByRole('button', { name: 'Close', exact: true }).click()
 
@@ -65,7 +65,7 @@ test('drops a native package into the current Project without adding an attachme
   )
   await page.screenshot({ path: testInfo.outputPath('project-package-drop-confirm.png') })
   await importing.getByRole('button', { name: 'Import', exact: true }).click()
-  await expect(importing.getByText('Package operation completed', { exact: true })).toBeVisible()
+  await expect(importing.getByText('Session imported', { exact: true })).toBeVisible()
   const sessionsBeforeOpen = await page.evaluate(async () =>
     (await window.api.sessions.loadAll()).sessions.map((session) => ({
       id: session.id,
@@ -75,7 +75,9 @@ test('drops a native package into the current Project without adding an attachme
   const importedSource = sessionsBeforeOpen.find((session) => session.imported)!
   await importing.getByRole('button', { name: 'Open imported Session', exact: true }).click()
   await expect(page.getByTestId('research-workspace-header')).toContainText(prompt)
-  await expect(page.getByTestId('research-workspace-header')).toContainText('Discussion')
+  await expect(page.getByTestId('research-workspace-header')).toContainText(
+    'Original record · Read-only'
+  )
   const editor = page.getByRole('textbox', { name: 'Ask anything', exact: true })
   await expect(editor).toBeEditable()
   await expect(editor).toBeEmpty()
@@ -94,17 +96,80 @@ test('drops a native package into the current Project without adding an attachme
     .getByRole('button', { name: `Open actions for ${prompt}`, exact: true })
     .click()
   await page.getByRole('menuitem', { name: 'View original record', exact: true }).click()
-  await expect(page.getByRole('region', { name: 'Imported research history' })).toBeVisible()
+  await expect(page.getByTestId('research-question-context')).toBeVisible()
   await expect(page.getByTestId('research-workspace-header')).toContainText(
     'Original record · Read-only'
   )
-  await expect(editor).toHaveCount(0)
+  await expect(editor).toBeEditable()
+  await expect(editor).toContainText('What can I learn from this imported research?')
+  await page.getByTestId('replay-panel').getByRole('slider', { name: 'Replay progress' }).focus()
+  await page.keyboard.press('End')
   await expect(
     page
       .getByRole('region', { name: 'Conversation', exact: true })
       .getByText(`Deterministic reply: ${prompt}`, { exact: true })
   ).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('project-package-drop-original-record.png') })
+
+  await page.getByRole('button', { name: 'All projects', exact: true }).click()
+  const home = page.getByRole('main')
+  const homeCdp = await page.context().newCDPSession(page)
+  const homeData = { items: [], files: [archive], dragOperationsMask: 1 }
+  const homeHint = page.getByText('Drop a .science file to import', { exact: true })
+  // A short, scrolled Home must retain an overlay covering the entire visible drop target.
+  await page.setViewportSize({ width: 1000, height: 320 })
+  await home.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  const homeBox = await home.boundingBox()
+  expect(homeBox).not.toBeNull()
+  const homePoint = { x: homeBox!.x + homeBox!.width / 2, y: homeBox!.y + homeBox!.height / 2 }
+  for (const cancel of [true, false]) {
+    await homeCdp.send('Input.dispatchDragEvent', {
+      type: 'dragEnter',
+      ...homePoint,
+      data: homeData
+    })
+    await homeCdp.send('Input.dispatchDragEvent', {
+      type: 'dragOver',
+      ...homePoint,
+      data: homeData
+    })
+    await expect(homeHint).toBeVisible()
+    const overlayBox = await homeHint.locator('..').locator('..').boundingBox()
+    expect(overlayBox).toEqual(homeBox)
+    await page.screenshot({ path: testInfo.outputPath('home-package-drop.png') })
+    await homeCdp.send('Input.dispatchDragEvent', { type: 'drop', ...homePoint, data: homeData })
+    await expect(homeHint).toHaveCount(0)
+    await expect(
+      importing.getByRole('radio', { name: 'Research exchange', exact: true })
+    ).toBeVisible()
+    await expect(importing.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled()
+    await expect(importing.getByRole('button', { name: 'Import', exact: true })).toHaveCount(0)
+    if (cancel) {
+      await importing.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(
+        importing.getByText('Package operation cancelled', { exact: true })
+      ).toBeVisible()
+      await importing.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(home).toBeVisible()
+    }
+  }
+  await homeCdp.detach()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.screenshot({ path: testInfo.outputPath('home-package-project-selection.png') })
+  await importing.getByRole('radio', { name: 'Research exchange', exact: true }).check()
+  await importing.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(importing.getByRole('button', { name: 'Import', exact: true })).toBeVisible()
+  await importing.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(importing.getByText('Session imported', { exact: true })).toBeVisible()
+  await importing.getByRole('button', { name: 'Open imported Session', exact: true }).click()
+  await expect(page.getByTestId('research-question-context')).toBeVisible()
+  await expect(page.getByTestId('research-workspace-header')).toContainText(
+    'Original record · Read-only'
+  )
+  await expect(editor).toBeEditable()
+  await page.screenshot({ path: testInfo.outputPath('home-package-drop-completed.png') })
 })
 
 test('attaches native files across the conversation and excludes both sidebars', async ({

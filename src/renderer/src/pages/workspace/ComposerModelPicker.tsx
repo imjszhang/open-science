@@ -93,7 +93,6 @@ const ComposerModelPicker = ({
   const claudeSubscriptionProviderId = useSettingsStore(
     (state) => state.claudeSubscriptionProviderId
   )
-  const openSettings = useSettingsStore((state) => state.openSettings)
   const openSettingsToPanel = useSettingsStore((state) => state.openSettingsToPanel)
   const agentFrameworkId = useSettingsStore((state) => state.agentFrameworkId)
   const agentFrameworks = useSettingsStore((state) => state.agentFrameworks)
@@ -482,7 +481,7 @@ const ComposerModelPicker = ({
         {hasUsable && !unavailable ? null : (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => openSettings()}>
+            <DropdownMenuItem onSelect={() => openSettingsToPanel('model')}>
               {t('Open Settings')}
             </DropdownMenuItem>
           </>
