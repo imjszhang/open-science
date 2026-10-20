@@ -14,13 +14,15 @@
     "src/main/settings/mirror-settings.test.ts",
     "src/main/settings/record-codec.test.ts",
     "src/main/settings/repository.test.ts",
-    "src/main/settings/classification-config.ts"
+    "src/main/settings/classification-config.ts",
+    "src/main/settings/local-shell-runtime-contract.ts"
   ],
   "interfacePaths": [
     "src/main/settings/repository.ts",
     "src/shared/network-proxy.ts",
     "src/main/settings/compute-grant-port.ts",
-    "src/main/settings/document-store.ts"
+    "src/main/settings/document-store.ts",
+    "src/main/settings/local-shell-runtime-contract.ts"
   ],
   "consumerModules": ["settings_provider_accounts", "settings_service_facade", "compute_service"],
   "testFiles": {
@@ -261,9 +263,11 @@
       "src/main/desktop-runtime-session-size.integration.test.ts",
       "src/main/notebook-payload.integration.test.ts",
       "src/main/web-service/session-payload.integration.test.ts",
+      "src/main/composition/session-packages.test.ts",
+      "src/main/composition/session-packages.lifecycle.test.ts",
+      "src/main/settings/list-models.test.ts",
       "src/main/composition/artifact-surfaces.test.ts",
       "src/main/composition/managed-execution.integration.test.ts",
-      "src/main/composition/session-packages.test.ts",
       "src/main/composition/handoff.test.ts",
       "src/main/notebook/local-rpc-server.managed-execution.test.ts",
       "src/main/notebook/managed-nested-generation.integration.test.ts",

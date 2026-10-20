@@ -1,3 +1,4 @@
+import { persistentContentReferences } from '../storage/prisma-content-references'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -102,6 +103,58 @@ describe('LiteratureCatalog', () => {
     return new LiteratureCatalog(async () => client!)
   }
 
+  it('reads current candidate states without changing receipts and follows import, merge, and deletion', async () => {
+    const catalog = await setup()
+    const receipt = await catalog.transact({ kind: 'stage-candidate', candidate: candidate() })
+    const request = { candidateIds: [receipt.id, receipt.id, 'missing'] }
+    expect(await catalog.getCandidateStates(request)).toEqual({
+      candidates: [{ candidateId: receipt.id, state: 'pending' }]
+    })
+    const imported = await catalog.transact({ kind: 'accept-candidate', candidateId: receipt.id })
+    expect(await catalog.getCandidateStates(request)).toEqual({
+      candidates: [{ candidateId: receipt.id, state: 'accepted', acceptedItemId: imported.id }]
+    })
+    const survivor = await catalog.transact({
+      kind: 'create-item',
+      item: { ...candidate().item, identifiers: [], title: 'Survivor' }
+    })
+    const reviewed = await Promise.all([survivor.id, imported.id].map((id) => catalog.get(id)))
+    await catalog.transact({
+      kind: 'merge-items',
+      survivorId: survivor.id,
+      duplicateIds: [imported.id],
+      expectedMetadataRevision: reviewed[0]!.metadataRevision,
+      expectedItems: reviewed.map((view) => ({
+        id: view!.id,
+        metadataRevision: view!.metadataRevision,
+        updatedAt: view!.updatedAt
+      })),
+      item: reviewed[0]!.item
+    })
+    expect(await catalog.getCandidateStates(request)).toEqual({
+      candidates: [{ candidateId: receipt.id, state: 'accepted', acceptedItemId: survivor.id }]
+    })
+    await client!.literatureItem.update({
+      where: { id: survivor.id },
+      data: { deletedAt: new Date() }
+    })
+    expect(await catalog.getCandidateStates(request)).toEqual({
+      candidates: [{ candidateId: receipt.id, state: 'accepted' }]
+    })
+    expect(receipt.state).toBe('pending')
+    await client!.literatureInboxCandidate.delete({ where: { id: receipt.id } })
+    expect(await catalog.getCandidateStates(request)).toEqual({ candidates: [] })
+  })
+
+  it('reports dismissed candidates without inventing a Library destination', async () => {
+    const catalog = await setup()
+    const receipt = await catalog.transact({ kind: 'stage-candidate', candidate: candidate() })
+    await catalog.transact({ kind: 'dismiss-candidate', candidateId: receipt.id })
+    expect(await catalog.getCandidateStates({ candidateIds: [receipt.id] })).toEqual({
+      candidates: [{ candidateId: receipt.id, state: 'dismissed' }]
+    })
+  })
+
   it('creates one reference for concurrent Add PDF requests and rolls back a failed new reference', async () => {
     const catalog = await setup()
     const checksum = 'd'.repeat(64)
@@ -146,6 +199,93 @@ describe('LiteratureCatalog', () => {
       catalog.attachContent({ ...input, contentBlobId: 'missing' }, undefined, item)
     ).rejects.toThrow('content authority')
   })
+
+  it.each(['attachment', 'new Inbox version', 'existing Inbox version'] as const)(
+    'rolls back %s when PDF binding fails and retries without duplicate versions',
+    async (path) => {
+      const catalog = await setup()
+      const checksum = 'd'.repeat(64)
+      await client!.contentBlob.create({
+        data: {
+          id: 'binding-blob',
+          checksum,
+          storageKey: 'binding.pdf',
+          sizeBytes: 128n,
+          contentType: 'application/pdf',
+          state: 'available',
+          verifiedAt: new Date()
+        }
+      })
+      const input = {
+        itemId: 'binding-item',
+        contentBlobId: 'binding-blob',
+        filename: 'paper.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+        checksum
+      }
+      let existingVersionId: string | undefined
+      if (path === 'existing Inbox version') {
+        const item = await catalog.transact({ kind: 'create-item', item: candidate().item })
+        const attachment = await catalog.attachContent({ ...input, itemId: item.id })
+        existingVersionId = attachment.versionId
+        // Model a published attachment whose annotation projection has not been populated.
+        await client!.pdfAnnotationDocument.deleteMany()
+      }
+      const staged =
+        path === 'attachment'
+          ? undefined
+          : await catalog.stageAcquiredPdf(candidate(), {
+              ...input,
+              pageCount: 1,
+              sourceUrl: 'https://example.test/paper.pdf'
+            })
+      const publish = async (): Promise<unknown> =>
+        staged
+          ? catalog.transact({ kind: 'accept-candidate', candidateId: staged.id })
+          : catalog.attachContent(input, undefined, candidate().item)
+      await client!
+        .$executeRawUnsafe(`CREATE TRIGGER reject_pdf_binding AFTER INSERT ON PdfAnnotationSourceBinding
+        BEGIN SELECT RAISE(ABORT, 'injected PDF binding failure'); END`)
+      await expect(publish()).rejects.toMatchObject({
+        code: 'P2003',
+        meta: { modelName: 'PdfAnnotationSourceBinding' }
+      })
+      const retained = existingVersionId ? 1 : 0
+      expect(await client!.literatureItem.count()).toBe(retained)
+      expect(await client!.literatureAttachment.count()).toBe(retained)
+      expect(await client!.literatureAttachmentVersion.count()).toBe(retained)
+      expect(await client!.pdfAnnotationDocument.count()).toBe(0)
+      expect(await client!.pdfAnnotationSourceBinding.count()).toBe(0)
+      expect(await client!.contentBlob.findMany()).toMatchObject([
+        { id: 'binding-blob', checksum, sizeBytes: 128n, state: 'available' }
+      ])
+      if (staged) {
+        expect(
+          await client!.literatureInboxCandidate.findUniqueOrThrow({ where: { id: staged.id } })
+        ).toMatchObject({ state: 'pending' })
+        expect(await client!.literatureInboxPdf.count()).toBe(1)
+      }
+
+      await client!.$executeRawUnsafe('DROP TRIGGER reject_pdf_binding')
+      await publish()
+      expect(await client!.literatureItem.count()).toBe(1)
+      expect(await client!.literatureAttachment.count()).toBe(1)
+      const versions = await client!.literatureAttachmentVersion.findMany()
+      expect(versions).toHaveLength(1)
+      if (existingVersionId) expect(versions[0].id).toBe(existingVersionId)
+      expect(await client!.pdfAnnotationDocument.count()).toBe(1)
+      expect(await client!.pdfAnnotationSourceBinding.findMany()).toMatchObject([
+        { sourceKind: 'literature-attachment-version', versionId: versions[0].id, checksum }
+      ])
+      if (staged) {
+        expect(
+          await client!.literatureInboxCandidate.findUniqueOrThrow({ where: { id: staged.id } })
+        ).toMatchObject({ state: 'accepted' })
+        expect(await client!.literatureInboxPdf.count()).toBe(0)
+      }
+    }
+  )
 
   it('searches PDF notes and quotes under Library with stable mixed pagination and active source scopes', async () => {
     const catalog = await setup()
@@ -1153,6 +1293,7 @@ describe('LiteratureCatalog', () => {
     async (operation) => {
       await setup()
       const content = new ContentRepository({
+        references: persistentContentReferences,
         storageRoot: storageRoot!,
         getClient: async () => client!
       })
@@ -1327,6 +1468,7 @@ describe('LiteratureCatalog', () => {
   it('publishes one tag refresh after mixed cleanup of two versions of the same attachment', async () => {
     await setup()
     const content = new ContentRepository({
+      references: persistentContentReferences,
       storageRoot: storageRoot!,
       getClient: async () => client!
     })

@@ -13,12 +13,11 @@ import { LITERATURE_OVERSIZED_REFERENCE } from '@aipoch/literature-library'
 import { smartEvidenceModeSchema, smartScopeSchema } from '@aipoch/literature-screening/contracts'
 import { createHash, randomUUID } from 'node:crypto'
 import { ApplicationCommandError } from '../../shared/application-command-contract'
-import { createLiteratureAttachmentVersionReference } from '../../shared/literature-attachment-reference'
 import {
   type LiteratureExportRecordRequest,
   type LiteratureExportRecordResult
 } from '../../shared/literature-export'
-import { ensureBinding } from '../pdf-annotations/document-store'
+import { bindLiteraturePdfVersion } from '../pdf-annotations/source-bindings'
 import { deletePdfAnnotations, readAnnotations } from '../pdf-annotations/repository'
 import type { ContentRepository } from '../storage/content-repository'
 import type { JournalAttributes } from './journal-attributes'
@@ -64,6 +63,10 @@ import {
   type LiteratureItemInput
 } from '@aipoch/literature-library/item'
 import {
+  literatureCandidateStatesRequestSchema,
+  literatureCandidateStatesResultSchema,
+  type LiteratureCandidateStatesRequest,
+  type LiteratureCandidateStatesResult,
   type LiteratureAnnotationSearchView,
   type LiteratureCatalogSearchPage
 } from '../../shared/literature'
@@ -540,24 +543,6 @@ const transferSourceRecords = async (
       })
     }
   }
-}
-
-const registerAttachmentNotes = async (
-  transaction: Prisma.TransactionClient,
-  versionId: string
-): Promise<void> => {
-  const version = await transaction.literatureAttachmentVersion.findUniqueOrThrow({
-    where: { id: versionId }
-  })
-  if (version.contentType.split(';', 1)[0].trim().toLowerCase() !== 'application/pdf') return
-  await ensureBinding(transaction, {
-    kind: 'literature-attachment-version',
-    sourceFileId: version.attachmentId,
-    versionId,
-    checksum: version.checksum,
-    name: version.filename,
-    path: createLiteratureAttachmentVersionReference(versionId)
-  })
 }
 
 class LiteratureCatalog {
@@ -1280,6 +1265,39 @@ class LiteratureCatalog {
     }
   }
 
+  async getCandidateStates(
+    request: LiteratureCandidateStatesRequest
+  ): Promise<LiteratureCandidateStatesResult> {
+    const { candidateIds } = literatureCandidateStatesRequestSchema.parse(request)
+    const client = await this.getClient()
+    const rows = await client.literatureInboxCandidate.findMany({
+      where: { id: { in: [...new Set(candidateIds)] } },
+      select: {
+        id: true,
+        state: true,
+        acceptedItem: {
+          select: {
+            id: true,
+            deletedAt: true,
+            mergedInto: { select: { id: true, deletedAt: true } }
+          }
+        }
+      }
+    })
+    return literatureCandidateStatesResultSchema.parse({
+      candidates: rows.map((row) => {
+        const item = row.acceptedItem?.mergedInto ?? row.acceptedItem
+        return {
+          candidateId: row.id,
+          state: row.state,
+          ...(row.state === 'accepted' && item && !item.deletedAt
+            ? { acceptedItemId: item.id }
+            : {})
+        }
+      })
+    })
+  }
+
   async get(itemId: string): Promise<LiteratureItemView | undefined> {
     const client = await this.getClient()
     const requested = await client.literatureItem.findUnique({
@@ -1437,7 +1455,7 @@ class LiteratureCatalog {
         const finish = async (
           result: AttachedLiteratureContent
         ): Promise<AttachedLiteratureContent> => {
-          await registerAttachmentNotes(transaction, result.versionId)
+          await bindLiteraturePdfVersion(transaction, result.versionId)
           await onAttached?.(transaction, result)
           return result
         }
@@ -2314,7 +2332,7 @@ class LiteratureCatalog {
           const existing = await transaction.literatureAttachmentVersion.findFirst({
             where: { checksum: pdf.checksum, attachment: { itemId } }
           })
-          if (existing) await registerAttachmentNotes(transaction, existing.id)
+          if (existing) await bindLiteraturePdfVersion(transaction, existing.id)
           else {
             const attachment = await transaction.literatureAttachment.create({
               data: {
@@ -2337,7 +2355,7 @@ class LiteratureCatalog {
               },
               include: { versions: true }
             })
-            await registerAttachmentNotes(transaction, attachment.versions[0].id)
+            await bindLiteraturePdfVersion(transaction, attachment.versions[0].id)
           }
         }
         await transaction.literatureInboxPdf.deleteMany({ where: { candidateId } })

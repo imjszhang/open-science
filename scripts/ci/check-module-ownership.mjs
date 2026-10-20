@@ -1,10 +1,15 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import { execFileSync } from 'node:child_process'
-import { verifiedHostOwnerSplits, verifiedHostSourceMoves } from './host-owner-split.mjs'
+import {
+  verifiedExistingHostOwnerTransfers,
+  verifiedHostOwnerSplits,
+  verifiedHostSourceMoves
+} from './host-owner-split.mjs'
 import {
   verifiedConsumerRetirements,
   verifiedExcludedPackageTests,
+  verifiedFuzzyMatchOwnerSplit,
   verifiedPdfTextOwnerSplit,
   verifiedPromiseIdentityOwnerSplit
 } from './consumer-retirement.mjs'
@@ -327,6 +332,8 @@ export function moduleOwnershipFromRevisions(base, head, { cwd = process.cwd() }
     boundedOwnerSplits: new Set([
       ...verifiedPdfTextOwnerSplit(mergeBase, head, baseManifest, headManifest, { cwd }),
       ...verifiedPromiseIdentityOwnerSplit(mergeBase, head, baseManifest, headManifest, { cwd }),
+      ...verifiedFuzzyMatchOwnerSplit(mergeBase, head, baseManifest, headManifest, { cwd }),
+      ...verifiedExistingHostOwnerTransfers(mergeBase, head, baseManifest, headManifest, { cwd }),
       ...hostSplits.paths,
       ...hostMoves.paths
     ]),
