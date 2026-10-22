@@ -152,10 +152,13 @@
       "src/renderer/src/stores/session-store.test.ts"
     ],
     "connector_core": ["packages/connector-builtins/src/scientific-expansion.test.ts"],
+    "connector_mcp_client": ["src/main/credential-identity/recovery.test.ts"],
+    "connector_url_admission": ["src/main/credential-identity/recovery.test.ts"],
     "delegation_execution_contracts": [
       "src/renderer/src/pages/workspace/ConversationPanel.interaction.test.tsx"
     ],
     "durable_files": [
+      "src/main/credential-identity/recovery.test.ts",
       "src/main/desktop-update-integration.test.ts",
       "src/main/session-package/literature-source.test.ts",
       "src/main/session-package/materialize.test.ts",
@@ -168,6 +171,7 @@
       "src/renderer/src/pages/workspace/ConversationPanel.interaction.test.tsx"
     ],
     "environment_contracts": [
+      "src/main/credential-identity/recovery.test.ts",
       "src/main/session-package/literature-source.test.ts",
       "src/main/session-package/materialize.test.ts",
       "src/renderer/src/components/ProjectPackageDropZone.test.tsx",
@@ -810,6 +814,7 @@
     "project_files_view": ["src/renderer/src/pages/workspace/WorkspacePage.compute-entry.test.tsx"],
     "providers_package": [
       "src/main/credential-identity/inventory-handoff.test.ts",
+      "src/main/credential-identity/recovery.test.ts",
       "src/main/desktop-recovery-readiness.test.ts",
       "src/main/desktop-runtime-adoption.integration.test.ts",
       "src/main/desktop-runtime-controller.integration.test.ts",
@@ -960,7 +965,6 @@
       "src/renderer/src/pages/workspace/LiteratureCandidateStatus.test.tsx",
       "src/renderer/src/pages/workspace/WorkspacePage.compute-entry.test.tsx",
       "src/renderer/src/pages/workspace/WorkspaceSidebar.session-gestures.test.tsx",
-      "src/renderer/src/pages/workspace/agent-authentication-error.test.ts",
       "src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationPreviewDialog.test.tsx",
       "src/renderer/src/pages/workspace/use-agent-authentication-recovery.test.tsx"
     ],
@@ -1282,7 +1286,6 @@
       "src/renderer/src/pages/workspace/ReadingContextPicker.test.tsx",
       "src/renderer/src/pages/workspace/WorkspacePage.compute-entry.test.tsx",
       "src/renderer/src/pages/workspace/WorkspaceSidebar.session-gestures.test.tsx",
-      "src/renderer/src/pages/workspace/agent-authentication-error.test.ts",
       "src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationPreviewDialog.test.tsx",
       "src/renderer/src/pages/workspace/use-agent-authentication-recovery.test.tsx"
     ],
@@ -1426,10 +1429,12 @@
       "src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationPreviewDialog.test.tsx"
     ],
     "settings_record_contracts": [
+      "src/main/credential-identity/recovery.test.ts",
       "src/main/literature/pdf-translation/api-target.test.ts",
       "src/main/literature/pdf-translation/text-generation.test.ts"
     ],
     "settings_repository": ["src/main/settings/workflows/local-shell.test.ts"],
+    "settings_resource_policy": ["src/main/credential-identity/recovery.test.ts"],
     "shared_fuzzy_match": [
       "src/renderer/src/lib/literature-renderer-host.test.ts",
       "src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationPreviewDialog.test.tsx"
@@ -1440,6 +1445,7 @@
       "src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationPreviewDialog.test.tsx"
     ],
     "skill_package": [
+      "src/main/credential-identity/recovery.test.ts",
       "src/main/session-package/literature-source.test.ts",
       "src/main/session-package/materialize.test.ts",
       "src/main/update/windows-update-handoff.test.ts",
