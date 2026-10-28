@@ -134,7 +134,7 @@ test('distinguishes package checks from confirmed import progress without a meas
   await expect(meter.locator('[aria-hidden="true"]')).toHaveCSS('animation-name', 'none')
   await page.screenshot({ path: testInfo.outputPath('import-reduced-motion.png') })
   await app.emitSessionPackageProgress({ ...operation, progress: { phase: 'confirming' } })
-  await expect(dialog.getByText('Waiting for you', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Waiting for you', { exact: true })).toHaveCount(0)
   await expect(meter).toHaveCount(0)
 })
 
@@ -221,7 +221,7 @@ test('presents waiting, measurable work and cleanup through native progress even
   await dialog.getByText('Transfer details', { exact: true }).click()
   await dialog.getByRole('button', { name: 'Run in background' }).click()
   const compactProgress = page.getByRole('button', {
-    name: 'Export Session package · Copying files… · View progress',
+    name: 'Export Session package: Copying files… View progress',
     exact: true
   })
   await expect(dialog).toBeHidden()
@@ -240,7 +240,7 @@ test('presents waiting, measurable work and cleanup through native progress even
     animations: 'disabled'
   })
   await app.emitSessionPackageProgress({ ...operation, progress: { phase: 'choosing-location' } })
-  await expect(dialog.getByText('Waiting for you', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Waiting for you', { exact: true })).toHaveCount(0)
   await expect(dialog.getByRole('progressbar')).toHaveCount(0)
   await page.screenshot({
     path: testInfo.outputPath('transfer-waiting-fixture.png'),
@@ -435,8 +435,11 @@ test('exports a Session package and opens its research workspace and read-only s
     contentType: 'application/gzip'
   })
   await page.getByRole('button', { name: 'All projects', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Import', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0)
+  const homeHeader = page.getByRole('main').locator('header')
+  await expect(homeHeader.getByRole('button', { name: 'New project', exact: true })).toBeVisible()
+  // Local package import belongs to the project menu; gallery examples have their own Import action.
+  await expect(homeHeader.getByRole('button', { name: 'Import', exact: true })).toHaveCount(0)
+  await expect(homeHeader.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('session-package-home.png') })
   await page
     .getByRole('region', { name: 'Projects', exact: true })
@@ -507,10 +510,10 @@ test('exports a Session package and opens its research workspace and read-only s
   await expect(page.getByTestId('research-workspace-header')).toContainText(
     'Original record · Read-only'
   )
-  await imported.getByText('Package source', { exact: true }).click()
-  await expect(imported.getByText(/^Imported on /)).toBeVisible()
-  await expect(imported.getByText(origins[0]!.sourceProjectId, { exact: true })).toBeVisible()
-  await expect(imported.getByText(origins[0]!.sourceSessionId, { exact: true })).toBeVisible()
+  await imported.getByText('Not included in this package', { exact: true }).click()
+  await expect(imported.getByText(/^Imported on /)).toHaveCount(0)
+  await expect(imported.getByText(origins[0]!.sourceProjectId, { exact: true })).toHaveCount(0)
+  await expect(imported.getByText(origins[0]!.sourceSessionId, { exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('session-package-source.png') })
   await expect(imported.getByText('Not included in this package', { exact: true })).toBeVisible()
   await expect(imported.getByText('raw-results.csv', { exact: true })).toBeVisible()
@@ -544,10 +547,10 @@ test('exports a Session package and opens its research workspace and read-only s
     page.getByRole('menuitem', { name: 'View original record', exact: true })
   ).toBeVisible()
   await page.keyboard.press('Escape')
-  await imported.getByText('Package source', { exact: true }).click()
+  await imported.getByText('Not included in this package', { exact: true }).click()
   await sessionMenu.focus()
   await expect(sessionMenu).toHaveCSS('opacity', '1')
-  await imported.getByText('Package source', { exact: true }).click()
+  await imported.getByText('Not included in this package', { exact: true }).click()
   await page.screenshot({ path: testInfo.outputPath('session-package-imported.png') })
   await page.getByRole('button', { name: 'New', exact: true }).click()
   await submitPromptViaUi(page, 'Continue in an ordinary Session.')
@@ -712,14 +715,15 @@ for (const launch of ['cold', 'warm'] as const) {
           return checkBrowserImportAvailability({ port })
         }, discoveryPort)
       ).toEqual({ status: 'available' })
-      const url = await website.evaluate(async () => {
+      const transferPort = await findBrowserImportPort()
+      const url = await website.evaluate(async (port) => {
         const sdkPath = '/browser-import.mjs'
         const { prepareBrowserImport } = await import(/* @vite-ignore */ sdkPath)
         const blob = await (await fetch('/study.science')).blob()
-        const transfer = prepareBrowserImport(blob, { filename: 'study.science' })
+        const transfer = prepareBrowserImport(blob, { filename: 'study.science', port })
         Object.assign(window, { browserPackageTransfer: transfer, browserPackageBlob: blob })
         return transfer.url as string
-      })
+      }, transferPort)
       const page = launch === 'cold' ? await app.restartWithPackage(url) : app.page
       if (launch === 'warm') await app.emitBrowserImport(url)
       const result = await website.evaluate(async () => {
