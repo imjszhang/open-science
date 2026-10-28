@@ -1,4 +1,6 @@
 import { openProjectWorkspace } from '../workspace/project-workspace-entry'
+
+import { UseCaseCarousel } from './UseCaseCarousel'
 import { ProjectPackageDropZone } from '@/components/ProjectPackageDropZone'
 import { ErrorNotice } from '@/components/error-notice'
 import {
@@ -161,7 +163,7 @@ const rowClassName =
   'group flex w-full items-center gap-2 rounded-xl px-2.5 py-2.5 text-left hover:bg-bg-300 sm:px-3'
 
 const rowActionClassName =
-  'inline-flex size-7 shrink-0 items-center justify-center rounded text-text-300 opacity-100 transition-opacity duration-150 ease-out hover:bg-bg-400 hover:text-text-000 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 data-[state=open]:opacity-100'
+  'inline-flex size-7 shrink-0 items-center justify-center rounded text-text-300 opacity-100 transition-opacity duration-150 ease-out hover:bg-bg-400 hover:text-text-000 focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 data-[state=open]:opacity-100 [@media(pointer:coarse)]:size-11'
 
 const withSessionDescriptionTooltip = (
   description: string | undefined,
@@ -651,7 +653,7 @@ const HomePage = ({
     <TooltipProvider>
       <ProjectPackageDropZone canImport className="relative h-svh">
         <main className="h-svh overflow-y-auto bg-bg-10 text-text-000">
-          <div className="mx-auto max-w-[1080px] px-4 py-5 pb-12 sm:px-8 sm:py-7 sm:pb-16">
+          <div className="mx-auto flex min-h-full max-w-[1080px] flex-col px-4 py-5 pb-12 sm:px-8 sm:py-7 sm:pb-16">
             <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -1234,6 +1236,7 @@ const HomePage = ({
                 )}
               </section>
             </div>
+            <UseCaseCarousel />
           </div>
 
           <ProjectFormDialog {...projectFormDialogProps} />
