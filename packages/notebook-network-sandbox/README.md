@@ -71,6 +71,13 @@ HTTP(S) proxy          SOCKS5 proxy
   └─ Windows: AppContainer + a small native process host
 ```
 
+Filesystem rules resolve existing paths using native filesystem semantics, including symbolic links
+before parent traversal. Missing leaves are anchored to their existing physical parent; unresolved
+links and ambiguous missing-parent traversal fail closed. On macOS, ancestors of explicitly denied
+paths cannot be moved or replaced inside writable regions; ordinary sibling files remain writable.
+HTTP forwarding preserves the requested path and query. Invalid upstream response heads return 502,
+while an interrupted response is terminated without appending diagnostic text to its body.
+
 Callers provide a minimal environment, read/write roots, protected roots, packaged resources, and
 one network-decision callback per command. Proxy lifecycle, command attribution, platform
 enforcement, parent-proxy routing, filesystem projection, and denial annotation stay inside the
@@ -239,6 +246,11 @@ Call `dispose()` during lifecycle shutdown.
 `status()` never elevates privileges or changes durable setup resources. When a receipt appears
 active, it launches short-lived positive and negative connection probes before reporting protected
 mode. Missing Windows setup leaves the runtime in standard mode; first Notebook use never prompts.
+
+`isWindowsProtectionConfigured()` reads validated ownership records independently of initialization
+and ACL propagation. It does not verify runtime readiness. Unconfirmed absence during a concurrent
+setup/removal, invalid records, and a configuration helper that exceeds its five-second limit are
+errors, never permission to run unprotected. Actual execution retains the full readiness checks.
 Explicit setup, removal, and protected R authorization can display a UAC prompt. A cancelled or failed setup
 leaves standard mode available. Successful setup affects new Notebook and package-manager processes;
 already-running sessions retain their original mode. `removeWindows()` uses the same explicit

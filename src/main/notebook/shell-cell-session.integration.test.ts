@@ -1,3 +1,4 @@
+import { windowsSupervisedLaunch } from '../../../packages/notebook-network-sandbox/runtime/src/platform/windows-appcontainer'
 import { configureTestRuntimeMetadata } from '../../../test/runtime-metadata'
 import {
   access,
@@ -13,7 +14,8 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotebookShellProcessAdapter } from './shell-process'
+import { buildShellEnv, NotebookShellProcessAdapter } from './shell-process'
+import { EXTRA_PATH_DIRS } from '../settings/shell-path'
 import type { NotebookShellProcessRequest } from './shell-process'
 import { NOTEBOOK_TEXT_LIMIT_BYTES, NOTEBOOK_DIAGNOSTIC_RESERVE_BYTES } from './content-limits'
 import { shellNpmPaths } from './shell-npm-environment'
@@ -187,6 +189,52 @@ describe('persistent platform shell cells', () => {
       })
       expect(reset.exitCode).toBe(0)
       expect(await realpath(reset.stdout.trim())).toBe(await realpath(join(root, 'workspace')))
+    }
+  )
+
+  it.skipIf(process.platform !== 'darwin').each([false, true])(
+    'resolves external Node for npm CLIs with a GUI PATH (sandbox=%s)',
+    async (sandboxed) => {
+      const bin = join(root, 'external-node', 'bin')
+      await mkdir(bin, { recursive: true })
+      await symlink(process.execPath, join(bin, 'node'))
+      const npmBin = shellNpmPaths(join(root, 'runtime'), process.platform).bin
+      await mkdir(npmBin, { recursive: true })
+      await writeFile(
+        join(npmBin, 'node-path-probe'),
+        '#!/usr/bin/env node\nconsole.log(process.version)\n',
+        { mode: 0o755 }
+      )
+      // Use fixture install locations so this cannot pass because the host happens to have Node.
+      const originalDirs = EXTRA_PATH_DIRS.splice(0, EXTRA_PATH_DIRS.length, bin)
+      vi.stubEnv('PATH', '/usr/bin:/bin')
+      try {
+        if (sandboxed) {
+          vi.stubEnv('OPEN_SCIENCE_E2E_STORAGE_ROOT', root)
+          sandbox = new NotebookNetworkSandboxOwner({
+            resourceRoot: join(process.cwd(), 'packages/notebook-network-sandbox/vendor'),
+            temporaryRoot: join(root, 'command-temp'),
+            getSettings: async () => DEFAULT_NOTEBOOK_NETWORK_SETTINGS,
+            persistAlwaysAllow: async () => DEFAULT_NOTEBOOK_NETWORK_SETTINGS,
+            requestDecision: async () => 'deny'
+          })
+          adapter = new NotebookShellProcessAdapter(process.platform, sandbox)
+        }
+        // Cover the adapter fallback and the frozen environment supplied by the execution owner.
+        for (const frozen of [false, true]) {
+          const result = await adapter.execute({
+            ...request('node-path-probe', frozen ? 'frozen' : 'fallback'),
+            ...(frozen ? { environment: buildShellEnv(join(root, 'workspace')) } : {})
+          })
+          expect(result, JSON.stringify(result)).toMatchObject({
+            exitCode: 0,
+            stdout: `${process.version}\n`
+          })
+        }
+        expect(process.env.PATH).toBe('/usr/bin:/bin')
+      } finally {
+        EXTRA_PATH_DIRS.splice(0, EXTRA_PATH_DIRS.length, ...originalDirs)
+      }
     }
   )
 
@@ -389,27 +437,49 @@ console.log(JSON.stringify(result))
       const controller = new AbortController()
       let waiting = true
       adapter = new NotebookShellProcessAdapter(process.platform, {
-        wrap: async (invocation) => ({
-          executable: invocation.executable,
-          args: [...invocation.args],
-          env: invocation.env,
-          annotateStderr: (stderr) => stderr,
-          beginExecution: (execution) => {
-            execution?.signal?.addEventListener('abort', () => pending.resolve(), { once: true })
-            queueMicrotask(() => {
-              execution?.onNetworkWaitChange?.(true)
-              entered.resolve()
+        wrap: async (invocation) => {
+          // Preserve the native control-pipe transport while simulating only approval timing.
+          const launch = windows
+            ? windowsSupervisedLaunch({
+                command: invocation.commandText,
+                executable: invocation.executable,
+                args: [...invocation.args],
+                cwd: invocation.cwd,
+                hostPath: join(
+                  process.cwd(),
+                  'packages/notebook-network-sandbox/vendor/windows',
+                  process.arch,
+                  'notebook-appcontainer-host.exe'
+                ),
+                gatewayPort: 49700,
+                gatewayCredentials: { username: 'unused', password: 'unused' },
+                env: invocation.env,
+                windowsShellControlPipe: invocation.windowsShellControlPipe
+              })
+            : { argv: [invocation.executable, ...invocation.args], env: invocation.env }
+          const { argv, ...spawnOptions } = launch
+          return {
+            ...spawnOptions,
+            executable: argv[0]!,
+            args: argv.slice(1),
+            annotateStderr: (stderr) => stderr,
+            beginExecution: (execution) => {
+              execution?.signal?.addEventListener('abort', () => pending.resolve(), { once: true })
+              queueMicrotask(() => {
+                execution?.onNetworkWaitChange?.(true)
+                entered.resolve()
+              })
+              return () => undefined
+            },
+            waitForNetworkApprovals: () => pending.promise,
+            networkApprovalRetryRequired: () => !waiting && !controller.signal.aborted,
+            cleanup: async () => ({
+              processesTerminated: true,
+              networkClosed: true,
+              temporaryResourcesRemoved: true
             })
-            return () => undefined
-          },
-          waitForNetworkApprovals: () => pending.promise,
-          networkApprovalRetryRequired: () => !waiting && !controller.signal.aborted,
-          cleanup: async () => ({
-            processesTerminated: true,
-            networkClosed: true,
-            temporaryResourcesRemoved: true
-          })
-        })
+          }
+        }
       })
       let settled = false
       const run = adapter.execute({

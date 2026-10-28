@@ -446,6 +446,7 @@ describe('module test impact commands', () => {
           throw new Error('CodeGraph unavailable in CI')
         },
         spawn,
+        derivedConsumers: { schemaVersion: 1, modules: {} },
         environment: { npm_execpath: '/npm/bin/npm-cli.js' }
       }
       const args = ['affected', '--base', 'base', '--head', 'head']
@@ -464,6 +465,7 @@ describe('module test impact commands', () => {
     expect(
       executeModuleTestPlan(createModuleTestPlan('artifact_storage', selectionModel()), {
         spawn,
+        derivedConsumers: { schemaVersion: 1, modules: {} },
         environment: { npm_execpath: '/npm/bin/npm-cli.js' }
       })
     ).toBe(1)
@@ -504,10 +506,12 @@ describe('module test impact commands', () => {
       const { spawn, invocation } = captureNpmInvocation()
       const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
       const source = 'src/main/notebook/mcp-server.ts'
-      const plan = createAffectedTestPlan([{ path: source, status: 'modified' }], {
-        status: 'unavailable-manifest-only',
-        testFiles: []
-      })
+      const manifest = loadModuleImpactManifest()
+      const plan = createAffectedTestPlan(
+        [{ path: source, status: 'modified' }],
+        { status: 'unavailable-manifest-only', testFiles: [] },
+        manifest
+      )
       try {
         await runModuleTestCli(
           [
@@ -529,6 +533,8 @@ describe('module test impact commands', () => {
               throw new Error('CodeGraph unavailable in CI')
             },
             spawn,
+            manifest,
+            derivedConsumers: { schemaVersion: 1, modules: {} },
             environment: { npm_execpath: '/npm/bin/npm-cli.js' }
           }
         )
@@ -657,7 +663,66 @@ describe('module test impact commands', () => {
     )
   })
 
-  it('expands User Skill repository changes through Settings and cross-surface consumers', () => {
+  it.each([
+    ['user_skills_repository', 'src/main/skills/catalog.ts'],
+    ['user_skills_repository', 'src/main/skills/user-skill-repository.ts'],
+    ['user_skills_repository', 'src/main/skills/source-repository.ts'],
+    ['settings_extension_presentation', 'src/renderer/src/pages/settings/SkillEditor.tsx'],
+    [
+      'settings_extension_presentation',
+      'src/renderer/src/pages/settings/SavedSkillRepositories.tsx'
+    ]
+  ])('retains full validation for %s changes in %s', (moduleId, path) => {
+    const manifest = loadModuleImpactManifest()
+    const reason = manifest.modules[moduleId].fullTestReason
+    expect(reason).toBeTruthy()
+    for (const plan of [
+      createModuleTestPlan(moduleId, manifest),
+      createAffectedTestPlan(
+        [{ path, status: 'modified' }],
+        { status: 'unavailable-manifest-only', testFiles: [] },
+        manifest
+      )
+    ]) {
+      expect(plan.mode).toBe('full')
+      expect(plan.reasonChains).toEqual([`${moduleId} -> ${reason} -> full`])
+    }
+  })
+
+  it('selects the expanded production Skill consumer closure while keeping package edits selective', () => {
+    const manifest = loadModuleImpactManifest()
+    const plan = createAffectedTestPlan(
+      [{ path: 'packages/skills/src/user-skill-store.ts', status: 'modified' }],
+      { status: 'current', testFiles: [] },
+      manifest
+    )
+    expect(plan.mode).toBe('selective')
+    expect(plan.modules).toEqual([
+      'settings_operations',
+      'settings_service_facade',
+      'skill_marketplace',
+      'skill_package',
+      'user_skills_repository',
+      'workspace_page',
+      'workspace_runtime'
+    ])
+    expect(plan.reasonChains).toEqual(
+      expect.arrayContaining([
+        'skill_package -> user_skills_repository -> settings_service_facade',
+        'skill_package -> user_skills_repository -> settings_service_facade -> workspace_runtime',
+        'skill_package -> user_skills_repository -> settings_service_facade -> workspace_runtime -> workspace_page'
+      ])
+    )
+    expect(plan.testFiles).toEqual(
+      expect.arrayContaining([
+        'src/main/settings/service.providers.test.ts',
+        'src/main/acp/runtime.test.ts',
+        'src/renderer/src/pages/workspace/WorkspacePage.send-gate.test.tsx'
+      ])
+    )
+  })
+
+  it('preserves User Skill evidence and expands reviewed package changes through cross-surface consumers', () => {
     const productionManifest = loadModuleImpactManifest()
     const manifest = selectionModel()
     const packageTests = manifest.modules.skill_package.testFiles.owner
@@ -681,9 +746,7 @@ describe('module test impact commands', () => {
       ).toEqual([])
     }
     for (const path of [
-      'src/main/skills/catalog.ts',
       'src/main/skill-marketplace/service.ts',
-      'src/renderer/src/pages/settings/SkillEditor.tsx',
       'src/main/compute/skill-provisioning.ts'
     ]) {
       const hostPlan = createAffectedTestPlan(
@@ -700,29 +763,33 @@ describe('module test impact commands', () => {
         path
       ).toBe(false)
     }
-    const direct = createModuleTestPlan('user_skills_repository', selectionModel())
-    expect(direct.testFiles).toEqual(
-      expect.arrayContaining([
-        'src/main/skills/user-skill-repository.architecture.test.ts',
-        'src/main/skills/host-skills-service.test.ts',
-        'src/main/skills/conversation-import.test.ts',
-        'src/main/notebook/local-rpc-server.test.ts',
-        'src/main/notebook/local-rpc-server.skill-import.test.ts',
-        'src/main/notebook/local-rpc-server.skills.test.ts',
-        'src/main/skills/catalog.test.ts',
-        'src/main/settings/service.test.ts',
-        'src/main/specialist/package/release-certification.test.ts',
-        'src/main/specialist/package/service.test.ts',
-        'src/preload/index.test.ts',
-        'src/renderer/src/pages/settings/SkillsPanel.render.test.tsx',
-        'src/renderer/src/stores/settings-skills-slice.test.ts'
-      ])
-    )
+    // Production full plans must retain their evidence; the reviewed fixture tests selection mechanics.
+    for (const registered of [
+      Object.values(productionManifest.modules.user_skills_repository.testFiles).flat(),
+      createModuleTestPlan('user_skills_repository', manifest).testFiles
+    ]) {
+      expect(registered).toEqual(
+        expect.arrayContaining([
+          'src/main/skills/user-skill-repository.architecture.test.ts',
+          'src/main/skills/host-skills-service.test.ts',
+          'src/main/skills/conversation-import.test.ts',
+          'src/main/notebook/local-rpc-server.test.ts',
+          'src/main/notebook/local-rpc-server.skill-import.test.ts',
+          'src/main/notebook/local-rpc-server.skills.test.ts',
+          'src/main/skills/catalog.test.ts',
+          'src/main/settings/service.test.ts',
+          'src/main/specialist/package/release-certification.test.ts',
+          'src/main/specialist/package/service.test.ts',
+          'src/preload/index.test.ts',
+          'src/renderer/src/pages/settings/SkillsPanel.render.test.tsx',
+          'src/renderer/src/stores/settings-skills-slice.test.ts'
+        ])
+      )
+    }
 
     for (const { path, status } of [
       { path: 'packages/skills/src/user-skill-catalog-observer.ts', status: 'modified' },
       { path: 'packages/skills/src/user-skill-compatibility-index.ts', status: 'added' },
-      { path: 'src/main/skills/user-skill-repository.ts', status: 'modified' },
       { path: 'packages/skills/src/user-skill-store.ts', status: 'modified' },
       { path: 'packages/skills/src/agent-home-skill-owner.ts', status: 'added' },
       { path: 'packages/skills/src/skill-bundle-import-owner.ts', status: 'modified' },
@@ -738,9 +805,11 @@ describe('module test impact commands', () => {
         },
         selectionModel()
       )
-      const prefix = path.startsWith('packages/skills/') ? 'skill_package -> ' : ''
+      expect(affected.mode, path).toBe('selective')
+      const prefix = 'skill_package -> '
       expect([...affected.modules].sort()).toEqual([
-        ...(prefix ? ['skill_marketplace', 'skill_package'] : []),
+        'skill_marketplace',
+        'skill_package',
         'user_skills_repository'
       ])
       expect(affected.reasonChains).toEqual(
@@ -752,22 +821,20 @@ describe('module test impact commands', () => {
       )
       expect(
         affected.testFiles.filter((file) => file.startsWith('packages/skills/')).sort()
-      ).toEqual(prefix ? [...packageTests].sort() : [])
-      if (prefix) {
-        expect(affected.reasonChains).toEqual(
-          expect.arrayContaining([
-            'skill_package -> skill_marketplace',
-            'skill_package -> skill_marketplace -> settings_operations -> capability routing only'
-          ])
-        )
-        expect(affected.testFiles).toEqual(
-          expect.arrayContaining([
-            'src/main/skill-marketplace/installation.test.ts',
-            'src/main/skill-marketplace/service.test.ts',
-            'src/main/settings/workflows.test.ts'
-          ])
-        )
-      }
+      ).toEqual([...packageTests].sort())
+      expect(affected.reasonChains).toEqual(
+        expect.arrayContaining([
+          'skill_package -> skill_marketplace',
+          'skill_package -> skill_marketplace -> settings_operations -> capability routing only'
+        ])
+      )
+      expect(affected.testFiles).toEqual(
+        expect.arrayContaining([
+          'src/main/skill-marketplace/installation.test.ts',
+          'src/main/skill-marketplace/service.test.ts',
+          'src/main/settings/workflows.test.ts'
+        ])
+      )
       expect(affected.testFiles).not.toContain('packages/open-science/cli.test.ts')
       expect(affected.testFiles).not.toContain('packages/open-science/client.test.ts')
       expect(affected.testFiles).toEqual(
@@ -1284,6 +1351,7 @@ describe('module test impact commands', () => {
             throw new Error('CodeGraph unavailable in CI')
           },
           spawn,
+          derivedConsumers: { schemaVersion: 1, modules: {} },
           environment: { npm_execpath: '/npm/bin/npm-cli.js' }
         }
       )
@@ -1291,6 +1359,28 @@ describe('module test impact commands', () => {
       expect(invocation.mock.calls[0]?.[1]).not.toContain('--coverage.changed')
     } finally {
       write.mockRestore()
+    }
+  })
+
+  it('generates derived consumers from the requested head, not the dirty worktree', async () => {
+    const cwd = mkdtempSync(resolve(tmpdir(), 'module-head-snapshot-'))
+    try {
+      const git = (...args: string[]): string =>
+        execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+      git('init', '-q')
+      mkdirSync(resolve(cwd, 'scripts/ci'), { recursive: true })
+      const edges = resolve(cwd, 'scripts/ci/module-runtime-consumers.json')
+      writeFileSync(edges, JSON.stringify({ 'missing.ts': ['consumer.ts'] }))
+      git('add', '.')
+      git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'init')
+      const head = git('rev-parse', 'HEAD')
+      writeFileSync(edges, '{}')
+
+      await expect(
+        runModuleTestCli(['affected', '--base', head, '--head', head], { cwd })
+      ).rejects.toThrow('Invalid runtime consumer edge')
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
     }
   })
 
@@ -1312,10 +1402,11 @@ describe('module test impact commands', () => {
     const { spawn, invocation } = captureNpmInvocation()
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     const environment = { npm_execpath: '/npm/bin/npm-cli.js' }
+    const manifest = selectionModel()
     const expectedPlan = createAffectedTestPlan(
       [{ path: 'src/main/artifacts/repository.ts', status: 'modified' }],
       { status: 'current', testFiles: [] },
-      selectionModel()
+      manifest
     )
 
     expect(
@@ -1323,7 +1414,8 @@ describe('module test impact commands', () => {
         ['affected', '--base', base, '--head', head, '--coverage-changed', coverageBase],
         {
           cwd: '/repo',
-          manifest: selectionModel(),
+          manifest,
+          derivedConsumers: { schemaVersion: 1, modules: {} },
           execute,
           spawn,
           environment,
@@ -1411,8 +1503,13 @@ describe('module test impact commands', () => {
     expect(packageJson.scripts['test:module:arguments']).toBe(
       'node scripts/ci/run-vitest-arguments.mjs'
     )
-    expect(packageJson.scripts['test:module']).toContain('module-test-impact.mjs module')
-    expect(packageJson.scripts['test:affected']).toContain('module-test-impact.mjs affected')
+    // Planning reads source snapshots; only the selected test execution prepares app outputs.
+    expect(packageJson.scripts['test:module']).toBe('node scripts/ci/module-test-impact.mjs module')
+    expect(packageJson.scripts['test:affected']).toBe(
+      'node scripts/ci/module-test-impact.mjs affected'
+    )
+    expect(packageJson.scripts['pretest:module']).toBeUndefined()
+    expect(packageJson.scripts['pretest:affected']).toBeUndefined()
   })
 })
 
@@ -1822,7 +1919,7 @@ it.each([
     id: 'user_skills_repository',
     path: 'src/main/skills/catalog.ts',
     reason:
-      'The user_skills_repository owner retains 50 explicit research consumer obligations beyond its reviewed source-derived edges, including research-reproduction.integration.test.ts, local-service.macos.integration.test.ts, research-service.macos.integration.test.ts. 45 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes.'
+      'The user_skills_repository owner retains 50 explicit research consumer obligations beyond its reviewed source-derived edges, including research-reproduction.integration.test.ts, local-service.macos.integration.test.ts, research-service.macos.integration.test.ts. 45 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes. Saved GitHub Skill sources expand the reviewed source boundary with persistent bookmarks and Settings navigation; retain full CI validation until this boundary is reviewed and reclassified.'
   },
   {
     id: 'settings_provider_accounts',
@@ -1873,6 +1970,7 @@ it.each([
           throw new Error('CodeGraph unavailable in fixture')
         },
         spawn,
+        derivedConsumers: { schemaVersion: 1, modules: {} },
         environment: { npm_execpath: '/npm/bin/npm-cli.js' }
       })
     ).rejects.toThrow('Selective test plan required; refusing full execution.')
