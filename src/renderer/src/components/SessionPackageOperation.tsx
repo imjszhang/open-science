@@ -1,7 +1,9 @@
+import { importSessionPackage } from '@/lib/session-package-import'
 import {
   packageOperationPresentation,
   primaryBrowserTransfer
 } from '@/lib/package-operation-presentation'
+import { WEB_CALLER_LOCATION_ATTRIBUTE } from '../../../shared/web-caller-location'
 import { WEB_EVENT_SURFACE_ATTRIBUTE } from '../../../shared/web-event-connection'
 import { PackageImportSelection } from './PackageImportSelection'
 import { PackageImportQueue } from './PackageImportQueue'
@@ -81,6 +83,7 @@ const openPackageSession = (operation: PackageOperationSnapshot): boolean => {
 
 const isImportCheck = (operation: PackageOperationSnapshot): boolean =>
   !operation.browserReceiptOnly &&
+  !operation.useCaseDownload &&
   operation.kind === 'import' &&
   operation.state === 'running' &&
   ['preparing', 'copying', 'validating'].includes(operation.progress.phase)
@@ -89,21 +92,31 @@ const operationStatus = (
   operation: PackageOperationSnapshot,
   t: TFunction
 ): { phase: string; status: string; waiting: boolean; busy: boolean; description?: string } => {
-  const phase = {
-    preparing: operation.kind === 'fork' ? t('Preparing fork…') : t('Preparing package…'),
-    selecting:
-      operation.kind === 'import'
-        ? t('Choose a destination project')
-        : t('Choose package contents'),
-    copying: t('Copying files…'),
-    validating: t('Validating package…'),
-    compressing: t('Compressing package…'),
-    saving: t('Saving package…'),
-    importing: operation.kind === 'fork' ? t('Copying research…') : t('Importing research…'),
-    'choosing-location': t('Waiting for a save location…'),
-    confirming: t('Waiting for import confirmation…'),
-    cleaning: t('Cleaning temporary files…')
-  }[operation.progress.phase]
+  const download = operation.useCaseDownload
+  const downloadPercent = download?.totalBytes
+    ? Math.min(100, Math.floor((download.completedBytes / download.totalBytes) * 100))
+    : undefined
+  const phase = download
+    ? downloadPercent === undefined
+      ? t('Preparing download…')
+      : downloadPercent === 100
+        ? t('Verifying download…')
+        : t('Downloading {{percent}}%', { percent: downloadPercent })
+    : {
+        preparing: operation.kind === 'fork' ? t('Preparing fork…') : t('Preparing package…'),
+        selecting:
+          operation.kind === 'import'
+            ? t('Choose a destination project')
+            : t('Choose package contents'),
+        copying: t('Copying files…'),
+        validating: t('Validating package…'),
+        compressing: t('Compressing package…'),
+        saving: t('Saving package…'),
+        importing: operation.kind === 'fork' ? t('Copying research…') : t('Importing research…'),
+        'choosing-location': t('Waiting for a save location…'),
+        confirming: t('Waiting for import confirmation…'),
+        cleaning: t('Cleaning temporary files…')
+      }[operation.progress.phase]
   const receiptState = primaryBrowserTransfer(operation)?.state
   const status = operation.browserReceiptOnly
     ? receiptState === 'preparing'
@@ -167,7 +180,7 @@ const PackageProgressMeter = ({
   const { t } = useTranslation()
   const { waiting, phase } = operationStatus(operation, t)
   const importPercent =
-    operation.kind === 'import' && !operation.browserReceiptOnly
+    operation.kind === 'import' && !operation.browserReceiptOnly && !operation.useCaseDownload
       ? (operation.progress.overallPercent ?? packageImportPercent(operation.progress))
       : undefined
   if ((operation.state !== 'running' && operation.state !== 'succeeded') || waiting) return null
@@ -445,7 +458,12 @@ export const PackageOperationIndicator = (): React.JSX.Element | null => {
     setOpen,
     dismiss
   } = usePackageOperationStore()
-  const operation = packageOperationPresentation(sourceOperation, browserReceipt)
+  const awayFromHome = useNavigationStore((state) => state.view !== 'home')
+  const operation = packageOperationPresentation(
+    sourceOperation,
+    browserReceipt,
+    awayFromHome || open
+  )
   const [cancellingId, setCancellingId] = useState<string>()
   const [cancelError, setCancelError] = useState<{ id: string; message: string }>()
   if (
@@ -619,6 +637,39 @@ const PackageDialogLayout = ({
   )
 }
 
+// Local Web receives a staged package path instead of a desktop save dialog, so the browser
+// saves it on demand. The save has to start inside this click: once the export promise resolves
+// the user gesture is gone and showSaveFilePicker would reject with NotAllowedError.
+const WebPackageDownloadButton = ({ filePath }: { filePath: string }): React.JSX.Element => {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const name = filePath.split(/[\\/]/).pop() ?? filePath
+  const label =
+    status === 'saving'
+      ? t('Saving {{name}}', { name })
+      : status === 'saved'
+        ? t('Saved {{name}}', { name })
+        : status === 'error'
+          ? t('Download failed for {{name}}', { name })
+          : t('Download {{name}}', { name })
+  return (
+    <Button
+      variant="outline"
+      disabled={status === 'saving'}
+      aria-busy={status === 'saving'}
+      onClick={() => {
+        setStatus('saving')
+        window.api
+          .saveManagedFile({ source: 'local', path: filePath, suggestedName: name })
+          .then((result) => setStatus(result.saved ? 'saved' : 'idle'))
+          .catch(() => setStatus('error'))
+      }}
+    >
+      {label}
+    </Button>
+  )
+}
+
 export const SessionPackageOperation = (): React.JSX.Element | null => {
   const { t } = useTranslation()
   const speedId = useId()
@@ -629,9 +680,14 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
     open,
     receive,
     setOpen,
-    dismiss
+    dismiss: dismissLocal
   } = usePackageOperationStore()
-  const operation = packageOperationPresentation(sourceOperation, browserReceipt)
+  const awayFromHome = useNavigationStore((state) => state.view !== 'home')
+  const operation = packageOperationPresentation(
+    sourceOperation,
+    browserReceipt,
+    awayFromHome || open
+  )
   const destinationName = useProjectStore(
     (state) =>
       state.projects.find(
@@ -648,8 +704,11 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
   const titleRef = useRef<HTMLHeadingElement>(null)
   const navigationIntent = useRef<{ operationId: string; revision: number } | undefined>(undefined)
   const isWeb = document.documentElement.getAttribute(WEB_EVENT_SURFACE_ATTRIBUTE) === 'true'
+  // Only remote Web loses the dialog: local Web and Electron both own these operations.
+  const isRemoteWeb =
+    isWeb && document.documentElement.getAttribute(WEB_CALLER_LOCATION_ATTRIBUTE) === 'remote'
   useEffect(() => {
-    if (isWeb) return
+    if (isRemoteWeb) return
     const native = window.api?.packagePresentation
     const subscribe = native?.onStateChanged ?? window.api?.sessions?.onPackageOperation
     if (!subscribe) return
@@ -672,7 +731,7 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
       disposed = true
       remove()
     }
-  }, [receive, isWeb])
+  }, [receive, isRemoteWeb])
   const openedImport = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (
@@ -695,7 +754,7 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
       })
       .catch(() => undefined)
   }, [sourceOperation, isWeb])
-  if (isWeb || !operation) return null
+  if (isRemoteWeb || !operation) return null
   const errorId = operation.browserReceiptOnly
     ? (primaryBrowserTransfer(operation)?.id ?? operation.id)
     : operation.id
@@ -737,6 +796,30 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
       })
     }
   }
+  const dismiss = (): void => {
+    if (
+      isWeb &&
+      operation.kind === 'import' &&
+      operation.state === 'failed' &&
+      operation.importRequestId &&
+      !operation.cleanupPending &&
+      !operation.result?.recovery
+    ) {
+      void window.api.sessions
+        .packageOperation({
+          action: 'discard-import',
+          operationId: operation.id,
+          requestId: operation.importRequestId
+        })
+        .then(dismissLocal)
+        .catch((caught) =>
+          setError({
+            id: errorId,
+            message: caught instanceof Error ? caught.message : String(caught)
+          })
+        )
+    } else dismissLocal()
+  }
   const retry = async (
     chooseAnotherPackage = false,
     allowSensitiveContent = false
@@ -764,6 +847,7 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
         else await window.api.sessions.exportPackage(operation.session)
       } else if (operation.importRequestId && !chooseAnotherPackage)
         await respond({ action: 'retry-import', operationId: operation.id })
+      else if (isWeb) await importSessionPackage(operation.importTarget?.projectId)
       else await window.api.sessions.importPackage(operation.importTarget)
     } catch (caught) {
       setError({
@@ -1257,7 +1341,17 @@ export const SessionPackageOperation = (): React.JSX.Element | null => {
                       <span className="tabular-nums">({operation.pendingImports?.length})</span>
                     </Button>
                   ) : null}
-                  {operation.state === 'succeeded' && operation.result?.filePath ? (
+                  {operation.kind === 'export' &&
+                  operation.state === 'succeeded' &&
+                  operation.result?.filePath &&
+                  isWeb ? (
+                    <WebPackageDownloadButton
+                      key={operation.result.filePath}
+                      filePath={operation.result.filePath}
+                    />
+                  ) : null}
+                  {/* A headless host has no desktop shell to reveal the staged path in. */}
+                  {operation.state === 'succeeded' && operation.result?.filePath && !isWeb ? (
                     <Button
                       onClick={() => void respond({ action: 'reveal', operationId: operation.id })}
                     >

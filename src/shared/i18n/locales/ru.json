@@ -188,6 +188,7 @@
     "Cleaning up database inspection resources": "Очистка ресурсов проверки базы данных"
   },
   "renderer": {
+    "Only .science packages can be imported.": "Можно импортировать только пакеты .science.",
     "Read the security policy and report vulnerabilities.": "Ознакомьтесь с политикой безопасности и сообщите об уязвимостях.",
     "Security": "Безопасность",
     "Reading status": "Статус чтения",
@@ -8120,6 +8121,15 @@
     "Linux": "Linux",
     "Branches": "Ветви",
     "Optional files: {{selected}} / {{total}} selected": "Необязательные файлы: выбрано {{selected}} из {{total}}",
-    "Steps": "Шаги"
+    "Steps": "Шаги",
+    "Use Case Gallery": "Галерея примеров использования",
+    "Random examples": "Случайные примеры",
+    "Previous examples": "Предыдущие примеры",
+    "Next examples": "Следующие примеры",
+    "Preparing download…": "Подготовка загрузки…",
+    "Verifying download…": "Проверка загрузки…",
+    "Example download progress": "Ход загрузки примера",
+    "Could not cancel download. Try again.": "Не удалось отменить загрузку. Повторите попытку.",
+    "Could not download this example. Try again.": "Не удалось загрузить этот пример. Повторите попытку."
   }
 }

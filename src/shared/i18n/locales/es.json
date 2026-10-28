@@ -187,6 +187,7 @@
     "Cleaning up database inspection resources": "Limpieza de los recursos de inspección de la base de datos"
   },
   "renderer": {
+    "Only .science packages can be imported.": "Solo se pueden importar paquetes .science.",
     "Read the security policy and report vulnerabilities.": "Consultar la política de seguridad y comunicar vulnerabilidades.",
     "Security": "Seguridad",
     "Reading status": "Estado de lectura",
@@ -7976,6 +7977,15 @@
     "Linux": "Linux",
     "Branches": "Ramas",
     "Optional files: {{selected}} / {{total}} selected": "Archivos opcionales: {{selected}} / {{total}} seleccionados",
-    "Steps": "Pasos"
+    "Steps": "Pasos",
+    "Use Case Gallery": "Galería de casos de uso",
+    "Random examples": "Ejemplos aleatorios",
+    "Previous examples": "Ejemplos anteriores",
+    "Next examples": "Ejemplos siguientes",
+    "Preparing download…": "Preparando la descarga…",
+    "Verifying download…": "Verificando la descarga…",
+    "Example download progress": "Progreso de descarga del ejemplo",
+    "Could not cancel download. Try again.": "No se pudo cancelar la descarga. Inténtelo de nuevo.",
+    "Could not download this example. Try again.": "No se pudo descargar este ejemplo. Inténtelo de nuevo."
   }
 }

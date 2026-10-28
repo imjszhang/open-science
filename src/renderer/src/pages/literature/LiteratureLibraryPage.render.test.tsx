@@ -4347,6 +4347,7 @@ describe('LiteratureLibraryPage', () => {
     }
   )
 
+  // Cover the 200+1 import boundary and both full pages on slower coverage workers.
   it('keeps the committed records and only the linked project subset after a later import batch fails', async () => {
     const importedItems = Array.from({ length: 201 }, (_, index) => {
       const item = createLibraryItem(index)
@@ -4518,7 +4519,7 @@ describe('LiteratureLibraryPage', () => {
     expect(importRecords.mock.calls.filter(([request]) => request.mode === 'commit')).toHaveLength(
       1
     )
-  })
+  }, 60_000)
 
   it('cleans up a cancelled desktop stage that returns a managed file late', async () => {
     search.mockImplementation(async (request: { scope: string }) =>

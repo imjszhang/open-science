@@ -185,6 +185,7 @@
     "Cleaning up database inspection resources": "清理資料庫檢查資源"
   },
   "renderer": {
+    "Only .science packages can be imported.": "只能匯入 .science 套件。",
     "Read the security policy and report vulnerabilities.": "查看安全政策並回報漏洞。",
     "Security": "安全",
     "Reading status": "閱讀狀態",
@@ -7640,6 +7641,15 @@
     "Linux": "Linux",
     "Branches": "分支",
     "Optional files: {{selected}} / {{total}} selected": "選用檔案：已選取 {{selected}} / {{total}}",
-    "Steps": "步驟"
+    "Steps": "步驟",
+    "Use Case Gallery": "案例廣場",
+    "Random examples": "隨機案例",
+    "Previous examples": "上一組案例",
+    "Next examples": "下一組案例",
+    "Preparing download…": "正在準備下載…",
+    "Verifying download…": "正在驗證下載檔案…",
+    "Example download progress": "案例下載進度",
+    "Could not cancel download. Try again.": "無法取消下載，請重試。",
+    "Could not download this example. Try again.": "無法下載此案例，請重試。"
   }
 }

@@ -4,6 +4,7 @@ import { flushSessionPersistence } from '@/lib/session-persistence/session-persi
 import { useNavigationStore } from '@/stores/navigation-store'
 import { usePreviewWorkbenchStore } from '@/stores/preview-workbench-store'
 import { WEB_EVENT_SURFACE_ATTRIBUTE } from '../../../shared/web-event-connection'
+import { WEB_CALLER_LOCATION_ATTRIBUTE } from '../../../shared/web-caller-location'
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -715,6 +716,8 @@ afterEach(() => {
   act(() => root.unmount())
   document.body.innerHTML = ''
   vi.unstubAllGlobals()
+  document.documentElement.removeAttribute(WEB_EVENT_SURFACE_ATTRIBUTE)
+  document.documentElement.removeAttribute(WEB_CALLER_LOCATION_ATTRIBUTE)
 })
 
 it('starts with a simple export summary and reveals optional controls on request', async () => {
@@ -1343,8 +1346,9 @@ it('keeps import confirmation in one dialog with omissions collapsed', async () 
   })
 })
 
-it('does not claim desktop import events on a Web client', async () => {
+it('does not claim desktop import events on a remote Web client', async () => {
   document.documentElement.setAttribute(WEB_EVENT_SURFACE_ATTRIBUTE, 'true')
+  document.documentElement.setAttribute(WEB_CALLER_LOCATION_ATTRIBUTE, 'remote')
   const subscribe = vi.fn(() => () => undefined)
   const query = vi.fn(async () => null)
   vi.stubGlobal('api', { sessions: { packageOperation: query, onPackageOperation: subscribe } })
@@ -1355,6 +1359,63 @@ it('does not claim desktop import events on a Web client', async () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   } finally {
     document.documentElement.removeAttribute(WEB_EVENT_SURFACE_ATTRIBUTE)
+    document.documentElement.removeAttribute(WEB_CALLER_LOCATION_ATTRIBUTE)
+  }
+})
+
+it('renders the operation dialog for a local Web client', async () => {
+  document.documentElement.setAttribute(WEB_EVENT_SURFACE_ATTRIBUTE, 'true')
+  document.documentElement.setAttribute(WEB_CALLER_LOCATION_ATTRIBUTE, 'local')
+  const subscribe = vi.fn(() => () => undefined)
+  const operation: PackageOperationSnapshot = {
+    id: 'local-web',
+    kind: 'export',
+    state: 'running',
+    progress: { phase: 'copying' }
+  }
+  const query = vi.fn(async () => operation)
+  vi.stubGlobal('api', { sessions: { packageOperation: query, onPackageOperation: subscribe } })
+  usePackageOperationStore.setState({ operation, open: true })
+  try {
+    await act(async () => root.render(<SessionPackageOperation />))
+    expect(subscribe).toHaveBeenCalled()
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  } finally {
+    document.documentElement.removeAttribute(WEB_EVENT_SURFACE_ATTRIBUTE)
+    document.documentElement.removeAttribute(WEB_CALLER_LOCATION_ATTRIBUTE)
+  }
+})
+
+it('saves a local Web export result to the browser from the footer button', async () => {
+  document.documentElement.setAttribute(WEB_EVENT_SURFACE_ATTRIBUTE, 'true')
+  document.documentElement.setAttribute(WEB_CALLER_LOCATION_ATTRIBUTE, 'local')
+  const saveManagedFile = vi.fn(async () => ({ saved: true }))
+  const operation: PackageOperationSnapshot = {
+    id: 'export-done',
+    kind: 'export',
+    state: 'succeeded',
+    progress: { phase: 'saving' },
+    result: { filePath: 'C:\\tmp\\research.science' }
+  }
+  vi.stubGlobal('api', {
+    sessions: {
+      packageOperation: vi.fn(async () => operation),
+      onPackageOperation: () => () => undefined
+    },
+    saveManagedFile
+  })
+  usePackageOperationStore.setState({ operation, open: true })
+  try {
+    await act(async () => root.render(<SessionPackageOperation />))
+    await act(async () => button('Download research.science').click())
+    expect(saveManagedFile).toHaveBeenCalledExactlyOnceWith({
+      source: 'local',
+      path: 'C:\\tmp\\research.science',
+      suggestedName: 'research.science'
+    })
+  } finally {
+    document.documentElement.removeAttribute(WEB_EVENT_SURFACE_ATTRIBUTE)
+    document.documentElement.removeAttribute(WEB_CALLER_LOCATION_ATTRIBUTE)
   }
 })
 
@@ -2533,4 +2594,104 @@ it('shows weighted overall import progress through checking, publication and suc
       .receive({ ...operation, state: 'cancelling', progress: { phase: 'cleaning' } })
   )
   expect(bar()).toBeNull()
+})
+
+it('keeps a catalog download cancellable after leaving home and retains its manually opened dialog', async () => {
+  const download: PackageOperationSnapshot = {
+    id: 'catalog-download',
+    kind: 'import',
+    state: 'running',
+    progress: { phase: 'preparing' },
+    useCaseDownload: { slug: 'research', completedBytes: 35, totalBytes: 100 }
+  }
+  const request = vi.fn(async () => download)
+  vi.stubGlobal('api', {
+    sessions: { packageOperation: request, onPackageOperation: () => () => undefined }
+  })
+  useNavigationStore.setState({ view: 'home' })
+  usePackageOperationStore.getState().receive(download)
+  await act(async () =>
+    root.render(
+      <>
+        <PackageOperationIndicator />
+        <SessionPackageOperation />
+      </>
+    )
+  )
+  expect(document.body.textContent).not.toContain('Downloading 35%')
+  await act(async () => useNavigationStore.setState({ view: 'workspace' }))
+  expect(document.body.textContent).toContain('Downloading 35%')
+  await act(async () => button('View progress').click())
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  await act(async () =>
+    usePackageOperationStore.getState().receive({
+      ...download,
+      useCaseDownload: { ...download.useCaseDownload!, completedBytes: 40 }
+    })
+  )
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  expect(document.body.textContent).toContain('Downloading 40%')
+  await act(async () => button('Cancel').click())
+  expect(request).toHaveBeenCalledWith({ action: 'cancel', operationId: 'catalog-download' })
+  useNavigationStore.setState({ view: 'home' })
+})
+
+it('releases a failed local Web upload when explicitly closing its result', async () => {
+  document.documentElement.setAttribute(WEB_EVENT_SURFACE_ATTRIBUTE, 'true')
+  document.documentElement.setAttribute(WEB_CALLER_LOCATION_ATTRIBUTE, 'local')
+  const failed: PackageOperationSnapshot = {
+    id: 'failed-upload',
+    kind: 'import',
+    state: 'failed',
+    progress: { phase: 'importing' },
+    importRequestId: 'upload-1',
+    error: 'Import failed'
+  }
+  const respond = vi.fn(async () => failed)
+  vi.stubGlobal('api', {
+    sessions: {
+      onPackageOperation: () => () => undefined,
+      packageOperation: respond
+    }
+  })
+  usePackageOperationStore.setState({ operation: failed, open: true })
+  await act(async () => root.render(<SessionPackageOperation />))
+  respond.mockClear()
+  await act(async () => button('Close').click())
+  expect(respond).toHaveBeenCalledWith({
+    action: 'discard-import',
+    operationId: 'failed-upload',
+    requestId: 'upload-1'
+  })
+  expect(usePackageOperationStore.getState().dismissedId).toBe('failed-upload')
+})
+
+it('uses the browser picker to choose another package after a local Web import fails', async () => {
+  document.documentElement.setAttribute(WEB_EVENT_SURFACE_ATTRIBUTE, 'true')
+  document.documentElement.setAttribute(WEB_CALLER_LOCATION_ATTRIBUTE, 'local')
+  const failed: PackageOperationSnapshot = {
+    id: 'failed-upload',
+    kind: 'import',
+    state: 'failed',
+    progress: { phase: 'validating' },
+    importRequestId: 'upload-1',
+    error: 'Import failed'
+  }
+  const importPackage = vi.fn()
+  vi.stubGlobal('api', {
+    sessions: {
+      importPackage,
+      onPackageOperation: () => () => undefined,
+      packageOperation: async () => failed
+    }
+  })
+  usePackageOperationStore.setState({ operation: failed, open: true })
+  await act(async () => root.render(<SessionPackageOperation />))
+  await act(async () => button('Choose another package').click())
+  const picker = document.querySelector<HTMLInputElement>('input[type="file"]')
+  expect(picker).not.toBeNull()
+  await act(async () => {
+    picker!.dispatchEvent(new Event('cancel'))
+  })
+  expect(importPackage).not.toHaveBeenCalled()
 })
