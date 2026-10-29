@@ -182,7 +182,12 @@
     "Startup has stopped. This check has not modified the original data. Share the diagnostic details below with support; this error alone does not establish that an encryption key is missing.": "起動を停止しました。この検査では元のデータを変更していません。以下の診断情報をサポートにお知らせください。このエラーだけでは暗号化キーが失われたとは判断できません。",
     "The failing data source and exact cause are unknown.": "失敗したデータソースと正確な原因は不明です。",
     "Failure reason: {{reason}}": "原因：{{reason}}",
-    "Cleaning up database inspection resources": "データベース検査リソースの後処理"
+    "Cleaning up database inspection resources": "データベース検査リソースの後処理",
+    "System credential authorization timed out. Retry startup and respond to the system authorization prompt.": "システム認証情報へのアクセス許可がタイムアウトしました。起動を再試行し、システムの許可要求に応答してください。",
+    "The system credential helper could not complete its operation. Check the diagnostic code and retry startup.": "システム認証情報ヘルパーが処理を完了できませんでした。診断コードを確認して起動を再試行してください。",
+    "The system credential helper failed. The exact authorization or key status is unknown.": "システム認証情報ヘルパーが失敗しました。正確な許可または鍵の状態は不明です。",
+    "System credential access failed": "システム認証情報へのアクセスに失敗しました",
+    "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "システム認証情報へのアクセス中に起動が停止しました。既存の認証情報とプロファイルデータは保持されています。アクセス許可の問題を解決してから起動を再試行してください。"
   },
   "renderer": {
     "Only .science packages can be imported.": ".science パッケージのみインポートできます。",
@@ -4534,7 +4539,7 @@
     "The distribution installation failed. Check Windows setup, then try again.": "ディストリビューションのインストールに失敗しました。Windows の設定を確認して、もう一度お試しください。",
     "Windows did not confirm the distribution installation. Check again before retrying.": "Windows でディストリビューションのインストールを確認できませんでした。再試行する前にもう一度確認してください。",
     "The distribution terminal could not be opened. Check again, then retry.": "ディストリビューションのターミナルを開けませんでした。もう一度確認してから再試行してください。",
-    "Set WSL networkingMode to mirrored, shut down WSL, then check again.": "WSL の networkingMode を mirrored に設定し、WSL を終了してから再確認してください。",
+    "WSL2 Bash requires Windows 11 22H2 or later with mirrored networking. On older Windows, use PowerShell. On supported Windows, enable mirrored networking and restart WSL, then check again.": "WSL2 Bash には、ミラーネットワークを有効にした Windows 11 22H2 以降が必要です。古い Windows では PowerShell を使用してください。対応する Windows ではミラーネットワークを有効にして WSL を再起動し、再確認してください。",
     "Choose the exact WSL2 distribution and non-root Linux user Open-Science should verify. Selection alone never enables WSL2 Bash.": "Open-Science が検証する WSL2 ディストリビューションと root 以外の Linux ユーザーを正確に選択してください。選択だけで WSL2 Bash が有効になることはありません。",
     "Checking WSL2 readiness…": "WSL2 の準備状態を確認中…",
     "WSL2 status has not been checked yet.": "WSL2 の状態はまだ確認されていません。",

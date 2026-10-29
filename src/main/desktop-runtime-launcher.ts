@@ -1,9 +1,11 @@
+import { CREDENTIAL_AUTHORIZATION_TIMEOUT_MS } from './credential-identity/identity-contract'
 import {
   readServiceLifetime,
   serviceLifetimeRecordSchema,
   type ServiceLifetimeRecord
 } from './local-service-lifetime'
 import { terminateVerifiedService } from './verified-service-stop'
+import { terminateProcessTree } from './process-tree'
 import { connectDesktopRuntime } from './desktop-runtime-client'
 import type { DesktopShutdownWork } from './desktop-runtime-lifecycle'
 import { runtimeStartupOptionsSchema, type RuntimeStartupOptions } from './desktop-runtime-info'
@@ -624,10 +626,18 @@ export async function startOrAttachDesktopBackend(options: {
   let failure: Error | undefined
   let status: BackendStartupStatus | undefined
   const startedAt = Date.now()
+  let deadline = startedAt + (options.timeoutMs ?? 60_000)
+  let credentialWaitGranted = false
   const onMessage = (message: unknown): void => {
     const result = backendStartupStatusSchema.safeParse(message)
     if (result.success && result.data.attemptId === attemptId && status?.kind !== 'failed') {
       status = result.data
+      if (status.stage === 'credentials' && status.kind === 'progress' && !credentialWaitGranted) {
+        credentialWaitGranted = true
+        // Grant once; repeated status messages cannot keep startup alive indefinitely.
+        if (options.timeoutMs === undefined)
+          deadline = Math.max(deadline, Date.now() + CREDENTIAL_AUTHORIZATION_TIMEOUT_MS + 60_000)
+      }
       try {
         options.onStatus?.({ ...status, elapsedMs: Date.now() - startedAt })
       } catch {
@@ -669,7 +679,6 @@ export async function startOrAttachDesktopBackend(options: {
   await file.close()
   child.unref()
   child.channel?.unref()
-  const deadline = startedAt + (options.timeoutMs ?? 60_000)
   try {
     while (Date.now() < deadline) {
       options.signal?.throwIfAborted()
@@ -723,6 +732,25 @@ export async function startOrAttachDesktopBackend(options: {
       logs,
       status
     )
+  } catch (error) {
+    if (
+      status?.stage === 'credentials' &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      (options.signal?.aborted || (error instanceof DesktopBackendStartupError && !error.canRetry))
+    ) {
+      // A blocked credential helper must not outlive an abandoned launch attempt.
+      const stopped = await terminateProcessTree(child, 'SIGKILL')
+      if (stopped.reaped && error instanceof DesktopBackendStartupError)
+        throw new DesktopBackendStartupError(
+          `Node backend startup timed out. See ${logs}.`,
+          status.stage,
+          true,
+          logs,
+          status
+        )
+    }
+    throw error
   } finally {
     child.off('message', onMessage)
     if (child.connected) child.disconnect()

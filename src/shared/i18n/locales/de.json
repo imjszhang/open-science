@@ -183,7 +183,12 @@
     "Startup has stopped. This check has not modified the original data. Share the diagnostic details below with support; this error alone does not establish that an encryption key is missing.": "Der Start wurde angehalten. Diese Prüfung hat die Originaldaten nicht verändert. Geben Sie die folgenden Diagnosedetails an den Support weiter; dieser Fehler allein belegt nicht, dass ein Verschlüsselungsschlüssel fehlt.",
     "The failing data source and exact cause are unknown.": "Die betroffene Datenquelle und die genaue Ursache sind unbekannt.",
     "Failure reason: {{reason}}": "Ursache: {{reason}}",
-    "Cleaning up database inspection resources": "Datenbankprüfungsressourcen bereinigen"
+    "Cleaning up database inspection resources": "Datenbankprüfungsressourcen bereinigen",
+    "System credential authorization timed out. Retry startup and respond to the system authorization prompt.": "Die Zeit für die Freigabe der Systemanmeldedaten ist abgelaufen. Starten Sie erneut und beantworten Sie die Freigabeanfrage des Systems.",
+    "The system credential helper could not complete its operation. Check the diagnostic code and retry startup.": "Das Hilfsprogramm für Systemanmeldedaten konnte den Vorgang nicht abschließen. Prüfen Sie den Diagnosecode und starten Sie erneut.",
+    "The system credential helper failed. The exact authorization or key status is unknown.": "Das Hilfsprogramm für Systemanmeldedaten ist fehlgeschlagen. Der genaue Freigabe- oder Schlüsselstatus ist unbekannt.",
+    "System credential access failed": "Zugriff auf Systemanmeldedaten fehlgeschlagen",
+    "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "Der Start wurde beim Zugriff auf Systemanmeldedaten angehalten. Bestehende Anmeldedaten und Profildaten wurden beibehalten. Beheben Sie das Freigabeproblem und starten Sie erneut."
   },
   "renderer": {
     "Only .science packages can be imported.": "Es können nur .science-Pakete importiert werden.",
@@ -4775,7 +4780,7 @@
     "The distribution installation failed. Check Windows setup, then try again.": "Die Installation der Distribution ist fehlgeschlagen. Prüfen Sie die Windows-Einrichtung und versuchen Sie es erneut.",
     "Windows did not confirm the distribution installation. Check again before retrying.": "Windows hat die Installation der Distribution nicht bestätigt. Prüfen Sie erneut, bevor Sie den Vorgang wiederholen.",
     "The distribution terminal could not be opened. Check again, then retry.": "Das Distributionsterminal konnte nicht geöffnet werden. Prüfen Sie erneut und versuchen Sie es dann noch einmal.",
-    "Set WSL networkingMode to mirrored, shut down WSL, then check again.": "Setzen Sie WSL networkingMode auf mirrored, beenden Sie WSL und prüfen Sie dann erneut.",
+    "WSL2 Bash requires Windows 11 22H2 or later with mirrored networking. On older Windows, use PowerShell. On supported Windows, enable mirrored networking and restart WSL, then check again.": "WSL2 Bash erfordert Windows 11 22H2 oder neuer mit gespiegeltem Netzwerk. Verwenden Sie auf älteren Windows-Versionen PowerShell. Aktivieren Sie auf unterstützten Windows-Versionen das gespiegelte Netzwerk, starten Sie WSL neu und prüfen Sie erneut.",
     "Choose the exact WSL2 distribution and non-root Linux user Open-Science should verify. Selection alone never enables WSL2 Bash.": "Wählen Sie genau die WSL2-Distribution und den Linux-Benutzer ohne Root-Rechte aus, die Open-Science prüfen soll. Die Auswahl allein aktiviert WSL2 Bash nie.",
     "Checking WSL2 readiness…": "WSL2-Bereitschaft wird geprüft…",
     "WSL2 status has not been checked yet.": "Der WSL2-Status wurde noch nicht geprüft.",

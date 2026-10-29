@@ -188,6 +188,27 @@ describe('certified historical Release source', () => {
     data[path] = { ...Object(data[path]), ...overrides }
     await expect(releaseSource('42', async (key: string) => data[key])).rejects.toThrow()
   })
+  it('accepts a cancelled run whose publish job certified the release', async () => {
+    const data = responses()
+    data['actions/runs/42'] = { ...Object(data['actions/runs/42']), conclusion: 'cancelled' }
+    data['actions/runs/42/jobs?per_page=100'] = {
+      jobs: [{ name: 'publish', conclusion: 'success' }]
+    }
+    expect(await releaseSource('42', async (path: string) => data[path])).toEqual({
+      version: '1.0.1',
+      sourceSha: sha,
+      tag: 'v1.0.1'
+    })
+  })
+  it.each([[undefined], [{ jobs: [] }], [{ jobs: [{ name: 'publish', conclusion: 'failure' }] }]])(
+    'rejects a cancelled run without certified publish job %j',
+    async (jobs) => {
+      const data = responses()
+      data['actions/runs/42'] = { ...Object(data['actions/runs/42']), conclusion: 'cancelled' }
+      if (jobs !== undefined) data['actions/runs/42/jobs?per_page=100'] = jobs
+      await expect(releaseSource('42', async (path: string) => data[path])).rejects.toThrow()
+    }
+  )
   it('fails closed on malformed inputs and unavailable GitHub evidence', async () => {
     for (const runId of ['', '../42', '42\n', '0']) {
       await expect(releaseSource(runId, async () => null)).rejects.toThrow()
@@ -321,16 +342,32 @@ describe('parallel platform publication', () => {
     expect(uploads).not.toHaveBeenCalled()
   })
 
-  it('blocks the entry if uploads succeed but registry versions never appear', async () => {
+  it('reports staged packages as pending instead of failing when the registry lags', async () => {
     const uploads = vi.fn(async () => {})
+    const pending = await publishPackages(
+      packages,
+      async () => null,
+      uploads,
+      async () => {}
+    )
+    expect(pending).toEqual(packages.map((pkg) => pkg.manifest.name))
+    expect(uploads).toHaveBeenCalledTimes(6)
+  })
+
+  it('still fails on genuine publish errors while reporting visibility lag as pending', async () => {
+    const registry = new Map()
+    const uploads = vi.fn(async (pkg: (typeof packages)[number]) => {
+      if (pkg.manifest.name === packages[0].manifest.name) throw new Error('ENEEDAUTH')
+      registry.set(pkg.manifest.name, published(pkg))
+    })
     await expect(
       publishPackages(
         packages,
-        async () => null,
+        async (name: string) => registry.get(name),
         uploads,
         async () => {}
       )
-    ).rejects.toThrow('entry package blocked')
+    ).rejects.toThrow('ENEEDAUTH')
     expect(uploads).toHaveBeenCalledTimes(5)
   })
 
@@ -359,6 +396,28 @@ describe('parallel platform publication', () => {
       )
     ).rejects.toThrow('registry unavailable')
     expect(delay).not.toHaveBeenCalled()
+    // An exhausted deadline stops polling immediately instead of running into the job timeout.
+    await expect(
+      waitForPublished(packages[0], lookup, delay, Date.now() - 1)
+    ).rejects.toMatchObject({ code: 'ERR_NPM_VISIBILITY' })
+  })
+
+  it('keeps integrity mismatches fatal instead of reporting them as pending', async () => {
+    // A conflicting version surfaces mid-batch: preflight passes (registry empty), then the
+    // first visibility poll sees mismatched bytes after a concurrent publish landed.
+    let conflicting = false
+    type RegistryView = { versions: Record<string, { dist: { integrity: string } }> } | null
+    const lookup = async (name: string): Promise<RegistryView> =>
+      conflicting && name === packages[0].manifest.name
+        ? { versions: { '1.2.3': { dist: { integrity: 'wrong-bytes' } } } }
+        : null
+    const publish = vi.fn(async (pkg: (typeof packages)[number]) => {
+      if (pkg.manifest.name === packages[0].manifest.name) conflicting = true
+    })
+    await expect(publishPackages(packages, lookup, publish, async () => {})).rejects.toThrow(
+      'Published bytes differ'
+    )
+    expect(publish).toHaveBeenCalledTimes(5)
   })
 
   it('converges when a concurrent rerun landed the same immutable version during publish', async () => {
