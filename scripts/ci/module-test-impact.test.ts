@@ -36,6 +36,18 @@ function captureNpmInvocation(): {
   return { spawn, invocation }
 }
 
+// Argument transport is independent of the repository's changing module-routing policy.
+const selectiveTransportPlan = (): ReturnType<typeof createModuleTestPlan> => ({
+  mode: 'selective',
+  modules: [],
+  testFiles: ['src/transport-fixture.test.ts'],
+  capabilityOverlays: [],
+  fallbackCapabilities: [],
+  graphStatus: 'not-requested',
+  graphReason: undefined,
+  reasonChains: []
+})
+
 const currentStatus = JSON.stringify({
   initialized: true,
   pendingChanges: { added: 0, modified: 0, removed: 0 },
@@ -702,7 +714,7 @@ describe('module test impact commands', () => {
   it.each(['win32', 'darwin', 'linux'])(
     'transports large selections without dropping filters or options on %s',
     (platform) => {
-      const plan = createModuleTestPlan('upload_repository')
+      const plan = selectiveTransportPlan()
       plan.testFiles = Array.from(
         { length: 2200 },
         (_, index) => `src/renderer/src/components/long-consumer-${index}.test.ts`
@@ -752,7 +764,7 @@ describe('module test impact commands', () => {
   )
 
   it.each(['return', 'throw'])('cleans temporary arguments when spawn errors %s', (failure) => {
-    const plan = createModuleTestPlan('upload_repository')
+    const plan = selectiveTransportPlan()
     plan.testFiles = ['x'.repeat(10000) + '.test.ts']
     let argumentFile = ''
     const error = new Error('spawn failed')
@@ -857,7 +869,7 @@ describe('module test impact commands', () => {
   it.each(['npm_execpath', 'NPM_EXECPATH', 'Npm_ExecPath'])(
     'launches npm through Node with the Windows environment key %s',
     (key) => {
-      const plan = createModuleTestPlan('upload_repository')
+      const plan = selectiveTransportPlan()
       const { spawn, invocation } = captureNpmInvocation()
       executeModuleTestPlan(plan, {
         platform: 'win32',
@@ -874,7 +886,7 @@ describe('module test impact commands', () => {
   )
 
   it('prints the exact file list before invoking portable npm test arguments', () => {
-    const plan = createModuleTestPlan('upload_repository')
+    const plan = selectiveTransportPlan()
     const { spawn, invocation } = captureNpmInvocation()
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
@@ -1488,20 +1500,27 @@ it('keeps literature command consumers covered by the explicit full fallback', (
   )
 })
 
-it.each([
-  [
-    'src/main/session-persistence/coordinator.ts',
-    'src/renderer/src/hooks/useLifecycleSync.test.tsx'
-  ],
-  [
-    'src/main/tags/repository.ts',
+it('keeps tag event consumers covered by the explicit full fallback', () => {
+  const manifest = loadModuleImpactManifest()
+  const reason = manifest.modules.main_tags.fullTestReason
+  expect(reason).toBeTruthy()
+  const plan = createAffectedTestPlan(
+    [{ path: 'src/main/tags/repository.ts', status: 'modified' }],
+    { status: 'not-used', testFiles: [] },
+    manifest
+  )
+  expect(plan.mode).toBe('full')
+  expect(plan.reasonChains).toEqual([`main_tags -> ${reason} -> full`])
+  expect(manifest.modules.main_tags.testFiles.consumer).toContain(
     'src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationsProvider.test.tsx'
-  ]
-])('preserves the explicit command or event consumer for %s', (path, test) => {
-  const plan = createAffectedTestPlan([{ path, status: 'modified' }], {
-    status: 'not-used',
-    testFiles: []
-  })
+  )
+})
+
+it('preserves the explicit command or event consumer for src/main/session-persistence/coordinator.ts', () => {
+  const plan = createAffectedTestPlan(
+    [{ path: 'src/main/session-persistence/coordinator.ts', status: 'modified' }],
+    { status: 'not-used', testFiles: [] }
+  )
   expect(plan.mode).toBe('selective')
-  expect(plan.testFiles).toContain(test)
+  expect(plan.testFiles).toContain('src/renderer/src/hooks/useLifecycleSync.test.tsx')
 })

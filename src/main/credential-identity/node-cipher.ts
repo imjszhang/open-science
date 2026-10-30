@@ -172,10 +172,12 @@ export function createNodeSecureStorageCipher(
     },
     decryptString(value) {
       if (identity.backend === 'windows-dpapi') {
+        // GCM and DPAPI authenticate before decoding. Match Electron's UTF-8 replacement
+        // semantics for cookie payloads that contain a binary domain digest.
         if (value.subarray(0, 3).toString() !== 'v10') {
           const plaintext = operations.unprotect(value)
           try {
-            return new TextDecoder('utf-8', { fatal: true }).decode(plaintext)
+            return plaintext.toString('utf8')
           } finally {
             plaintext.fill(0)
           }
@@ -188,7 +190,7 @@ export function createNodeSecureStorageCipher(
           decipher.final()
         ])
         try {
-          return new TextDecoder('utf-8', { fatal: true }).decode(plaintext)
+          return plaintext.toString('utf8')
         } finally {
           plaintext.fill(0)
         }

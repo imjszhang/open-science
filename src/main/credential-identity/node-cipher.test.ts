@@ -266,4 +266,37 @@ describe('Node OSCrypt-compatible cipher', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('converts legacy DPAPI binary plaintext using Electron string semantics', () => {
+    const plaintext = Buffer.from([0xff, 0x61])
+    const cipher = createNodeSecureStorageCipher(
+      { backend: 'windows-dpapi', appName: 'Open-Science' },
+      '/unused',
+      { readPassword: vi.fn(), unprotect: () => Buffer.from(plaintext) }
+    )
+    try {
+      expect(cipher.decryptString(Buffer.from('legacy-dpapi-fixture'))).toBe('\ufffda')
+    } finally {
+      cipher.dispose()
+    }
+  })
+
+  it('retains the Linux legacy-key fallback when the selected key produces non-UTF-8 bytes with valid padding', () => {
+    // Fixed independently generated v11 record encrypted using Chromium's legacy empty password.
+    // The selected password deliberately decrypts it to non-UTF-8 bytes with valid CBC padding.
+    const encrypted = Buffer.from(
+      '76313135072aab3a3a50ff49513b81d93df001bcb6de1e08c5fba755645b7b2a898769',
+      'hex'
+    )
+    const cipher = createNodeSecureStorageCipher(
+      { backend: 'linux-secret-service', appName: 'Open Science', exists: true },
+      '/unused',
+      { readPassword: () => Buffer.from('wrong-vault-22'), unprotect: vi.fn() }
+    )
+    try {
+      expect(cipher.decryptString(encrypted)).toBe('fixture-legacy-secret')
+    } finally {
+      cipher.dispose()
+    }
+  })
 })

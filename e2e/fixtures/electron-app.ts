@@ -60,6 +60,21 @@ const FAKE_REMOTEIT_PATH = resolve(APP_ROOT, 'e2e', 'fixtures', 'fake-remoteit.c
 const FAKE_PROVIDER_NAME = 'Electron E2E provider'
 type E2eWindowMode = 'hidden' | 'normal'
 
+const assertPackagedElectronIdentity = (
+  evidence: { packaged: boolean; appPath: string; executable: string; version: string },
+  environment: NodeJS.ProcessEnv = process.env
+): void => {
+  const revision = environment.OPEN_SCIENCE_E2E_EXPECTED_BUILD_SHA
+  if (
+    !evidence.packaged ||
+    !evidence.appPath.endsWith('app.asar') ||
+    evidence.executable !== environment.OPEN_SCIENCE_E2E_EXECUTABLE ||
+    (revision && !evidence.version.endsWith(`-nightly.g${revision.slice(0, 7)}`))
+  ) {
+    throw new Error(`Packaged Electron identity mismatch: ${JSON.stringify(evidence)}`)
+  }
+}
+
 const electronLaunchTarget = (
   userDataRoot: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -450,7 +465,9 @@ const launchEnvironment = (
       'kde_session_version'
     ])
     if (process.platform === 'win32')
-      for (const key of ['programfiles', 'programfiles(x86)', 'programw6432']) osInputs.add(key)
+      // Native OpenSSH requires ProgramData during initialization, even for version/config queries.
+      for (const key of ['programfiles', 'programfiles(x86)', 'programw6432', 'programdata'])
+        osInputs.add(key)
     for (const key of Object.keys(environment)) {
       if (
         !osInputs.has(key.toLowerCase()) &&
@@ -829,6 +846,14 @@ const openMainWindow = async (
   onFirstReady?: (page: Page) => Promise<void>
 ): Promise<Page> => {
   const page = await application.firstWindow()
+  if (process.env.OPEN_SCIENCE_E2E_USE_CASE_GATE) {
+    await page.route('https://statics.aipoch.com/open-science/usecases/**/cover.png', (route) =>
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><rect width="640" height="360" fill="#e7e5df"/></svg>'
+      })
+    )
+  }
   await applyHiddenWindowPresentation(page, windowMode)
   await rendererFailures.observe(page)
   await waitForRendererReady(page)
@@ -1932,15 +1957,7 @@ class ElectronAppHarness implements ElectronApp {
           executable: process.execPath,
           version: app.getVersion()
         }))
-        const revision = process.env.OPEN_SCIENCE_E2E_EXPECTED_BUILD_SHA
-        if (
-          !evidence.packaged ||
-          !evidence.appPath.endsWith('app.asar') ||
-          evidence.executable !== process.env.OPEN_SCIENCE_E2E_EXECUTABLE ||
-          (revision && !evidence.version.endsWith(`-nightly.${revision.slice(0, 7)}`))
-        ) {
-          throw new Error(`Packaged Electron identity mismatch: ${JSON.stringify(evidence)}`)
-        }
+        assertPackagedElectronIdentity(evidence)
         console.info('Packaged Electron identity:', JSON.stringify(evidence))
       }
       this.currentPage = await openMainWindow(
@@ -2163,6 +2180,7 @@ const test = base.extend<{ app: ElectronApp; windowMode: E2eWindowMode }>({
 })
 
 export {
+  assertPackagedElectronIdentity,
   configurePackagedMacKeychain,
   runWithCleanup,
   closeElectronApplicationForCleanup,
