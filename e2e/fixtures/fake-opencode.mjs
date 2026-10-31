@@ -345,6 +345,13 @@ const submitReviewerPass = async (mcpServers, prompt = '') => {
   return true
 }
 
+const recordMutationStage = async (stage) => {
+  const path = process.env.OPEN_SCIENCE_E2E_MICROMAMBA_EVENTS
+  if (path && path !== 'enabled') {
+    await appendFile(path, JSON.stringify({ at: new Date().toISOString(), stage }) + '\n')
+  }
+}
+
 const withMcpClient = async (sessionId, serverName, operation) => {
   const route = sessionRoutes.get(sessionId)
   const server = route?.mcpServers?.find(
@@ -363,11 +370,15 @@ const withMcpClient = async (sessionId, serverName, operation) => {
     env: stringEnvironment(server.env)
   })
   const client = new Client({ name: 'open-science-e2e-agent', version: VERSION })
+  await recordMutationStage('mcp-connect-start')
   await client.connect(transport)
+  await recordMutationStage('mcp-connected')
   try {
     return await operation(client)
   } finally {
+    await recordMutationStage('mcp-close-start')
     await client.close()
+    await recordMutationStage('mcp-closed')
   }
 }
 
@@ -1011,17 +1022,24 @@ const waitForProcessesToExit = async (pids, timeoutMs = 10_000) => {
 
 const verifyNotebookMutationCancellation = async (sessionId) =>
   withMcpClient(sessionId, 'open-science-notebook', async (client) => {
+    await recordMutationStage('warmup-start')
     const warmup = toolResult(
       'manage_environments',
-      await client.callTool(
-        {
-          name: 'manage_environments',
-          arguments: { action: 'create', language: 'python', name: 'e2e-warm' }
-        },
-        undefined,
-        { timeout: 60_000, resetTimeoutOnProgress: true, onprogress: () => undefined }
-      )
+      await client
+        .callTool(
+          {
+            name: 'manage_environments',
+            arguments: { action: 'create', language: 'python', name: 'e2e-warm' }
+          },
+          undefined,
+          { timeout: 60_000 }
+        )
+        .catch(async (error) => {
+          await recordMutationStage('warmup-failed')
+          throw new Error(`Mutation warm-up failed: ${String(error)}`, { cause: error })
+        })
     )
+    await recordMutationStage('warmup-complete')
     if (warmup.created?.runnable !== true) {
       throw new Error(`Mutation warm-up did not succeed: ${JSON.stringify(warmup)}`)
     }
