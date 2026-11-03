@@ -180,7 +180,6 @@ const suspendSessionWrites = async () => {
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(sessionsRoot, entry.name))
   await Promise.all(directories.map((directory) => chmod(directory, 0o500)))
-  return async () => Promise.all(directories.map((directory) => chmod(directory, 0o700)))
 }
 
 const stringEnvironment = (overrides = []) => {
@@ -1289,57 +1288,64 @@ const verifyNotebookPackageCancellation = async (sessionId) =>
     return `Notebook package cancellation verified; stopped PIDs ${started.pid} and ${started.descendantPid}.`
   })
 
-const createProvenanceArtifact = async (sessionId) => {
-  const producerRunId = await withMcpClient(sessionId, 'open-science-notebook', async (client) => {
-    const before = toolResult(
-      'notebook_state',
-      await client.callTool({ name: 'notebook_state', arguments: {} })
-    )
-    const existingRunIds = new Set(
-      before.recentRuns?.map((candidate) => candidate.runId).filter(Boolean) ?? []
-    )
-    const execution = toolResult(
-      'bash_execute',
-      await client.callTool({
-        name: 'bash_execute',
-        arguments: { command: "echo 'artifact-provenance-e2e'" }
+const createProvenanceArtifact = async (sessionId, markdown = false, withoutExecution = false) => {
+  const producerRunId = withoutExecution
+    ? undefined
+    : await withMcpClient(sessionId, 'open-science-notebook', async (client) => {
+        const before = toolResult(
+          'notebook_state',
+          await client.callTool({ name: 'notebook_state', arguments: {} })
+        )
+        const existingRunIds = new Set(
+          before.recentRuns?.map((candidate) => candidate.runId).filter(Boolean) ?? []
+        )
+        const execution = toolResult(
+          'bash_execute',
+          await client.callTool({
+            name: 'bash_execute',
+            arguments: { command: "echo 'artifact-provenance-e2e'" }
+          })
+        )
+        const state = toolResult(
+          'notebook_state',
+          await client.callTool({ name: 'notebook_state', arguments: {} })
+        )
+        const run = state.recentRuns
+          ?.toReversed()
+          .find(
+            (candidate) =>
+              candidate.kernelKind === 'bash' &&
+              candidate.status === 'completed' &&
+              !existingRunIds.has(candidate.runId)
+          )
+        if (!execution.stdout?.includes('artifact-provenance-e2e') || !run?.runId) {
+          throw new Error(
+            `The Notebook did not persist the Bash producer run: ${JSON.stringify({ execution, recentRuns: state.recentRuns })}`
+          )
+        }
+        return run.runId
       })
-    )
-    const state = toolResult(
-      'notebook_state',
-      await client.callTool({ name: 'notebook_state', arguments: {} })
-    )
-    const run = state.recentRuns
-      ?.toReversed()
-      .find(
-        (candidate) =>
-          candidate.kernelKind === 'bash' &&
-          candidate.status === 'completed' &&
-          !existingRunIds.has(candidate.runId)
-      )
-    if (!execution.stdout?.includes('artifact-provenance-e2e') || !run?.runId) {
-      throw new Error(
-        `The Notebook did not persist the Bash producer run: ${JSON.stringify({ execution, recentRuns: state.recentRuns })}`
-      )
-    }
-    return run.runId
-  })
   const stored = await withMcpClient(sessionId, 'open-science-artifacts', async (client) =>
     toolResult(
       'write_artifact_file',
       await client.callTool({
         name: 'write_artifact_file',
         arguments: {
-          filename: 'provenance-evidence.txt',
-          mimeType: 'text/plain',
-          content: 'artifact provenance e2e',
+          filename: markdown ? 'publication-policy.md' : 'provenance-evidence.txt',
+          mimeType: markdown ? 'text/markdown' : 'text/plain',
+          content: markdown
+            ? '# Publication report\n\nOriginal result.\n'
+            : 'artifact provenance e2e',
           encoding: 'utf8',
           producerRunId
         }
       })
     )
   )
-  if (!stored.artifact?.version_id || stored.artifact.producer_run_id !== producerRunId) {
+  if (
+    !stored.artifact?.version_id ||
+    (producerRunId && stored.artifact.producer_run_id !== producerRunId)
+  ) {
     throw new Error('The artifact Version did not retain its Notebook producer run.')
   }
   return `Artifact provenance verified for session ${sessionId}, artifact ${stored.artifact.artifact_id}, version ${stored.artifact.version_id}.`
@@ -2793,11 +2799,36 @@ if (process.argv.includes('--version')) {
               ? 'PNG artifact created.'
               : 'Resumed PNG artifact created.'
           }
+        } else if (prompt.includes('Verify Markdown task reads.')) {
+          const expected = prompt.includes('Expected: restored')
+            ? '# Publication report\n\nManually corrected result.\n'
+            : '# Publication report\n\nOriginal result.\n'
+          const historicalId = prompt.match(/Historical version: ([a-zA-Z0-9_-]+)/)?.[1]
+          if (!historicalId) throw new Error('Missing historical version')
+          const result = await executeControlCode(
+            context.params.sessionId,
+            `{
+            const files = await host.artifacts({ filename: 'publication-policy.md', exact: true });
+            if (files.artifacts.length !== 1) throw new Error('Expected one logical file');
+            const fs = require('node:fs/promises');
+            const latest = await fs.readFile(await host.artifactPath(files.artifacts[0].latestVersionId), 'utf8');
+            const historical = await fs.readFile(await host.artifactPath(${JSON.stringify(historicalId)}), 'utf8');
+            if (latest !== ${JSON.stringify(expected)} || historical !== '# Publication report\\n\\nManually corrected result.\\n') throw new Error('Task read selected incorrect bytes');
+            return { marker: 'markdown-task-read-verified' };
+          }`
+          )
+          if (controlResultValue(result).marker !== 'markdown-task-read-verified')
+            throw new Error(JSON.stringify(result))
+          reply = 'Markdown task read verified.'
         } else if (prompt.includes(ARTIFACT_PROVENANCE_PROMPT)) {
           if (prompt.includes('Observe the Task before publication.')) {
             await new Promise((resolve) => setTimeout(resolve, 8_000))
           }
-          reply = await createProvenanceArtifact(context.params.sessionId)
+          reply = await createProvenanceArtifact(
+            context.params.sessionId,
+            prompt.includes('Markdown publication policy'),
+            prompt.includes('Without execution evidence')
+          )
         } else if (prompt.includes(PREVIEW_CONTEXT_MENU_ARTIFACTS_PROMPT)) {
           reply = await createPreviewContextMenuArtifacts(context.params.sessionId)
         } else if (prompt.includes(SPREADSHEET_SEARCH_ARTIFACT_PROMPT)) {
@@ -3163,30 +3194,14 @@ if (process.argv.includes('--version')) {
         } else if (prompt.includes('Parked reliable child question')) {
           reply = 'Main rendered the parked child question after branch restoration.'
         } else if (prompt.includes('Trigger reliable post-fence persistence failure')) {
-          const restoreWrites = await suspendSessionWrites()
-          try {
-            await context.client.notify(acp.methods.client.session.update, {
-              sessionId: context.params.sessionId,
-              update: {
-                sessionUpdate: 'agent_message_chunk',
-                messageId: `e2e-message-${fixtureInstanceId}${nextMessageId++}`,
-                content: { type: 'text', text: 'Provider acceptance crossed the durable fence.' }
-              }
-            })
-            await delay(1_000)
-          } finally {
-            await restoreWrites()
-            await writeFile(
-              join(process.env.OPEN_SCIENCE_E2E_HANDOFF_CAPTURE_ROOT, 'post-fence-released'),
-              'released'
-            )
-          }
+          // Playwright owns restoration because persistence failure can terminate this provider.
+          await suspendSessionWrites()
           await context.client.notify(acp.methods.client.session.update, {
             sessionId: context.params.sessionId,
             update: {
               sessionUpdate: 'agent_message_chunk',
               messageId: `e2e-message-${fixtureInstanceId}${nextMessageId++}`,
-              content: { type: 'text', text: 'Persistence sabotage released.' }
+              content: { type: 'text', text: 'Provider acceptance crossed the durable fence.' }
             }
           })
           // Keep the provider call in flight until the test crashes Main. Completing it would
