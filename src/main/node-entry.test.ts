@@ -1,3 +1,8 @@
+import { Console } from 'node:console'
+import { Writable } from 'node:stream'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { backendStartupStatusSchema } from './backend-startup'
 import { createElectronCallerContext } from './caller-context'
@@ -6,6 +11,8 @@ import { ApplicationCallerLeaseRegistry } from './caller-lifecycle'
 const f = vi.hoisted(() => ({
   initLogs: vi.fn(),
   stopIntent: vi.fn(),
+  createLifetime: vi.fn(),
+  startFirstConnectionTimeout: vi.fn(),
   lifetimeAdmission: undefined as (() => void) | undefined,
   startupFailure: false,
   storageFailure: undefined as Error | undefined,
@@ -97,6 +104,7 @@ vi.mock('./local-service-lifetime', () => ({
     stop(reason: string): void
     onStoppingAdmission?(): void
   }) => {
+    f.createLifetime(options)
     f.lifetimeAdmission = options.onStoppingAdmission
     let stopping = false
     return {
@@ -108,6 +116,7 @@ vi.mock('./local-service-lifetime', () => ({
         apps: 1
       }),
       close: vi.fn(),
+      startFirstConnectionTimeout: f.startFirstConnectionTimeout,
       stop: async (_force: boolean, reason = 'user-stop') => {
         f.stopIntent(reason)
         if (!stopping) {
@@ -287,6 +296,61 @@ afterEach(() => {
   }
 })
 
+it('exports early startup errors captured by the backend without dropping their records', async () => {
+  const logger = await vi.importActual<typeof import('@aipoch/diagnostics/node')>(
+    '@aipoch/diagnostics/node'
+  )
+  const { runSessionDiagnosticWorker } = await import('./session-diagnostics/collector')
+  const root = await mkdtemp(join(tmpdir(), 'startup-diagnostic-export-'))
+  const configRoot = join(root, 'config')
+  const directory = join(root, 'output')
+  const name = 'desktop-backend-42-1700000000000.log'
+  let stderr = ''
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      stderr += chunk.toString()
+      callback()
+    }
+  })
+  const terminal = new Console({ stdout: stream, stderr: stream })
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false })
+  vi.spyOn(console, 'error').mockImplementation(terminal.error)
+  f.initLogs.mockImplementation((options) =>
+    logger.initLogger({ ...options, logDir: join(configRoot, 'logs'), mirrorToConsole: true })
+  )
+  f.log.error.mockImplementation(logger.createLogger('node-runtime').error)
+  f.startupFailure = true
+  try {
+    await mkdir(directory, { recursive: true })
+    await import('./node-entry')
+    await vi.waitFor(() => expect(process.exit).toHaveBeenCalled())
+    await logger.flushLogs()
+    await writeFile(join(configRoot, 'logs', name), stderr)
+    const result = await runSessionDiagnosticWorker({
+      action: 'export',
+      projectId: 'project',
+      sessionId: 'session',
+      configRoot,
+      dataRoot: join(root, 'data'),
+      directory,
+      appVersion: 'test',
+      selectedItems: [`backend-log:${name}`]
+    })
+    expect(result).toMatchObject({ kind: 'archive', partial: false })
+    expect(await readFile(join(directory, 'content/logs/backend', name), 'utf8')).toContain(
+      'isolated startup failure'
+    )
+  } finally {
+    f.initLogs.mockReset()
+    f.log.error.mockReset()
+    if (descriptor) Object.defineProperty(process.stdout, 'isTTY', descriptor)
+    else Reflect.deleteProperty(process.stdout, 'isTTY')
+    await logger.flushLogs()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 it('logs the startup failure before cleanup can terminate the process', async () => {
   f.startupFailure = true
   await import('./node-entry')
@@ -348,7 +412,9 @@ it('reports credential recovery during startup as a failure after draining resou
   expect(f.closeOwnership).toHaveBeenCalledOnce()
   expect(f.disposeCipher).toHaveBeenCalledOnce()
   expect(process.exitCode).toBe(1)
-  expect(f.initLogs).toHaveBeenCalledWith({ logDir: expect.stringMatching(/config[/\\]logs$/) })
+  expect(f.initLogs).toHaveBeenCalledWith(
+    expect.objectContaining({ logDir: expect.stringMatching(/config[/\\]logs$/) })
+  )
   expect(process.env.OPEN_SCIENCE_STARTUP_ATTEMPT).toBeUndefined()
   const messages = send.mock.calls.map(([message]) => backendStartupStatusSchema.parse(message))
   expect(messages).toContainEqual({
@@ -702,6 +768,44 @@ it('closes business admission without starting cleanup when a stop grant may hav
   f.lifecycle.mock.calls[0][0].quit()
   await vi.waitFor(() => expect(process.exitCode).toBe(0))
 })
+
+it('arms the first-App deadline after runtime discovery, before database startup', async () => {
+  const control = Promise.withResolvers<Awaited<ReturnType<typeof f.startControl>>>()
+  f.startControl.mockReturnValueOnce(control.promise)
+  const send = await startHealthyRuntime()
+  await vi.waitFor(() => expect(f.startControl).toHaveBeenCalledOnce())
+  expect(f.createLifetime).toHaveBeenCalledWith(
+    expect.objectContaining({ deferFirstConnectionTimeout: true })
+  )
+  expect(f.startFirstConnectionTimeout).not.toHaveBeenCalled()
+  control.resolve(f.control)
+  await waitForReady(send)
+  expect(f.startFirstConnectionTimeout).toHaveBeenCalledOnce()
+  expect(f.startFirstConnectionTimeout.mock.invocationCallOrder[0]).toBeLessThan(
+    f.verifyDatabase.mock.invocationCallOrder[0]
+  )
+  f.lifecycle.mock.calls[0][0].quit()
+  await vi.waitFor(() => expect(f.closeNetwork).toHaveBeenCalled())
+})
+
+it.each(['failure', 'cancellation'] as const)(
+  'does not arm the first-App timeout after discovery %s',
+  async (mode) => {
+    const control = Promise.withResolvers<Awaited<ReturnType<typeof f.startControl>>>()
+    f.startControl.mockReturnValueOnce(control.promise)
+    await startHealthyRuntime()
+    await vi.waitFor(() => expect(f.startControl).toHaveBeenCalledOnce())
+    if (mode === 'failure') control.reject(new Error('Discovery could not be published'))
+    else {
+      f.lifecycle.mock.calls[0][0].quit()
+      await vi.waitFor(() => expect(f.stopIntent).toHaveBeenCalled())
+      control.resolve(f.control)
+    }
+    await vi.waitFor(() => expect(f.closeNetwork).toHaveBeenCalled())
+    expect(f.startFirstConnectionTimeout).not.toHaveBeenCalled()
+    expect(f.verifyDatabase).not.toHaveBeenCalled()
+  }
+)
 
 it.each([true, false])(
   'preserves quit preparation outcome unless aborted (aborted=%s)',

@@ -141,7 +141,10 @@ async function main(): Promise<void> {
   ownership.acquireSync(configRoot)
   configureRuntimeDirectoryOwnership(ownership)
   // Credential preflight can fail before full application diagnostics are initialized.
-  initLogger({ logDir: join(configRoot, 'logs') })
+  initLogger({
+    logDir: join(configRoot, 'logs'),
+    consoleFormat: process.stdout.isTTY ? 'text' : 'json'
+  })
   try {
     await configureMainAgentProcessOwnership(
       new DelegatedProcessOwnership(configRoot, 'main-agent-process-ownership')
@@ -295,6 +298,7 @@ async function main(): Promise<void> {
     configRoot,
     generation,
     explicitStart: !process.argv.includes('--desktop'),
+    deferFirstConnectionTimeout: true,
     onStoppingAdmission: () => runtime?.applicationCommands.beginStopping(),
     stop: (_reason, deadlineAt) => {
       // Cancellation must be visible before an already-resolving startup await resumes.
@@ -665,6 +669,8 @@ async function main(): Promise<void> {
       }
     )
     abortStartupIfStopping()
+    // The first-App deadline begins only once Desktop can discover and attach to this runtime.
+    lifetime.startFirstConnectionTimeout()
     startupReporter.phase('database')
     const state = await databaseStartup.start()
     abortStartupIfStopping()
