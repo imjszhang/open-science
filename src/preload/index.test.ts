@@ -391,6 +391,7 @@ describe('preload bridge — public surface inventory', () => {
       'literature.addPdf',
       'literature.cancelPdfImport',
       'literature.citationStyles',
+      'literature.collect',
       'literature.completeMetadata',
       'literature.exportRecord',
       'literature.formatDocument',
@@ -404,10 +405,12 @@ describe('preload bridge — public surface inventory', () => {
       'literature.journals',
       'literature.lookupMetadata',
       'literature.onChanged',
+      'literature.overviewBatch',
       'literature.publicationCheck',
       'literature.related',
       'literature.search',
       'literature.sources',
+      'literature.studySnapshot',
       'literature.supplementAttachment',
       'literature.supplementAttachmentProgress',
       'literature.supplements',
@@ -426,6 +429,7 @@ describe('preload bridge — public surface inventory', () => {
       'localModels.getSnapshot',
       'localModels.install',
       'localModels.remove',
+      'localModels.setOcrLanguages',
       'locale.initialize',
       'locale.onChanged',
       'locale.setPreference',
@@ -542,8 +546,11 @@ describe('preload bridge — public surface inventory', () => {
       'preview.save',
       'previewContextMenu.onRequested',
       'previewResources.acquire',
+      'previewResources.cancelResearchVideoExport',
+      'previewResources.exportResearchVideo',
       'previewResources.readRange',
       'previewResources.release',
+      'previewResources.researchVideoExportProgress',
       'projectFiles.getOverview',
       'projectFiles.listArtifactGroups',
       'projectFiles.listFiles',
@@ -580,10 +587,14 @@ describe('preload bridge — public surface inventory', () => {
       'remoteAccess.getSnapshot',
       'remoteAccess.onChanged',
       'remoteAccess.probe',
+      'remoteAccess.refreshOffer',
       'remoteAccess.reject',
       'remoteAccess.revokeBrowser',
       'remoteAccess.revokeBrowsers',
+      'remoteAccess.selectLanAddress',
       'remoteAccess.setMode',
+      'remoteAccess.setPinggyRegion',
+      'remoteAccess.setPinggyToken',
       'researchDemos.carriers',
       'researchDemos.get',
       'researchDemos.inspect',
@@ -599,6 +610,14 @@ describe('preload bridge — public surface inventory', () => {
       'researchExecutionProfiles.resolve',
       'researchExecutionProfiles.save',
       'researchRuns.inspect',
+      'researchVideo.cancel',
+      'researchVideo.remove',
+      'researchVideo.start',
+      'researchVideo.status',
+      'resourceRecording.getState',
+      'resourceRecording.onChanged',
+      'resourceRecording.start',
+      'resourceRecording.stop',
       'reviewer.abortFixLoop',
       'reviewer.getForSession',
       'reviewer.getReviewLog',
@@ -674,6 +693,7 @@ describe('preload bridge — public surface inventory', () => {
       'sessions.unlinkPdfContext',
       'sessions.updateArchive',
       'sessions.useCaseCatalog',
+      'sessions.useCaseIntroduction',
       'settings.addCustomServer',
       'settings.addSkillSource',
       'settings.authenticateCustomServer',
@@ -723,6 +743,7 @@ describe('preload bridge — public surface inventory', () => {
       'settings.installMissingWslDependencies',
       'settings.installNotebookNetwork',
       'settings.installOpencode',
+      'settings.installPi',
       'settings.installRecommendedWslDistro',
       'settings.installSkillMarketplace',
       'settings.installWslPlatform',
@@ -818,6 +839,7 @@ describe('preload bridge — public surface inventory', () => {
       'settings.uninstallCodeBuddy',
       'settings.uninstallCodex',
       'settings.uninstallOpencode',
+      'settings.uninstallPi',
       'settings.updateClassification',
       'settings.updateCustomServer',
       'settings.updateDeviceCredential',
@@ -936,6 +958,7 @@ describe('preload bridge — public surface inventory', () => {
       'window.onInterfaceScaleShortcut',
       'window.onShowWindowFind',
       'window.onWindowFindAppearance',
+      'window.openConnectMobile',
       'window.sendCloseConfirmResponse',
       'window.setZoomFactor',
       'window.showTitleBarMenu',
@@ -1041,6 +1064,7 @@ describe('preload bridge — core renderer contract catalog', () => {
       'literature',
       'memory',
       'logs',
+      'resource-recording',
       'managed-file-versions',
       'network',
       'notifications',
@@ -1271,6 +1295,22 @@ describe('preload bridge — core renderer contract catalog', () => {
       code: 'session-revision-conflict'
     })
     expect(invokeMock).toHaveBeenCalledWith('sessions:save-session', { id: 'session-1' })
+  })
+
+  it.each([
+    'session-size-limit',
+    'session-revision-conflict',
+    'desktop-runtime-disconnected',
+    'desktop-runtime-not-submitted'
+  ])('keeps %s in a contextBridge-safe Session rejection', async (code) => {
+    const failure = { code, message: 'Reviewed Session failure.' }
+    invokeMock.mockResolvedValueOnce({ ok: false, error: failure })
+    const rejected = await Promise.resolve(api.sessions.saveSession({ id: 'session-1' })).catch(
+      (error: unknown) => error
+    )
+    expect(rejected).not.toBeInstanceOf(Error)
+    expect(rejected).toEqual(failure)
+    expect(JSON.parse(JSON.stringify(rejected))).toEqual(failure)
   })
 
   it('restores a details-conflict rejection from the Session edit IPC outcome', async () => {

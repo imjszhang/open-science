@@ -1,3 +1,5 @@
+import type { composeResearchFilm } from './research-film'
+import type { LocalModelApi } from '../../shared/local-models'
 import { UseCaseCatalog } from '../session-package/use-case-catalog'
 import { createSessionRecoveryFolderCommand } from '../session-persistence/ipc'
 import { createCompletionHandoffCommands } from '../agents/completion-handoff-ipc'
@@ -71,6 +73,8 @@ export function composeCommandDependencies({
   managedFiles,
   sessionAuthority,
   documentReading,
+  researchFilm,
+  localModels,
   projectLifecycle,
   notebookRuntime,
   researchCatalog,
@@ -118,6 +122,8 @@ export function composeCommandDependencies({
   sessionPackages: Awaited<ReturnType<typeof composeSessionPackages>>
   managedFiles: ReturnType<typeof composeManagedFiles>
   sessionAuthority: Awaited<ReturnType<typeof composeSessionAuthority>>
+  researchFilm: Awaited<ReturnType<typeof composeResearchFilm>>
+  localModels: LocalModelApi
   documentReading: Awaited<ReturnType<typeof composeDocumentReading>>
   projectLifecycle: ReturnType<typeof composeProjectLifecycle>
   notebookRuntime: Awaited<ReturnType<typeof composeNotebookRuntime>>
@@ -148,7 +154,8 @@ export function composeCommandDependencies({
   listAppIconPreviews: (() => import('../../shared/settings').AppIconPreview[]) | undefined
 }): { applicationCommandDependencies: ApplicationCommandCompositionDependencies } {
   const useCaseCatalog = new UseCaseCatalog(resolveConfigRoot())
-  void useCaseCatalog.refresh()
+  // Optional startup warm-up must not reject startup; the marketplace owns its retry UI.
+  void useCaseCatalog.refresh().catch(() => undefined)
   const sessionReplay = new SessionReplayService(
     new SessionReplayRepository(() => getProjectDbClient(resolveConfigRoot())),
     {
@@ -243,6 +250,8 @@ export function composeCommandDependencies({
     permissionGrants: settingsEffects.permissionGrantProjection,
     tags: researchCatalog.tagService,
     literature: createLiteratureCommandOwner({
+      literatureOverview: researchCatalog.literatureOverview,
+      literatureOverviewBatch: researchCatalog.literatureOverviewBatch,
       journalAttributes: researchCatalog.journalAttributes,
       literatureBatchJobs: researchCatalog.literatureBatchJobs,
       literatureCitationFormatter: researchCatalog.literatureCitationFormatter,
@@ -258,6 +267,7 @@ export function composeCommandDependencies({
       literatureCitationDocument: researchCatalog.literatureCitationDocument,
       literatureCatalog: researchCatalog.literatureCatalog,
       literaturePdfImporter: researchCatalog.literaturePdfImporter,
+      literatureCollector: researchCatalog.literatureCollector,
       contentRepository: managedFiles.contentRepository
     }),
     memory: {
@@ -361,6 +371,8 @@ export function composeCommandDependencies({
       },
       events: applicationEvents,
       managedPreview: managedFiles.managedPreviewOwners,
+      researchVideoPresentation: researchFilm.researchVideoPresentation,
+      videoExportTools: researchFilm.videoExportTools,
       preview: {
         load: (request) => sessionPackages.previewStateRepository.get(request.projectId),
         save: (request) =>
@@ -476,7 +488,7 @@ export function composeCommandDependencies({
       locale: localeOwner,
       network: createNetworkCommandOwner(),
       backgroundResults: settingsEffects.backgroundResultActivity,
-      localModels: documentReading.localModels,
+      localModels,
       pdfStructure: documentReading.pdfStructureReader,
       cli: cliCommandOwner,
       github: githubCommandOwner,

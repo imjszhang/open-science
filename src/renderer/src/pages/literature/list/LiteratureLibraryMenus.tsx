@@ -6,7 +6,9 @@ import {
   Download,
   FilePlus2,
   FileText,
+  LibraryBig,
   LoaderCircle,
+  Link,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -28,25 +30,48 @@ import {
 export function LiteratureAddMenu({
   label,
   onAddReference,
+  onImportZotero,
+  onAddLink,
   onImportPdf,
   onImportReferences
 }: Readonly<{
   label?: string
   onAddReference: () => void
+  onImportZotero: () => void
+  onAddLink: (trigger: HTMLButtonElement | null) => void
   onImportPdf: () => void
   onImportReferences: () => void
 }>): React.JSX.Element {
   const { t } = useTranslation()
+  const linkTrigger = useRef<HTMLButtonElement>(null)
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" className="shrink-0 transition-none">
+        <Button
+          ref={linkTrigger}
+          type="button"
+          variant="outline"
+          className="shrink-0 transition-none"
+        >
           <Plus data-icon="inline-start" aria-hidden="true" />
           {label ?? t('Add')}
           <ChevronDown data-icon="inline-end" className="opacity-70" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuItem
+          className="gap-2.5"
+          aria-label={t('Add from identifiers or links')}
+          onSelect={() => onAddLink(linkTrigger.current)}
+        >
+          <Link className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex flex-col">
+            <span>{t('Add from identifiers or links')}</span>
+            <span className="text-xs text-muted-foreground">
+              {t('DOI, arXiv, PMID, PMCID or links')}
+            </span>
+          </span>
+        </DropdownMenuItem>
         <DropdownMenuItem
           className="gap-2.5"
           aria-label={t('Add reference')}
@@ -77,6 +102,19 @@ export function LiteratureAddMenu({
             <span>{t('Import references')}</span>
             <span className="text-xs text-muted-foreground">
               {t('BibTeX, RIS, or PubMed NBIB')}
+            </span>
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2.5"
+          aria-label={t('Import from Zotero')}
+          onSelect={onImportZotero}
+        >
+          <LibraryBig className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex flex-col">
+            <span>{t('Import from Zotero')}</span>
+            <span className="text-xs text-muted-foreground">
+              {t('References, PDFs, tags and collections')}
             </span>
           </span>
         </DropdownMenuItem>

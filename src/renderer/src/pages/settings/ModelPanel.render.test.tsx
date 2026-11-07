@@ -3,14 +3,17 @@ import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18next } from '@/i18n'
-import type { LocalModelSnapshot } from '../../../../shared/local-models'
+import type { LocalModelCapability, LocalModelSnapshot } from '../../../../shared/local-models'
 import { ModelPanel } from './ModelPanel'
 
 let container: HTMLDivElement
 let root: Root
 let snapshot: LocalModelSnapshot
+let ocrSnapshot: LocalModelSnapshot
 const api = {
-  getSnapshot: vi.fn(async () => snapshot),
+  getSnapshot: vi.fn(async (capability?: LocalModelCapability) =>
+    capability === 'ocr' || capability === 'research-narration' ? ocrSnapshot : snapshot
+  ),
   install: vi.fn(
     async () => (snapshot = { ...snapshot, availability: 'installing', hasFiles: true })
   ),
@@ -51,6 +54,7 @@ beforeEach(async () => {
     hasFiles: false,
     inUse: false
   }
+  ocrSnapshot = { ...snapshot }
   vi.stubGlobal('api', { localModels: api })
   container = document.createElement('div')
   document.body.append(container)
@@ -99,6 +103,7 @@ describe('model settings A tabs', () => {
       '50'
     )
     await click('Cancel download')
+    expect(api.cancel).toHaveBeenCalledWith()
     expect(container.querySelector('[role="progressbar"]')).toBeNull()
   })
   it('prevents removal while in use and updates an already-open confirmation', async () => {
@@ -141,6 +146,8 @@ describe('model settings A tabs', () => {
     )
     expect(await api.getSnapshot.mock.results[0]?.value).toEqual(snapshot)
     expect(container.textContent).toContain('PDF figures and tables')
+    expect(container.textContent).toContain('Research narration')
+    expect(api.getSnapshot).not.toHaveBeenCalledWith('video-export')
   })
   it('installs, cancels and removes retained partial files only after confirmation', async () => {
     await act(async () => root.render(<Harness />))

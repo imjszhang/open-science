@@ -1,3 +1,10 @@
+import { formatNetworkHostname } from '../../../../shared/notebook-network-settings'
+import {
+  SplitButton,
+  SplitButtonGroup,
+  SplitButtonPrimary,
+  SplitButtonTrigger
+} from '@/components/ui/split-button'
 import { ScopeDropdown, type PermissionScope } from './PermissionScopeButton'
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 
@@ -9,7 +16,6 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { dialogTitleClassName } from '@/components/ui/dialog-chrome'
-import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { AcpPermissionRequest } from '../../../../shared/acp-permission-contract'
@@ -174,7 +180,7 @@ const getScopeConfirmationSubject = (
   const networkApproval = getNotebookNetworkApproval(request)
   if (networkApproval) {
     return {
-      subject: networkApproval.hostname,
+      subject: `${networkApproval.protocol}://${formatNetworkHostname(networkApproval.hostname)}:${networkApproval.port ?? (networkApproval.protocol === 'http' ? 80 : 443)}`,
       codeExecution: false,
       settingsTarget: 'network'
     }
@@ -470,12 +476,40 @@ const NotebookNetworkApprovalDetail = ({
   const [expanded, setExpanded] = useState(false)
   const approval = getNotebookNetworkApproval(request)
   if (!approval) return null
-  const destination = approval.port ? `${approval.hostname}:${approval.port}` : approval.hostname
 
   return (
     <div className="space-y-2 text-xs leading-5 text-muted-foreground">
-      <p>{t('Notebook code requested access to {{destination}}.', { destination })}</p>
-      {approval.reason ? <p>{t('Reason: {{reason}}', { reason: approval.reason })}</p> : null}
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
+        <dt>{t('Requested domain')}</dt>
+        <dd className="break-all font-mono text-foreground">
+          {formatNetworkHostname(approval.hostname)}
+        </dd>
+        <dt>{t('Protocol')}</dt>
+        <dd className="font-mono text-foreground">{approval.protocol.toUpperCase()}</dd>
+        <dt>{t('Port')}</dt>
+        <dd className="font-mono text-foreground">
+          {approval.port ?? (approval.protocol === 'http' ? 80 : 443)}
+        </dd>
+        {approval.addresses?.length ? (
+          <>
+            <dt>{t('Resolved IP addresses')}</dt>
+            <dd className="break-all font-mono text-foreground">{approval.addresses.join(', ')}</dd>
+          </>
+        ) : null}
+      </dl>
+      <div className="flex items-start gap-2 rounded-md bg-status-warning-surface/60 p-3 text-status-warning-foreground dark:bg-status-warning-dark-surface/60 dark:text-status-warning-dark-foreground">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <p>
+          {t(
+            'This access may involve local services, private networks, cloud credentials, or a Mihomo Fake-IP.'
+          )}
+        </p>
+      </div>
+      <p>
+        {t(
+          'Approval does not replay the command. The agent must check side effects and retry explicitly.'
+        )}
+      </p>
       {approval.runtime &&
       approval.runtime !== 'bash' &&
       request.options.some((option) => option.kind === 'allow_once') ? (
@@ -498,12 +532,36 @@ const NotebookNetworkApprovalDetail = ({
         {t('Details')}
       </button>
       {expanded ? (
-        <p>
-          {t(
-            'This lets Notebook code read from and send data to {{domain}}. Only allow domains you trust. You can revoke saved access anytime in Settings > Network > Notebook network access.',
-            { domain: approval.hostname }
-          )}
-        </p>
+        <div className="space-y-2" role="region">
+          {approval.blockReason === 'addresses-changed' ? (
+            <p>{t('Addresses changed. Review the new addresses before approving again.')}</p>
+          ) : null}
+          {approval.risks?.includes('sensitive') ? (
+            <p>
+              {t(
+                'Sensitive destination: this may expose local services, private networks, or cloud credentials. Approve only if you trust this access.'
+              )}
+            </p>
+          ) : null}
+          {approval.risks?.includes('local') ? (
+            <p>{t('This address may reach the local computer or a loopback service.')}</p>
+          ) : null}
+          {approval.risks?.includes('metadata') ? (
+            <p>{t('This address may expose cloud metadata or credentials.')}</p>
+          ) : null}
+          {approval.risks?.includes('fake-ip') ? (
+            <p>
+              {t('Possible Mihomo Fake-IP: this virtual address is not the final server address.')}
+            </p>
+          ) : null}
+          {approval.reason ? <p>{t('Reason: {{reason}}', { reason: approval.reason })}</p> : null}
+          <p>
+            {t(
+              'This lets Notebook code read from and send data to {{domain}}. Only allow domains you trust. You can revoke saved access anytime in Settings > Network > Notebook network access.',
+              { domain: formatNetworkHostname(approval.hostname) }
+            )}
+          </p>
+        </div>
       ) : null}
     </div>
   )
@@ -684,13 +742,16 @@ const PermissionApprovalCard = ({
   // Default to Session when available: it avoids repeated prompts without silently widening to a
   // whole Project or Global grant. Once remains the fallback for requests without Session scope.
   const availableScopes = request ? getAvailableScopes(request.options) : new Set<PermissionScope>()
-  const defaultScope: PermissionScope = availableScopes.has('session')
-    ? 'session'
-    : availableScopes.has('once')
-      ? 'once'
-      : availableScopes.has('project')
-        ? 'project'
-        : 'global'
+  const defaultScope: PermissionScope =
+    getNotebookNetworkApproval(request)?.recordId && availableScopes.has('project')
+      ? 'project'
+      : availableScopes.has('session')
+        ? 'session'
+        : availableScopes.has('once')
+          ? 'once'
+          : availableScopes.has('project')
+            ? 'project'
+            : 'global'
 
   // Reset per-request UI state (scope + open menu) whenever the displayed request changes,
   // so nothing leaks from the previously answered prompt.
@@ -1080,92 +1141,77 @@ const PermissionApprovalCard = ({
             Styled like the shared Button (default size, including flex centering so the label baseline
             matches the neighboring Button primitives) but kept as two segments so the chevron
             stays a separate tab stop with its own aria-haspopup semantics. */}
-        <Popover
-          open={embedded && scopeOpen}
+        <SplitButton
+          kind="popover"
+          disabled={disabled || isSubmitting}
+          hideMenu={!hasScopePicker}
+          open={scopeOpen}
           onOpenChange={(open) => {
-            if (!open) closeScopeMenu()
+            setScopeOpen(open)
           }}
         >
-          <div className="relative flex items-stretch overflow-visible rounded-lg">
-            {hasScopePicker && scopeOpen && (
-              <ScopeDropdown
-                selected={effectiveScope}
-                available={availableScopes}
-                onSelect={setScope}
-                onClose={closeScopeMenu}
-                portaled={embedded}
-                onceDescription={
-                  networkRuntime && networkRuntime !== 'bash'
-                    ? t('Next matching execution')
-                    : undefined
-                }
-              />
-            )}
-            <PopoverAnchor asChild>
-              <div className="flex items-stretch overflow-hidden rounded-lg">
-                <button
-                  ref={allowPrimaryRef}
+          <SplitButtonGroup>
+            <SplitButtonPrimary
+              ref={allowPrimaryRef}
+              type="button"
+              data-testid="allow-primary"
+              className={cn(
+                'inline-flex h-8 select-none items-center justify-center gap-1 whitespace-nowrap border-0 px-3 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50',
+                isDeleteRequest
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/80'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/80'
+              )}
+              disabled={disabled || !allowOptionId || isSubmitting}
+              onClick={() => {
+                if (!allowOptionId) return
+                respondOnce(allowOptionId)
+              }}
+            >
+              {isFixedOnce ? (
+                <span className="font-semibold">{t('Allow')}</span>
+              ) : isDeleteRequest ? (
+                <span className="font-semibold">{t('Delete')}</span>
+              ) : (
+                <span className="font-semibold">{allowLabel[effectiveScope]}</span>
+              )}
+            </SplitButtonPrimary>
+            {hasScopePicker ? (
+              <>
+                <SplitButtonTrigger
+                  ref={scopeTriggerRef}
                   type="button"
-                  data-testid="allow-primary"
+                  data-testid="scope-chevron"
+                  aria-label={t('Choose authorization scope')}
+                  aria-expanded={scopeOpen}
+                  aria-haspopup="menu"
                   className={cn(
-                    'inline-flex h-8 select-none items-center justify-center gap-1 whitespace-nowrap px-3 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50',
+                    'inline-flex h-8 select-none items-center justify-center border-0 px-2 outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
                     isDeleteRequest
                       ? 'bg-destructive text-destructive-foreground hover:bg-destructive/80'
                       : 'bg-primary text-primary-foreground hover:bg-primary/80'
                   )}
-                  disabled={disabled || !allowOptionId || isSubmitting}
-                  onClick={() => {
-                    if (!allowOptionId) return
-                    respondOnce(allowOptionId)
-                  }}
+                  disabled={isSubmitting}
                 >
-                  {isFixedOnce ? (
-                    <span className="font-semibold">{t('Allow')}</span>
-                  ) : isDeleteRequest ? (
-                    <span className="font-semibold">{t('Delete')}</span>
-                  ) : (
-                    <span className="font-semibold">{allowLabel[effectiveScope]}</span>
-                  )}
-                </button>
-                {hasScopePicker ? (
-                  <>
-                    <div
-                      className={cn(
-                        'w-px',
-                        isDeleteRequest
-                          ? 'bg-destructive-foreground/25'
-                          : 'bg-primary-foreground/25'
-                      )}
-                    />
-                    <button
-                      ref={scopeTriggerRef}
-                      type="button"
-                      data-testid="scope-chevron"
-                      aria-label={t('Choose authorization scope')}
-                      aria-expanded={scopeOpen}
-                      aria-haspopup="menu"
-                      className={cn(
-                        'inline-flex h-8 select-none items-center justify-center px-2 outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
-                        isDeleteRequest
-                          ? 'bg-destructive text-destructive-foreground hover:bg-destructive/80'
-                          : 'bg-primary text-primary-foreground hover:bg-primary/80'
-                      )}
-                      disabled={isSubmitting}
-                      onClick={(e) => {
-                        // Stop propagation so this click doesn't reach the dropdown's document
-                        // click-listener and immediately re-close the menu it just opened.
-                        e.stopPropagation()
-                        setScopeOpen((o) => !o)
-                      }}
-                    >
-                      <ChevronDown className="size-4" />
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </PopoverAnchor>
-          </div>
-        </Popover>
+                  <ChevronDown className="size-4" />
+                </SplitButtonTrigger>
+              </>
+            ) : null}
+          </SplitButtonGroup>
+          {hasScopePicker && (
+            <ScopeDropdown
+              selected={effectiveScope}
+              available={availableScopes}
+              onSelect={setScope}
+              onClose={closeScopeMenu}
+              portaled={embedded}
+              onceDescription={
+                networkRuntime && networkRuntime !== 'bash'
+                  ? t('Next matching execution')
+                  : undefined
+              }
+            />
+          )}
+        </SplitButton>
         {/* Fallback buttons for any protocol option the Allow/Deny controls can't reach, so an
             unrecognized or ambiguous same-kind option stays selectable rather than disappearing.
             Provider-controlled labels can be long: override the Button's shrink-0/whitespace-nowrap

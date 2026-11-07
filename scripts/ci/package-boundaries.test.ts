@@ -625,34 +625,31 @@ it.each(hostBoundaryCases)(
   }
 )
 
-const productionBoundaryCases = (
-  Object.entries(hostBoundaryManifest.modules) as [string, { ownerPaths: string[] }][]
-).map(([id, module]) => ({ id, module }))
-const pdfHostBoundaryCases = productionBoundaryCases.flatMap(({ id, module }) => {
-  if (module.ownerPaths.some((path) => path.startsWith('packages/pdf-'))) return []
-  const source = module.ownerPaths.find(
-    (path) => path.startsWith('src/') && !path.includes('.test.')
+it.each(
+  (Object.entries(hostBoundaryManifest.modules) as [string, { ownerPaths: string[] }][]).flatMap(
+    ([id, module]) => {
+      if (module.ownerPaths.some((path) => path.startsWith('packages/pdf-'))) return []
+      const source = module.ownerPaths.find(
+        (path) => path.startsWith('src/') && !path.includes('.test.')
+      )
+      return source ? [{ id, source }] : []
+    }
   )
-  return source ? [{ id, source }] : []
-})
-
-// Keep every production owner in the audit while giving each plan its own test deadline.
-describe('host source edits never select unchanged upstream PDF package implementation tests', () => {
-  it.each(pdfHostBoundaryCases)('$id: $source', async ({ id, source }) => {
+)(
+  '$id host source edits never select unchanged upstream PDF package implementation tests',
+  async ({ source }) => {
     const { createAffectedTestPlan } = await import('./module-test-impact.mjs')
-    const violations: string[] = []
-    // Integrity retains historical registration evidence. Package boundaries apply to the
-    // executable plan, including stale graph suggestions, rather than to raw evidence records.
-    const plan = createAffectedTestPlan(
-      [{ path: source, status: 'modified' }],
-      { status: 'not-used', testFiles: [] },
-      hostBoundaryManifest
-    )
-    for (const test of plan.testFiles)
-      if (/^packages\/pdf-(translation|structure)\//.test(test)) violations.push(`${id} -> ${test}`)
-    expect(violations).toEqual([])
-  })
-})
+    // Integrity retains historical registration evidence. Check the executable plan, including
+    // stale graph suggestions, with one timeout per module as the ownership manifest grows.
+    const plan = createAffectedTestPlan([{ path: source, status: 'modified' }], {
+      status: 'not-used',
+      testFiles: []
+    })
+    expect(
+      plan.testFiles.filter((test) => /^packages\/pdf-(translation|structure)\//.test(test))
+    ).toEqual([])
+  }
+)
 
 it('Compute host edits never register or select upstream Compute units', async () => {
   const model = createPackageDirectionModel()
@@ -714,20 +711,20 @@ it('Compute host edits never register or select upstream Compute units', async (
   }
 })
 
-describe('every module plan excludes unrelated upstream package tests', () => {
-  it.each(productionBoundaryCases)('$id', async ({ id, module }) => {
+it.each(Object.entries(hostBoundaryManifest.modules) as [string, { ownerPaths: string[] }][])(
+  '%s module plan excludes unrelated upstream package tests',
+  async (id, module) => {
     const { createModuleTestPlan } = await import('./module-test-impact.mjs')
-    const violations: string[] = []
     // Validate executed coverage while the trusted retirement policy permits cleanup of
     // historical redundant registrations. Full-validation owners retain their fallback.
     const plan = createModuleTestPlan(id, hostBoundaryManifest)
     if (plan.mode === 'full') return
     const { excluded } = createPackageTestPlan(module.ownerPaths, registry)
-    for (const test of plan.testFiles)
-      if (excluded.some((root) => test.startsWith(root + '/'))) violations.push(`${id} -> ${test}`)
-    expect(violations).toEqual([])
-  })
-})
+    expect(
+      plan.testFiles.filter((test) => excluded.some((root) => test.startsWith(root + '/')))
+    ).toEqual([])
+  }
+)
 
 it('selects durable file consumers downstream without testing unchanged prerequisites', async () => {
   const model = createPackageDirectionModel()
@@ -802,10 +799,11 @@ it('selects durable file consumers downstream without testing unchanged prerequi
   expect(invocations.flat()).toContain('packages/durable-files/src/durable-json-file.test.ts')
 })
 
-it('routes download package changes downstream and host adapters without unchanged package units', async () => {
+it('routes download package changes downstream and honors full host owners', async () => {
   const model = createPackageDirectionModel()
   const { createAffectedTestPlan, executeModuleTestPlan } = await import('./module-test-impact.mjs')
   const graph = { status: 'not-used', testFiles: [] }
+  const localModels = loadModuleImpactManifest().modules.main_local_models
   const packageRoot = 'packages/resilient-download'
   for (const path of [
     `${packageRoot}/src/resilient-download.ts`,
@@ -846,7 +844,14 @@ it('routes download package changes downstream and host adapters without unchang
       'src/main/notebook/environment-download.contract.test.ts'
     ]
   ]) {
-    const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph, model)
+    const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph)
+    if (localModels.fullTestReason && path.startsWith('src/main/local-models/')) {
+      expect(plan.mode, path).toBe('full')
+      expect(plan.reasonChains).toContain(
+        `main_local_models -> ${localModels.fullTestReason} -> full`
+      )
+      continue
+    }
     expect(plan.mode).toBe('selective')
     expect(plan.testFiles).toContain(test)
     for (const entry of registry.packages)
@@ -1020,10 +1025,6 @@ it('keeps provider units upstream of host adapters and selects real downstream c
     [
       'src/main/settings/native-responses-compatibility.ts',
       'src/main/settings/native-responses-compatibility.test.ts'
-    ],
-    [
-      'src/main/literature/pdf-translation/local.ts',
-      'src/main/literature/pdf-translation/local.test.ts'
     ],
     [
       'src/main/literature/pdf-translation/text-generation.ts',

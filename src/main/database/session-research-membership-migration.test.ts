@@ -19,6 +19,10 @@ const legacyResearchChecksum = 'fbba1e83ef4fb800b7713330a1c1f34e1a758017236ec8fa
 const releasedResearchId = '0052_session_research_membership'
 const releasedResearchChecksum = '549bd69cfebeeb1420d3d9787b0a1c7a80f4c3f758f339e2c781a0e535d640b3'
 const readingId = '0051_literature_reading_status'
+const noteSearchId = '0052_literature_personal_note_search'
+const doiId = '0053_literature_doi_identity'
+const slurmId = '0054_slurm_job_reliability'
+const upstreamGap = [noteSearchId, doiId, slurmId]
 const researchMigration: MigrationManifestEntry = MIGRATION_MANIFEST.find(
   ({ id }) => id === researchId
 )!
@@ -37,10 +41,12 @@ const seedHistoricalDatabase = async (
   client = createProjectDbClient(root)
   await createDatabaseAtReleasedManifest(
     client,
-    MIGRATION_MANIFEST.filter(
-      ({ id }) =>
-        id !== (variant === 'upstream' ? researchId : variant === 'research' ? readingId : '')
-    ).map((migration) => {
+    MIGRATION_MANIFEST.filter(({ id }) => {
+      if (variant !== 'upstream' && upstreamGap.includes(id)) return false
+      if (variant === 'upstream' && id === researchId) return false
+      if (variant === 'research' && id === readingId) return false
+      return true
+    }).map((migration) => {
       if (migration.id !== researchId || variant === 'upstream') return migration
       return variant === 'released-0052'
         ? { ...migration, id: releasedResearchId, checksum: releasedResearchChecksum }
@@ -101,7 +107,7 @@ it('adds nullable research projections without changing existing Session or PDF 
   })
   await expect(
     migrateApplicationDatabase(client, { databasePath: join(root, 'open-science.db') })
-  ).resolves.toMatchObject({ from: readingId, to: researchId, applied: [researchId] })
+  ).resolves.toMatchObject({ from: slurmId, to: researchId, applied: [researchId] })
   expect(await client.$queryRaw`SELECT * FROM "Session" WHERE id = 's'`).toEqual([
     { ...before, researchMembershipJson: null, importedResearchId: null }
   ])
@@ -115,7 +121,7 @@ it('adds nullable research projections without changing existing Session or PDF 
   await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({ applied: [] })
 })
 
-it('bridges the released research ledger without renaming it or replaying its populated columns', async () => {
+it('bridges the released research ledger and inserts the upstream migrations ahead of it', async () => {
   await seedHistoricalDatabase('research')
   await client.$executeRaw`UPDATE "Session" SET "researchMembershipJson" = '{"researchId":"r"}',
     "importedResearchId" = 'imported-r' WHERE id = 's'`
@@ -129,7 +135,11 @@ it('bridges the released research ledger without renaming it or replaying its po
       databasePath: join(root, 'open-science.db'),
       onBackupReady: ({ migrationId }) => backups.push(migrationId)
     })
-  ).resolves.toMatchObject({ from: legacyResearchId, to: researchId, applied: [readingId] })
+  ).resolves.toMatchObject({
+    from: legacyResearchId,
+    to: researchId,
+    applied: [readingId, ...upstreamGap]
+  })
   expect(backups).toEqual([readingId])
   await expect(
     access(join(root, `open-science.db.before-${readingId}.backup`))
@@ -139,15 +149,27 @@ it('bridges the released research ledger without renaming it or replaying its po
     title: 'Existing paper',
     readingStatus: 'unread'
   })
-  expect(
-    await client.$queryRaw`SELECT * FROM "_open_science_migrations" WHERE id <> ${readingId} ORDER BY id`
-  ).toEqual(ledger)
-  expect(await client.$queryRaw`PRAGMA foreign_key_check`).toEqual([])
   const upgradedLedger = await readLedger()
+  expect(upgradedLedger).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: readingId }),
+      expect.objectContaining({ id: noteSearchId }),
+      expect.objectContaining({ id: doiId }),
+      expect.objectContaining({ id: slurmId }),
+      expect.objectContaining({ id: researchId, checksum: researchMigration.checksum })
+    ])
+  )
+  expect(upgradedLedger).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: legacyResearchId })])
+  )
+  expect((upgradedLedger as Array<{ id: string }>).filter(({ id }) => id < readingId)).toEqual(
+    (ledger as Array<{ id: string }>).filter(({ id }) => id < readingId)
+  )
+  expect(await client.$queryRaw`PRAGMA foreign_key_check`).toEqual([])
   await client.$disconnect()
   client = createProjectDbClient(root)
   await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
-    from: legacyResearchId,
+    from: researchId,
     to: researchId,
     applied: []
   })
@@ -214,11 +236,17 @@ it('rolls back a failed bridge and can retry without altering the released resea
     migrateApplicationDatabase(client, {
       onBackupReady: ({ reused }) => reusedBackups.push(reused)
     })
-  ).resolves.toMatchObject({ applied: [readingId] })
+  ).resolves.toMatchObject({ applied: [readingId, ...upstreamGap] })
   expect(reusedBackups).toEqual([true])
-  expect(
-    await client.$queryRaw`SELECT * FROM "_open_science_migrations" WHERE id <> ${readingId} ORDER BY id`
-  ).toEqual(ledger)
+  expect(await readLedger()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: readingId }),
+      expect.objectContaining({ id: researchId, checksum: researchMigration.checksum })
+    ])
+  )
+  expect(await readLedger()).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: legacyResearchId })])
+  )
 })
 
 const futureMigration = (): MigrationManifestEntry => {
@@ -235,25 +263,32 @@ const futureMigration = (): MigrationManifestEntry => {
   }
 }
 
-it('reopens both released 0051 rows and accepts only a verified future canonical suffix', async () => {
+it('renames a released 0051 row, fills the upstream gap, and accepts only a verified future suffix', async () => {
   await seedHistoricalDatabase('research-with-reading')
-  const oldLedger = await readLedger()
   await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
     from: legacyResearchId,
     to: researchId,
-    applied: []
+    applied: upstreamGap
   })
-  expect(await readLedger()).toEqual(oldLedger)
+  const bridgedLedger = await readLedger()
+  expect(bridgedLedger).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: researchId, checksum: researchMigration.checksum })
+    ])
+  )
+  expect(bridgedLedger).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: legacyResearchId })])
+  )
   const future = futureMigration()
   const manifest = [...MIGRATION_MANIFEST, future]
   await expect(migrateApplicationDatabaseWithManifest(client, manifest)).resolves.toMatchObject({
-    from: legacyResearchId,
+    from: researchId,
     to: future.id,
     applied: [future.id]
   })
   expect(
     await client.$queryRaw`SELECT * FROM "_open_science_migrations" WHERE id <> ${future.id} ORDER BY id`
-  ).toEqual(oldLedger)
+  ).toEqual(bridgedLedger)
   const upgradedLedger = await readLedger()
   await client.$disconnect()
   client = createProjectDbClient(root)
@@ -288,16 +323,30 @@ it.each(['research', 'research-with-reading'] as const)(
   }
 )
 
-it('recognizes a released 0052 ledger as the five-digit research migration', async () => {
+it('renames a released 0052 ledger and applies the upstream migrations ahead of it', async () => {
   await seedHistoricalDatabase('released-0052')
-  const ledger = await readLedger()
   await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
     from: releasedResearchId,
     to: researchId,
+    applied: upstreamGap
+  })
+  const ledger = await readLedger()
+  expect(ledger).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: researchId, checksum: researchMigration.checksum }),
+      expect.objectContaining({ id: noteSearchId }),
+      expect.objectContaining({ id: doiId }),
+      expect.objectContaining({ id: slurmId })
+    ])
+  )
+  expect(ledger).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: releasedResearchId })])
+  )
+  await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
+    from: researchId,
+    to: researchId,
     applied: []
   })
-  expect(await readLedger()).toEqual(ledger)
-  await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({ applied: [] })
 })
 
 it('does not bridge missing reading status for a canonical 10052 history', async () => {

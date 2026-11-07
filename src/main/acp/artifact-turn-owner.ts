@@ -141,7 +141,10 @@ type ArtifactTurnOwnerOptions = {
   runRegistry: ArtifactRunRegistry
   runtimeInstanceId?: string
   now?: () => number
-  issueRpcCapability?: (binding: ArtifactRpcCapabilityBinding) => string
+  issueRpcCapability?: (
+    binding: ArtifactRpcCapabilityBinding,
+    isOwnerActive: () => boolean
+  ) => string
   revokeRpcCapability?: (token: string) => Promise<void> | void
   provenance?: ArtifactTurnProvenance
   writeHandoffFile?: (filePath: string, content: string) => Promise<void>
@@ -238,41 +241,51 @@ class ArtifactTurnOwner {
     const runContext = this.createRunContext(turn)
     return this.withHandoffLock(turn.currentRunFile, async () => {
       let handoffWritten = false
+      let activationComplete = false
 
-      turn.rpcCapabilityToken = this.options.issueRpcCapability?.({
-        executionId: turn.executionId,
-        projectId: turn.projectId,
-        appSessionId: turn.appSessionId,
-        artifactStorageSessionId: turn.artifactStorageSessionId,
-        artifactRunId: turn.runId,
-        rootFrameId: turn.rootFrameId,
-        agentFrameId: turn.agentFrameId,
-        messageBranchId: turn.messageBranchId,
-        messageBranchAncestry: turn.messageBranchAncestry,
-        messageAncestry: turn.messageAncestry,
-        runtimeSegmentId: turn.runtimeSegmentId,
-        promptMessageId: turn.promptMessageId,
-        agentName: turn.agentName,
-        ...(turn.notebookArtifactSourceScope
-          ? { notebookSessionId: turn.notebookArtifactSourceScope.notebookSessionId }
-          : {}),
-        sourceScope: {
-          allowedImportRoots: [
-            ...(turn.workspaceCwd ? [turn.workspaceCwd] : []),
-            ...(turn.notebookArtifactSourceScope
-              ? [turn.notebookArtifactSourceScope.notebookSessionRoot]
-              : [])
-          ],
-          workspaceCwd: turn.workspaceCwd,
-          notebookDataDir: turn.notebookArtifactSourceScope?.notebookDataDir,
-          notebookSessionRoot: turn.notebookArtifactSourceScope?.notebookSessionRoot
+      turn.rpcCapabilityToken = this.options.issueRpcCapability?.(
+        {
+          executionId: turn.executionId,
+          projectId: turn.projectId,
+          appSessionId: turn.appSessionId,
+          artifactStorageSessionId: turn.artifactStorageSessionId,
+          artifactRunId: turn.runId,
+          rootFrameId: turn.rootFrameId,
+          agentFrameId: turn.agentFrameId,
+          messageBranchId: turn.messageBranchId,
+          messageBranchAncestry: turn.messageBranchAncestry,
+          messageAncestry: turn.messageAncestry,
+          runtimeSegmentId: turn.runtimeSegmentId,
+          promptMessageId: turn.promptMessageId,
+          agentName: turn.agentName,
+          ...(turn.notebookArtifactSourceScope
+            ? { notebookSessionId: turn.notebookArtifactSourceScope.notebookSessionId }
+            : {}),
+          sourceScope: {
+            allowedImportRoots: [
+              ...(turn.workspaceCwd ? [turn.workspaceCwd] : []),
+              ...(turn.notebookArtifactSourceScope
+                ? [turn.notebookArtifactSourceScope.notebookSessionRoot]
+                : [])
+            ],
+            workspaceCwd: turn.workspaceCwd,
+            notebookDataDir: turn.notebookArtifactSourceScope?.notebookDataDir,
+            notebookSessionRoot: turn.notebookArtifactSourceScope?.notebookSessionRoot
+          },
+          allowedMethods: ['artifactSaveVersion']
         },
-        allowedMethods: ['artifactSaveVersion']
-      })
+        () =>
+          turn.phase === 'open' &&
+          this.activeTurnsByExecution.get(turn.executionId) === turn &&
+          (!activationComplete || this.activeTurnsByHandoffFile.get(turn.currentRunFile) === turn)
+      )
       if (turn.rpcCapabilityToken) runContext.rpcCapabilityToken = turn.rpcCapabilityToken
 
       try {
         await mkdir(dirname(turn.currentRunFile), { recursive: true })
+        // MCP can read the handoff as soon as the write is visible, before its promise settles.
+        // Admit the new execution first, retaining the previous handoff owner until success.
+        this.activeTurnsByExecution.set(turn.executionId, turn)
         await this.writeHandoffFile(turn.currentRunFile, runContext)
         handoffWritten = true
         if (turn.updatesSessionNotebookContext) {
@@ -292,6 +305,10 @@ class ArtifactTurnOwner {
           })
         }
       } catch (error) {
+        // Close liveness before awaiting cleanup, even if capability revocation itself fails.
+        if (this.activeTurnsByExecution.get(turn.executionId) === turn) {
+          this.activeTurnsByExecution.delete(turn.executionId)
+        }
         if (turn.rpcCapabilityToken) {
           try {
             await this.options.revokeRpcCapability?.(turn.rpcCapabilityToken)
@@ -319,8 +336,8 @@ class ArtifactTurnOwner {
         throw error
       }
 
-      this.activeTurnsByExecution.set(turn.executionId, turn)
       this.activeTurnsByHandoffFile.set(turn.currentRunFile, turn)
+      activationComplete = true
       const handle: ArtifactTurnHandle = { [artifactTurnHandleKey]: Symbol(turn.runId) }
       this.turnsByHandle.set(handle, turn)
       this.activeHandlesByExecution.set(turn.executionId, handle)

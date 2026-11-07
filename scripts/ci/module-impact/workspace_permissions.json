@@ -7,7 +7,6 @@
     "src/renderer/src/pages/workspace/PermissionApprovalControls.tsx",
     "src/renderer/src/pages/workspace/PermissionScopeConfirmationDialog.tsx",
     "src/renderer/src/pages/workspace/QuestionSkipButton.tsx",
-    "src/renderer/src/pages/workspace/question-skip-button.css",
     "src/renderer/src/pages/workspace/WorkspaceElicitationCard.interaction.test.tsx",
     "src/renderer/src/pages/workspace/WorkspaceElicitationCard.tsx",
     "src/renderer/src/pages/workspace/permission-request-presentation.test.ts",
@@ -110,5 +109,5 @@
   },
   "capabilityOverlays": [],
   "fallbackCapability": "renderer_view",
-  "fullTestReason": "The workspace_permissions owner retains 2 explicit research consumer obligations beyond its reviewed source-derived edges, including index-startup-failure.test.ts, index-fatal-errors.test.ts. 2 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full renderer_view validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes."
+  "fullTestReason": "The workspace_permissions owner retains 2 explicit research consumer obligations beyond its reviewed source-derived edges, including index-startup-failure.test.ts, index-fatal-errors.test.ts. 2 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full renderer_view validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes. Question skip controls now use the shared split button instead of their reviewed stylesheet; retain complete validation until the changed permission control boundary is reviewed and reclassified."
 }

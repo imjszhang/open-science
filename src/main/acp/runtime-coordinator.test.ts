@@ -19,6 +19,8 @@ import type {
 import { MAX_ACP_RUNTIME_EVENTS, toAcpStateCommandResponse } from '../../shared/acp'
 import type { AcpSessionAgentTarget } from '../../shared/acp'
 import { AcpRuntimeCoordinator } from './runtime-coordinator'
+import { createAcpCreateSessionWorkflow } from './create-session-workflow'
+import { retainSessionCreationCleanup } from './session-creation-cleanup'
 import type { AcpRuntime, AcpRuntimeCallbacks } from './runtime'
 import type { ConversationPermissionGrantStore } from './permission-broker'
 import type { AgentModelChangeTarget } from '../agent-framework'
@@ -581,6 +583,7 @@ const createFakeRuntime = (options: {
     sendAppContinuation,
     steerFollowUp,
     steerSideChatAdvisory,
+    withPromptAdmission: vi.fn(async (work: () => Promise<unknown>) => work()),
     withActivity: vi.fn(
       async (_activityOptions: unknown, work: (scopedRuntime: AcpRuntime) => Promise<unknown>) =>
         work(runtime)
@@ -594,8 +597,12 @@ const createFakeRuntime = (options: {
       reviewerBridgeScoped: undefined
     })),
     disconnect,
+    get cleanupConfirmed() {
+      return true
+    },
     requestRetirement,
     requestProviderReconnect,
+    requestIdleRelease: vi.fn(),
     applyReasoningEffortChange,
     applyModelChange,
     captureBackend,
@@ -6686,6 +6693,41 @@ describe('AcpRuntimeCoordinator', () => {
     expect(onSessionUnavailable).toHaveBeenCalledWith('session-2')
   })
 
+  it('retains an unconfirmed successful disconnect alongside a rejected runtime for retry', async () => {
+    const created: ReturnType<typeof createFakeRuntime>[] = []
+    const onDisconnected = vi.fn()
+    const coordinator = new AcpRuntimeCoordinator(
+      (callbacks) => {
+        const fake = createFakeRuntime({
+          frameworkId: created.length === 0 ? 'claude-code' : 'codex',
+          sessionIds: [`session-${created.length + 1}`],
+          callbacks
+        })
+        created.push(fake)
+        return fake.runtime
+      },
+      {},
+      '',
+      undefined,
+      onDisconnected
+    )
+    await coordinator.createSession()
+    await coordinator.requestAgentFrameworkSwitch()
+    await coordinator.createSession()
+    created[0].disconnect.mockRejectedValueOnce(new Error('old disconnect failed'))
+    const cleanupConfirmed = vi.spyOn(created[1].runtime, 'cleanupConfirmed', 'get')
+    cleanupConfirmed.mockReturnValue(false)
+
+    await expect(coordinator.disconnect()).rejects.toThrow('old disconnect failed')
+    expect(onDisconnected).not.toHaveBeenCalled()
+
+    cleanupConfirmed.mockReturnValue(true)
+    await coordinator.disconnect()
+    expect(created[0].disconnect).toHaveBeenCalledTimes(2)
+    expect(created[1].disconnect).toHaveBeenCalledTimes(2)
+    expect(onDisconnected).toHaveBeenCalledOnce()
+  })
+
   it('preserves sessions still reported by a runtime whose teardown rejects', async () => {
     const created: ReturnType<typeof createFakeRuntime>[] = []
     const onSessionUnavailable = vi.fn()
@@ -8467,4 +8509,54 @@ it('retains a reused runtime while a newly admitted Session is still being creat
   expect(owner.sendPrompt).toHaveBeenCalledOnce()
   await expect(coordinator.shutdownForQuit()).resolves.toEqual({ reaped: true })
   expect(owner.runtime.shutdownForQuit).toHaveBeenCalledOnce()
+})
+
+it('reports a failed cold create before cleanup while retaining the enclosing workspace writer', async () => {
+  const capabilityCleanup = createDeferred()
+  const retirement = createDeferred()
+  const failure = new Error('Original provider startup failure')
+  const created: ReturnType<typeof createFakeRuntime>[] = []
+  const coordinator = new AcpRuntimeCoordinator((callbacks) => {
+    const fake = createFakeRuntime({ frameworkId: 'opencode', sessionIds: [], callbacks })
+    fake.createSession.mockImplementation(async () => {
+      retainSessionCreationCleanup(failure, capabilityCleanup.promise)
+      throw failure
+    })
+    fake.requestRetirement.mockImplementation(() => retirement.promise)
+    created.push(fake)
+    return fake.runtime
+  })
+  let writerActive = false
+  const release = vi.fn(async () => undefined)
+  const workflow = createAcpCreateSessionWorkflow(coordinator, {
+    workspaces: { acquire: async () => ({ cwd: '/workspace', commit: vi.fn(), release }) },
+    withDataRootWrite: async (operation) => {
+      writerActive = true
+      try {
+        return await operation()
+      } finally {
+        writerActive = false
+      }
+    }
+  })
+  await expect(
+    workflow.create({
+      projectId: 'project-1',
+      agentTarget: {
+        frameworkId: 'opencode',
+        providerId: 'provider',
+        model: 'model',
+        reasoningEffort: 'default'
+      }
+    })
+  ).rejects.toBe(failure)
+  expect(writerActive).toBe(true)
+  expect(created.at(-1)!.requestRetirement).not.toHaveBeenCalled()
+  capabilityCleanup.resolve()
+  await vi.waitFor(() => expect(created.at(-1)!.requestRetirement).toHaveBeenCalledOnce())
+  expect(writerActive).toBe(true)
+  expect(release).not.toHaveBeenCalled()
+  retirement.resolve()
+  await vi.waitFor(() => expect(writerActive).toBe(false))
+  expect(release).toHaveBeenCalledOnce()
 })

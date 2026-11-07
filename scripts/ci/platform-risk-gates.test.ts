@@ -18,6 +18,7 @@ import {
 import { loadModuleImpactManifest } from './load-module-impact.mjs'
 import { windowsCoreChecks } from './windows-core-plan.mjs'
 
+const selectiveRendererPath = 'src/renderer/src/lib/format-star-count.ts'
 const full = classifyChanges([{ path: 'package.json', status: 'modified' }])
 const changes = (path: string): Array<{ path: string; status: string }> => [
   { path, status: 'modified' }
@@ -76,14 +77,22 @@ const boundedPlatformModel = (): ReturnType<typeof createModuleImpactModel> =>
 
 describe('platform risk execution policy', () => {
   it.each([
-    ['shared owner', 'M', 'src/shared/settings.ts'],
-    ['unknown owner', 'A', 'src/shared/new-unregistered-contract.ts'],
-    ['destructive change', 'D', 'src/shared/app-config.ts'],
-    ['global input', 'M', 'package.json'],
-    ['CI policy', 'M', '.github/workflows/pr-gate.yml']
+    ['shared owner', 'M', 'src/shared/settings.ts', true],
+    ['unknown owner', 'A', 'src/shared/new-unregistered-contract.ts', false],
+    ['destructive change', 'D', 'src/shared/app-config.ts', false],
+    ['global input', 'M', 'package.json', false],
+    ['CI policy', 'M', '.github/workflows/pr-gate.yml', false],
+    ['literature tool contract', 'M', 'src/main/literature/mcp-server.ts', true],
+    ['renderer UI boundary', 'M', 'src/renderer/src/components/ui/button.tsx', true],
+    [
+      'permission control boundary',
+      'M',
+      'src/renderer/src/pages/workspace/PermissionScopeButton.tsx',
+      true
+    ]
   ])(
     'defers %s full portable validation to acceptance without weakening other checks',
-    (_, status, path) => {
+    (_, status, path, floor) => {
       const classify = (event: string): ReturnType<typeof runModuleImpactAuthorityCli> =>
         runModuleImpactAuthorityCli(
           ['--base', 'a'.repeat(40), '--head', 'b'.repeat(40)],
@@ -94,22 +103,25 @@ describe('platform risk execution policy', () => {
       const { plan: queue } = classify('merge_group')
       expect(report.resolved.mode).toBe('full')
       expect(pr.mode).toBe('full')
-      expect(pr.bundles).not.toContain('unit')
-      expect(pr.lanes).not.toContain('unit_macos')
       expect(pr.roots).toEqual(report.resolved.roots)
       expect(pr.reasonChains).toEqual(expect.arrayContaining(report.resolved.reasonChains))
       expect(pr.reasonChains).toContain(
         'pull_request: full portable tests and coverage deferred to scheduled/manual acceptance'
       )
+      expect(queue.mode).toBe('full')
+      for (const plan of [pr, queue]) {
+        // Owned changes keep their declared module test floor; the complete suite is deferred.
+        expect(plan.bundles.includes('unit')).toBe(floor)
+        expect(plan.lanes.includes('unit_macos')).toBe(floor)
+        expect(plan.unitFloor === true).toBe(floor)
+        expect(toGitHubOutputPlan(plan).unitFloor === true).toBe(floor)
+      }
       expect(pr.bundles).toEqual(
         expect.arrayContaining(['policy', 'static', 'linux_runtime', 'windows_core', 'windows_e2e'])
       )
       expect(pr.lanes).toEqual(
         expect.arrayContaining(['interface_contracts', 'cli_sdk', 'i18n', 'lint', 'typecheck_node'])
       )
-      expect(queue.mode).toBe('full')
-      expect(queue.bundles).not.toContain('unit')
-      expect(queue.lanes).not.toContain('unit_macos')
       for (const plan of [pr, queue]) {
         const conclusions = Object.fromEntries(
           ['preflight', ...plan.bundles].map((name) => [name, 'success'])
@@ -118,7 +130,7 @@ describe('platform risk execution policy', () => {
         for (const unit of ['skipped', 'failure', 'cancelled', undefined]) {
           expect(
             evaluatePrGate(plan, { ...conclusions, unit }, { executionMode: 'bundles' }).ok
-          ).toBe(unit === 'skipped')
+          ).toBe(!floor && unit === 'skipped')
         }
       }
     }
@@ -127,10 +139,13 @@ describe('platform risk execution policy', () => {
   it.each(['pull_request', 'merge_group'])(
     'keeps bounded module tests and their blocking gate on %s',
     (event) => {
-      const { plan } = resolveModuleImpactModel(
-        changes('src/renderer/src/components/ui/button.tsx'),
-        boundedPlatformModel(),
-        event
+      const { plan } = runModuleImpactAuthorityCli(
+        ['--base', 'a'.repeat(40), '--head', 'b'.repeat(40)],
+        { EVENT_NAME: event, PR_GATE_PLATFORM_POLICY: 'risk-v1' },
+        {
+          execute: () => Buffer.from(`M\0${selectiveRendererPath}\0`),
+          write: () => undefined
+        }
       )
       expect(plan.mode).toBe('selective')
       expect(plan.bundles).toContain('unit')
@@ -343,13 +358,14 @@ it.each(['pull_request', 'merge_group'])(
 it.each(['pull_request', 'merge_group'])(
   'does not let a workflow contract expand an ordinary UI change on %s',
   (event) => {
-    const { plan, report } = resolveModuleImpactModel(
-      [
-        ...changes('src/renderer/src/components/ui/button.tsx'),
-        ...changes('scripts/ci/pr-gate-workflow.test.ts')
-      ],
-      boundedPlatformModel(),
-      event
+    const { plan, report } = runModuleImpactAuthorityCli(
+      ['--base', 'a'.repeat(40), '--head', 'b'.repeat(40)],
+      { EVENT_NAME: event, PR_GATE_PLATFORM_POLICY: 'risk-v1' },
+      {
+        execute: () =>
+          Buffer.from(`M\0${selectiveRendererPath}\0M\0scripts/ci/pr-gate-workflow.test.ts\0`),
+        write: () => undefined
+      }
     )
     expect(plan.mode).toBe('selective')
     expect(plan.macosProfile).toBe('smoke')

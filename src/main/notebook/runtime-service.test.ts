@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, posix, win32 } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi, type Mock } from 'vitest'
 import { NotebookBackgroundRunError } from '../../shared/notebook'
+import { resourceActivity } from '../resource-diagnostics/activity'
 import { NotebookExecutionStopError } from '../../shared/notebook-execution-error'
 import { EnvironmentLeaseManager } from '@aipoch/environment'
 import { markTrustedNotebookBindingPermissionPrompts } from './runtime-binding-admission'
@@ -76,7 +77,7 @@ import {
   writeReadyMarker,
   writeRReadyMarker
 } from '@aipoch/environment'
-import type { NotebookShellProcess } from './shell-process'
+import { ShellPreparationError, type NotebookShellProcess } from './shell-process'
 import * as windowsNotebookRuntime from './windows-notebook-runtime'
 import { NOTEBOOK_CODE_LIMIT_BYTES } from './content-limits'
 import type { RuntimeDiagnosticLogger } from '@aipoch/diagnostics/node'
@@ -312,6 +313,7 @@ describe('notebook runtime service', () => {
       service.requestNetworkAccess({
         sessionId: 'session-1',
         workspaceCwd: root,
+        recordId: 'record-1',
         hostname: 'data.example.org',
         reason: 'Download data.'
       })
@@ -4121,6 +4123,7 @@ describe('notebook runtime service', () => {
       }
 
       const receipt = await service.executeShellBackground(request)
+      expect(resourceActivity.state.sampling).toBe(true)
       expect(receipt).toMatchObject({
         executionType: 'shell-command',
         sessionId: request.sessionId,
@@ -4138,6 +4141,7 @@ describe('notebook runtime service', () => {
 
       releaseExecution.resolve()
       await service.waitForBackgroundRun(receipt.runId)
+      expect(resourceActivity.state.sampling).toBe(false)
       await expect(
         service.getBackgroundRun({ ...request, submissionIdentity: request.executionInvocationId })
       ).resolves.toMatchObject({
@@ -4563,6 +4567,63 @@ describe('notebook runtime service', () => {
       expect(await service.executeShell(request)).toEqual(unavailable)
       expect(execute).toHaveBeenCalledOnce()
     })
+
+    it.each([false, true])(
+      'replays completed Shell work without checking current runtime readiness (background: %s)',
+      async (background) => {
+        const root = await createStorageRoot()
+        const result = { stdout: 'completed', stderr: '', exitCode: 0 }
+        const execute = vi.fn<NotebookShellProcess['execute']>().mockResolvedValue(result)
+        const prepareEnvironment = vi.fn().mockResolvedValue({ PATH: 'verified-runtime' })
+        const service = new NotebookRuntimeService({
+          configRoot: root,
+          dataRoot: root,
+          projectId: 'default-project',
+          platform: 'win32',
+          shellRuntimeBinding: { kind: 'powershell', version: '7.6' },
+          shellBackgroundExecutionEnabled: true,
+          shellProcess: { execute, prepareEnvironment }
+        })
+        const request = {
+          sessionId: 'completed-retry',
+          workspaceCwd: root,
+          command: '$PSVersionTable.PSVersion.ToString()',
+          executionInvocationId: 'same-invocation'
+        }
+        try {
+          let runId: string | undefined
+          if (background) {
+            const receipt = await service.executeShellBackground(request)
+            runId = receipt.runId
+            await service.waitForBackgroundRun(runId)
+          } else expect(await service.executeShell(request)).toEqual(result)
+          prepareEnvironment.mockRejectedValue(
+            new ShellPreparationError({
+              stdout: '',
+              stderr: 'Notebook protection changed.',
+              exitCode: null,
+              runtimeStatus: 'unavailable',
+              errorCode: 'shell-runtime-unavailable',
+              recovery: { execution: 'not-started', retryAfter: 'runtime-ready' }
+            })
+          )
+          if (background) {
+            expect((await service.executeShellBackground(request)).runId).toBe(runId)
+            expect((await service.getBackgroundRun({ ...request, runId })).run.status).toBe(
+              'completed'
+            )
+          } else await expect(service.executeShell(request)).resolves.toEqual(result)
+          expect(prepareEnvironment).toHaveBeenCalledOnce()
+          expect(execute).toHaveBeenCalledOnce()
+          const changed = { ...request, command: 'Write-Output different' }
+          await expect(
+            background ? service.executeShellBackground(changed) : service.executeShell(changed)
+          ).rejects.toThrow('NOTEBOOK_RUN_SUBMISSION_CONFLICT')
+        } finally {
+          await service.shutdownAll()
+        }
+      }
+    )
 
     it('blocks unmanaged WSL Bash detachment on a Windows host', async () => {
       const root = await createStorageRoot()
@@ -5359,55 +5420,70 @@ describe('notebook runtime service', () => {
       expect((await service.state(scope)).runs).toHaveLength(1)
     })
 
-    it('dispatches a queued Shell Run with the environment frozen at admission', async () => {
-      const root = await createStorageRoot()
-      const originalPath = process.env.PATH ?? ''
-      let releaseFirst!: () => void
-      const firstGate = new Promise<void>((resolve) => {
-        releaseFirst = resolve
-      })
-      const firstStarted = createDeferred<void>()
-      const observedPaths: string[] = []
-      const execute = vi.fn<NotebookShellProcess['execute']>(async (request) => {
-        observedPaths.push(request.environment?.PATH ?? '')
-        if (request.command === 'first') firstStarted.resolve(undefined)
-        if (request.command === 'first') await firstGate
-        return { stdout: '', stderr: '', exitCode: 0 }
-      })
-      const service = new NotebookRuntimeService({
-        configRoot: root,
-        dataRoot: root,
-        projectId: 'default-project',
-        repository: new NotebookRunRepository(root),
-        shellProcess: { execute },
-        shellConcurrencyLimit: 1
-      })
-      const scope = { sessionId: 'session-1', workspaceCwd: root }
-      const first = service.executeShell({ ...scope, command: 'first' })
-      // Filesystem preparation can exceed waitFor's default 1s under CI coverage.
-      await firstStarted.promise
-      const admittedPath = observedPaths[0]
-      expect(admittedPath.split(delimiter)).toEqual(
-        expect.arrayContaining([...new Set(originalPath.split(delimiter))])
-      )
-      const second = service.executeShell({ ...scope, command: 'second' })
-      await vi.waitFor(
-        async () => {
-          const state = await service.state(scope)
-          expect(state.runs.find((run) => run.script === 'second')?.status).toBe('queued')
-        },
-        { timeout: 10_000 }
-      )
-      process.env.PATH = '/mutated-after-admission'
-      try {
-        releaseFirst()
-        await Promise.all([first, second])
-      } finally {
-        process.env.PATH = originalPath
+    it.each(['unique', 'repeated'] as const)(
+      'dispatches a queued Shell Run with the environment frozen at admission (%s PATH entries)',
+      async (pathShape) => {
+        const root = await createStorageRoot()
+        const firstDirectory = join(root, 'admitted-first')
+        const secondDirectory = join(root, 'admitted-second')
+        const directories =
+          pathShape === 'repeated'
+            ? [firstDirectory, secondDirectory, firstDirectory]
+            : [firstDirectory, secondDirectory]
+        vi.stubEnv('PATH', directories.join(delimiter))
+        let releaseFirst!: () => void
+        const firstGate = new Promise<void>((resolve) => {
+          releaseFirst = resolve
+        })
+        const firstStarted = createDeferred<void>()
+        const observedPaths: string[] = []
+        const execute = vi.fn<NotebookShellProcess['execute']>(async (request) => {
+          observedPaths.push(request.environment?.PATH ?? '')
+          if (request.command === 'first') firstStarted.resolve(undefined)
+          if (request.command === 'first') await firstGate
+          return { stdout: '', stderr: '', exitCode: 0 }
+        })
+        const service = new NotebookRuntimeService({
+          configRoot: root,
+          dataRoot: root,
+          projectId: 'default-project',
+          repository: new NotebookRunRepository(root),
+          shellProcess: { execute },
+          shellConcurrencyLimit: 1
+        })
+        const scope = { sessionId: 'session-1', workspaceCwd: root }
+        const first = service.executeShell({ ...scope, command: 'first' })
+        let second: ReturnType<typeof service.executeShell> | undefined
+        try {
+          // Filesystem preparation can exceed waitFor's default 1s under CI coverage.
+          await firstStarted.promise
+          const admittedPath = observedPaths[0]
+          const admittedDirectories = admittedPath.split(delimiter)
+          // Platform PATH preparation may deduplicate directories or prepend trusted tools.
+          expect(admittedDirectories).toEqual(
+            expect.arrayContaining([firstDirectory, secondDirectory])
+          )
+          expect(admittedDirectories.indexOf(firstDirectory)).toBeLessThan(
+            admittedDirectories.indexOf(secondDirectory)
+          )
+          second = service.executeShell({ ...scope, command: 'second' })
+          await vi.waitFor(
+            async () => {
+              const state = await service.state(scope)
+              expect(state.runs.find((run) => run.script === 'second')?.status).toBe('queued')
+            },
+            { timeout: 10_000 }
+          )
+          vi.stubEnv('PATH', join(root, 'mutated-after-admission'))
+          releaseFirst()
+          await Promise.all([first, second])
+          expect(observedPaths).toEqual([admittedPath, admittedPath])
+        } finally {
+          releaseFirst()
+          await Promise.allSettled([first, ...(second ? [second] : [])])
+        }
       }
-
-      expect(observedPaths).toEqual([admittedPath, admittedPath])
-    })
+    )
 
     it('prepares queued Shell sandbox permissions before durable admission', async () => {
       const root = await createStorageRoot()
@@ -12477,10 +12553,14 @@ describe('v4 runtime bindings & agent tools', () => {
       }
     )
 
-    it.each(['explicit', 'implicit'] as const)(
-      'Ask waits once before %s binding and resumes without another environment approval',
-      async (entry) => {
-        const h = await makeApprovalHarness()
+    it.each(
+      (['explicit', 'implicit'] as const).flatMap((entry) =>
+        [false, true].map((multiple) => ({ entry, multiple }))
+      )
+    )(
+      'Ask waits once before $entry binding with multiple=$multiple and resumes without another environment approval',
+      async ({ entry, multiple }) => {
+        const h = await makeApprovalHarness(multiple)
         const pending = waitingApproval()
         h.service.setRuntimeBindingApproval(pending.approve)
         const codeApproval = vi.fn(async () => false)
@@ -12519,6 +12599,67 @@ describe('v4 runtime bindings & agent tools', () => {
       expect(approval).toHaveBeenCalledTimes(1)
       expect(legacy).not.toHaveBeenCalled()
     })
+
+    it.each(['disabled', 'unrunnable', 'repair-required'] as const)(
+      'does not prefer a %s default over multiple other enabled runtimes',
+      async (condition) => {
+        const h = await makeApprovalHarness(true)
+        const additional = {
+          ...h.external,
+          envId: `${h.external.envId}-other`,
+          interpreterPath: `${h.external.interpreterPath}-other`
+        }
+        h.discovered.push(additional)
+        h.enablement.enabled[additional.envId] = true
+        if (condition === 'disabled') h.enablement.enabled[h.managed.envId] = false
+        if (condition === 'unrunnable') h.managed.runnable = false
+        if (condition === 'repair-required') {
+          addRepairRequired(
+            getRuntimeRoot(h.root),
+            language === 'r' ? DEFAULT_R_ENV : DEFAULT_PY_ENV,
+            'protected-identity-change'
+          )
+        }
+        const approval = vi.fn(async () => true)
+        h.service.setRuntimeBindingApproval(approval)
+        await expect(h.service.execute({ ...h.request, code: h.code })).rejects.toThrow(
+          `Several ${language} environments`
+        )
+        expect(approval).not.toHaveBeenCalled()
+        expect(h.executions).toEqual([])
+        expect((await h.service.listRuntimes(h.request)).bindings[language]).toBeUndefined()
+      }
+    )
+
+    it.each([false, true])(
+      'preserves an existing external binding when the default is ready (unavailable=%s)',
+      async (unavailable) => {
+        const h = await makeApprovalHarness(true)
+        await h.service.bindRuntime({ ...h.request, runtimeId: h.external.envId })
+        if (unavailable) {
+          h.enablement.enabled[h.external.envId] = false
+          await h.service.revokeRuntime(language, h.external.envId)
+        }
+        const approval = vi.fn(async () => true)
+        h.service.setRuntimeBindingApproval(approval)
+        const operation = h.service.execute({ ...h.request, code: h.code })
+        if (unavailable) {
+          expect(await operation).toMatchObject({ status: 'failed', kernelDispatched: false })
+          expect(h.executions).toEqual([])
+        } else {
+          expect(await operation).toMatchObject({ status: 'completed' })
+          expect(h.executions).toHaveLength(1)
+          expect(h.executions[0].resolvedInterpreter?.command).toBe(
+            language === 'r' ? '/usr/local/bin/Rscript' : h.external.interpreterPath
+          )
+        }
+        expect(approval).not.toHaveBeenCalled()
+        expect((await h.service.listRuntimes(h.request)).bindings[language]).toMatchObject({
+          runtimeId: h.external.envId,
+          status: unavailable ? 'unavailable' : 'active'
+        })
+      }
+    )
 
     it('reuses a live and persisted binding without persistence, approval or kernel stop', async () => {
       const h = await makeApprovalHarness()

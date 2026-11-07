@@ -319,7 +319,9 @@ describe('application database migrations', () => {
       (id, "itemType", title, "containerTitle", "updatedAt")
       VALUES ('synthetic-history', 'journalArticle', 'Independent migration fixture',
         'Imaginary Planetary Review', CURRENT_TIMESTAMP)`
-    const before = await client.literatureItem.findMany({ omit: { readingStatus: true } })
+    const before = await client.literatureItem.findMany({
+      omit: { readingStatus: true, normalizedPersonalNote: true }
+    })
     await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
       applied: [
         '0046_journal_attributes',
@@ -328,10 +330,17 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
-    expect(await client.literatureItem.findMany({ omit: { readingStatus: true } })).toEqual(before)
+    expect(
+      await client.literatureItem.findMany({
+        omit: { readingStatus: true, normalizedPersonalNote: true }
+      })
+    ).toEqual(before)
     expect(await client.$queryRawUnsafe('SELECT * FROM "Journal"')).toEqual([])
     expect(await client.$queryRawUnsafe('SELECT * FROM "JournalDataset"')).toEqual([])
     expect(await client.$queryRawUnsafe('PRAGMA foreign_key_check')).toEqual([])
@@ -346,7 +355,9 @@ describe('application database migrations', () => {
       (id, "itemType", title, "containerTitle", "metadataRevision", "updatedAt")
       VALUES ('historical-reference', 'journalArticle', 'Historical paper',
         'Already populated', 7, CURRENT_TIMESTAMP)`
-    const before = await client.literatureItem.findMany({ omit: { readingStatus: true } })
+    const before = await client.literatureItem.findMany({
+      omit: { readingStatus: true, normalizedPersonalNote: true }
+    })
     await client.$executeRawUnsafe('DROP TABLE "JournalItemBinding"')
     await client.$executeRawUnsafe('DROP TABLE "JournalDatasetEntry"')
     await client.$executeRawUnsafe('DROP TABLE "JournalDataset"')
@@ -375,14 +386,21 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
     expect(await client.literatureMetadataCommitReceipt.count()).toBe(0)
-    expect(await client.literatureItem.findMany({ omit: { readingStatus: true } })).toEqual(before)
+    expect(
+      await client.literatureItem.findMany({
+        omit: { readingStatus: true, normalizedPersonalNote: true }
+      })
+    ).toEqual(before)
     expect(
       await client.$queryRawUnsafe(
-        `SELECT * FROM "_open_science_migrations" WHERE id NOT IN ('0039_literature_metadata_commit_receipt', '0040_literature_collection_revision', '0041_bookmarks', '0042_classification_usage', '0043_pdf_annotations', '0044_literature_smart_collections', '0045_literature_smart_pause_run', '0046_journal_attributes', '0047_session_replay', '0048_pdf_annotation_sharing', '0049_pascalcase_table_names', '0050_literature_translation', '0051_literature_reading_status', '10052_session_research_membership') ORDER BY id`
+        `SELECT * FROM "_open_science_migrations" WHERE id NOT IN ('0039_literature_metadata_commit_receipt', '0040_literature_collection_revision', '0041_bookmarks', '0042_classification_usage', '0043_pdf_annotations', '0044_literature_smart_collections', '0045_literature_smart_pause_run', '0046_journal_attributes', '0047_session_replay', '0048_pdf_annotation_sharing', '0049_pascalcase_table_names', '0050_literature_translation', '0051_literature_reading_status', '0052_literature_personal_note_search', '0053_literature_doi_identity', '0054_slurm_job_reliability', '10052_session_research_membership') ORDER BY id`
       )
     ).toEqual(ledger)
     await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({ applied: [] })
@@ -774,6 +792,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: null,
@@ -835,6 +856,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0033_compute_job_harvest_retry',
@@ -966,6 +990,9 @@ describe('application database migrations', () => {
           '0049_pascalcase_table_names',
           '0050_literature_translation',
           '0051_literature_reading_status',
+          '0052_literature_personal_note_search',
+          '0053_literature_doi_identity',
+          '0054_slurm_job_reliability',
           '10052_session_research_membership'
         ]
       })
@@ -1074,6 +1101,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -1194,6 +1224,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0005_project_preview_state_owner_fk',
@@ -1300,6 +1333,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0005_project_preview_state_owner_fk',
@@ -1502,6 +1538,9 @@ describe('application database migrations', () => {
       { id: '0049_pascalcase_table_names' },
       { id: '0050_literature_translation' },
       { id: '0051_literature_reading_status' },
+      { id: '0052_literature_personal_note_search' },
+      { id: '0053_literature_doi_identity' },
+      { id: '0054_slurm_job_reliability' },
       { id: '10052_session_research_membership' },
       { id: '9997_test_suffix' }
     ])
@@ -1607,6 +1646,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0001_runtime_schema_baseline',
@@ -1716,6 +1758,9 @@ describe('application database migrations', () => {
       { id: '0049_pascalcase_table_names' },
       { id: '0050_literature_translation' },
       { id: '0051_literature_reading_status' },
+      { id: '0052_literature_personal_note_search' },
+      { id: '0053_literature_doi_identity' },
+      { id: '0054_slurm_job_reliability' },
       { id: '10052_session_research_membership' }
     ])
   })
@@ -1861,6 +1906,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership',
         '9997_test_suffix'
       ],
@@ -2139,6 +2187,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -2288,6 +2339,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -2389,6 +2443,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -2493,6 +2550,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -2631,6 +2691,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -3160,6 +3223,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ]
     })
@@ -3229,7 +3295,7 @@ describe('application database migrations', () => {
         entries.filter((entry) => entry.endsWith('.backup')).sort()
       )
     ).resolves.toEqual([
-      'open-science.db.before-0051_literature_reading_status.backup',
+      'open-science.db.before-0054_slurm_job_reliability.backup',
       'open-science.db.before-10052_session_research_membership.backup',
       unknownBackupName
     ])
@@ -3551,6 +3617,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0024_compute_job_file_evidence',
@@ -3697,6 +3766,9 @@ describe('application database migrations', () => {
         '0049_pascalcase_table_names',
         '0050_literature_translation',
         '0051_literature_reading_status',
+        '0052_literature_personal_note_search',
+        '0053_literature_doi_identity',
+        '0054_slurm_job_reliability',
         '10052_session_research_membership'
       ],
       from: '0024_compute_job_file_evidence',

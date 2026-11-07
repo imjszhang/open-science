@@ -24,8 +24,8 @@ import {
   useWorkspaceElicitation
 } from '@/lib/acp/useWorkspaceElicitation'
 import { usePreviewPersistence } from '@/lib/preview-persistence/preview-persistence'
+import type { SessionWriteIssue } from '@/lib/session-persistence/session-write-recovery'
 import {
-  deleteSession,
   hydratePersistedSessionIfPresent,
   loadPersistedSession,
   retryPendingArtifactFinalization,
@@ -45,6 +45,8 @@ import {
   createProjectComputePreviewItem,
   createProjectFilesPreviewItem,
   createProjectLibraryPreviewItem,
+  createProjectMarketplacePreviewItem,
+  PROJECT_MARKETPLACE_PREVIEW_ID,
   PROJECT_COMPUTE_PREVIEW_ID,
   PROJECT_FILES_PREVIEW_ID,
   PROJECT_LIBRARY_PREVIEW_ID,
@@ -109,6 +111,7 @@ import { SessionNotebookDialog } from './SessionNotebookDialog'
 import { BookmarksProvider } from './bookmarks/BookmarksProvider'
 import { PdfAnnotationsProvider } from './pdf-annotations/PdfAnnotationsProvider'
 import { JobDetailModal } from '@/components/JobDetailModal'
+import { ErrorNotice } from '@/components/error-notice'
 import { useProjectFormDialog } from '@/hooks/useProjectFormDialog'
 import { startWslSetupConversation } from '@/lib/wsl-support-handoff'
 import { ProjectFormDialog } from '../home/ProjectFormDialog'
@@ -134,6 +137,8 @@ type WorkspacePageProps = {
   isSessionPersistenceHydrated: boolean
   isSessionPersistenceReady: boolean
   persistenceBlockedSessionIds?: readonly string[]
+  persistenceWriteIssues?: readonly SessionWriteIssue[]
+  onReviewPersistence?: () => void
   onSessionSizeLimit?: (sessionId: string) => void
   canDeleteConversations: boolean
   isPreviewPresentationActive?: boolean
@@ -162,6 +167,8 @@ const WorkspacePage = ({
   isSessionPersistenceHydrated,
   isSessionPersistenceReady,
   persistenceBlockedSessionIds = [],
+  persistenceWriteIssues = [],
+  onReviewPersistence,
   onSessionSizeLimit = () => undefined,
   canDeleteConversations,
   isPreviewPresentationActive = true
@@ -414,11 +421,15 @@ const WorkspacePage = ({
     sendPreparationInFlightSessionIds = [],
     saveAsSkillInFlightSessionIds = [],
     nativeContextCompactionSessionIds,
+    sessionCleanups,
     compactContext,
     respondToPermission,
     setPermissionProfile,
     revokePermissionGrant
   } = runtime
+  const projectSessionCleanups = Object.values(sessionCleanups).filter(
+    (cleanup) => cleanup.projectId === scopedProjectId
+  )
   const { respondToElicitation } = useWorkspaceElicitation(
     runtime.resolveSessionRuntimeSelection,
     onSessionSizeLimit
@@ -603,7 +614,7 @@ const WorkspacePage = ({
       if (deleted && sameResearch(research.draftResearchByProject[source.sourceProjectId], source))
         research.leaveDraft(source.sourceProjectId)
     },
-    deleteSession,
+    deleteSession: runtime.deleteSession,
     onSessionSizeLimit
   })
   const deleteSessionProjectName = useProjectStore(
@@ -1708,6 +1719,12 @@ const WorkspacePage = ({
     if (!isSessionPersistenceReady) return
     usePreviewWorkbenchStore.getState().upsertAndActivateItem(createProjectComputePreviewItem())
   }
+
+  const openMarketplacePreview = (): boolean => {
+    if (!isSessionPersistenceReady) return false
+    usePreviewWorkbenchStore.getState().upsertAndActivateItem(createProjectMarketplacePreviewItem())
+    return usePreviewWorkbenchStore.getState().activeItemId === PROJECT_MARKETPLACE_PREVIEW_ID
+  }
   const canOpenProjectCompute =
     typeof window.api.notebook?.getProjectActivity === 'function' &&
     typeof window.api.notebook?.onChanged === 'function' &&
@@ -1730,8 +1747,41 @@ const WorkspacePage = ({
     <main
       ref={previewFocusFallbackRef}
       tabIndex={-1}
-      className="h-[100dvh] overflow-hidden bg-bg-10 text-[13px] leading-normal text-text-000 md:h-screen md:p-[10px]"
+      className="grid h-[100dvh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-bg-10 text-[13px] leading-normal text-text-000 md:h-screen md:p-[10px]"
     >
+      <div
+        className={
+          projectSessionCleanups.length > 0
+            ? 'mb-2 max-h-[30vh] space-y-2 overflow-y-auto'
+            : undefined
+        }
+      >
+        {projectSessionCleanups.map((cleanup) => (
+          <ErrorNotice
+            key={cleanup.sessionId}
+            title={t('Session cleanup needs attention')}
+            description={
+              cleanup.result.status === 'deleted'
+                ? t('The Session was deleted, but some cleanup could not be completed.')
+                : t(
+                    'An unsent Session could not be cleaned up. Retry cleanup to finish removing it.'
+                  )
+            }
+            errorCode={[cleanup.sessionId, cleanup.error].filter(Boolean).join('\n')}
+            diagnosticsLabel={t('Details')}
+            primaryButton={{
+              label: t('Retry cleanup'),
+              onClick: () =>
+                void runtime.retrySessionCleanup({
+                  projectId: cleanup.projectId,
+                  sessionId: cleanup.sessionId
+                }),
+              disabled: !canDeleteConversations || !isSessionPersistenceReady,
+              loading: cleanup.retrying
+            }}
+          />
+        ))}
+      </div>
       <BookmarksProvider
         projectId={bookmarkSession?.projectId}
         sessionId={bookmarkSession?.id}
@@ -1787,6 +1837,8 @@ const WorkspacePage = ({
                 onOpenFiles={openFilesPreview}
                 isLibraryOpen={activePreviewItemId === PROJECT_LIBRARY_PREVIEW_ID}
                 onOpenLiterature={openLibraryPreview}
+                isMarketplaceOpen={activePreviewItemId === PROJECT_MARKETPLACE_PREVIEW_ID}
+                onOpenMarketplace={isSessionPersistenceReady ? openMarketplacePreview : undefined}
                 isComputeOpen={
                   canOpenProjectCompute && activePreviewItemId === PROJECT_COMPUTE_PREVIEW_ID
                 }
@@ -1855,6 +1907,14 @@ const WorkspacePage = ({
                 onOpenLiterature={() => {
                   if (openLibraryPreview()) close()
                 }}
+                isMarketplaceOpen={activePreviewItemId === PROJECT_MARKETPLACE_PREVIEW_ID}
+                onOpenMarketplace={
+                  isSessionPersistenceReady
+                    ? () => {
+                        if (openMarketplacePreview()) close()
+                      }
+                    : undefined
+                }
                 isComputeOpen={
                   canOpenProjectCompute && activePreviewItemId === PROJECT_COMPUTE_PREVIEW_ID
                 }
@@ -1971,8 +2031,12 @@ const WorkspacePage = ({
                   composerFocusKey: currentDraftKey,
                   canEditDraft,
                   canEditLocalDraft,
+                  sendPreparing: activeSessionHasSendPreparation,
                   persistenceBlocked: persistenceBlockedSessionIds.includes(
                     activeSession?.id ?? ''
+                  ),
+                  persistenceIssue: persistenceWriteIssues.find(
+                    ({ sessionId }) => sessionId === activeSession?.id
                   ),
                   actionError: visibleActionError,
                   authenticationRecovery,
@@ -2072,6 +2136,8 @@ const WorkspacePage = ({
                   }
                 }}
                 sessionTools={{
+                  newConversation: openNewConversation,
+                  reviewPersistence: onReviewPersistence,
                   menuBindings: createSessionActionBindings({
                     canMutateConversations: isSessionPersistenceReady,
                     canDeleteConversations: false,

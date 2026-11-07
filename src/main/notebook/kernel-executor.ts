@@ -1,4 +1,6 @@
 import { createLogger } from '@aipoch/diagnostics/node'
+import { observeResourceProcess, recordResourceEvent } from '../resource-diagnostics/recorder'
+import { resourceActivity } from '../resource-diagnostics/activity'
 import { resolveExternalRLibrary } from '@aipoch/environment'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -302,7 +304,10 @@ type ProcState = {
   child: ChildProcessWithoutNullStreams
   readline: Interface
   pending?: PendingRequest
-  beginSandboxExecution: () => () => void
+  beginSandboxExecution: NonNullable<
+    import('./process-sandbox').NotebookSandboxedSpawn['beginExecution']
+  >
+  waitForNetworkApprovals?: () => Promise<void>
   stderrTail: string
   annotateStderr: (stderr: string) => string
   teardownProcess: () => Promise<ProcessTreeKillResult>
@@ -595,6 +600,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
 
   // Sends one cell to the kind's loop and resolves with the mapped execution result.
   async execute(request: NotebookExecutionRequest): Promise<NotebookExecutionResult> {
+    const endObservation = resourceActivity.begin()
     let workingFileObservation: WorkingFileObservation | undefined
     let kernelDispatched = false
     let cwdBefore: string | undefined
@@ -609,7 +615,17 @@ class NotebookKernelExecutor implements NotebookExecutor {
 
       const proc = await this.ensureProc(key, kind, env, request)
       if (proc.pending) throw new Error('Notebook execution is already running.')
-      endSandboxExecution = proc.beginSandboxExecution()
+      endSandboxExecution = proc.beginSandboxExecution({
+        commandText: request.code,
+        executionReference: request.runId ?? randomUUID(),
+        signal: request.signal,
+        onNetworkWaitChange: (waiting) => {
+          const pending = proc.pending
+          if (!pending?.timeout || pending.timeout.timedOut) return
+          pending.timeout.disarm()
+          if (!waiting && pending.timeoutMs !== undefined) pending.timeout.arm(pending.timeoutMs)
+        }
+      })
       if (kind !== 'repl') {
         cwdBefore = proc.cwd
         request = { ...request, cwd: cwdBefore }
@@ -687,6 +703,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
         },
         replBindings
       )
+      await proc.waitForNetworkApprovals?.()
       const status = cancelled
         ? 'cancelled'
         : timedOut
@@ -759,7 +776,11 @@ class NotebookKernelExecutor implements NotebookExecutor {
           : {})
       }
     } finally {
-      endSandboxExecution?.()
+      try {
+        endSandboxExecution?.()
+      } finally {
+        endObservation()
+      }
     }
   }
 
@@ -936,6 +957,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
       child,
       readline,
       beginSandboxExecution: spawned.beginSandboxExecution,
+      waitForNetworkApprovals: spawned.waitForNetworkApprovals,
       stderrTail: '',
       annotateStderr: spawned.annotateStderr,
       teardownProcess: spawned.teardownProcess,
@@ -1069,7 +1091,10 @@ class NotebookKernelExecutor implements NotebookExecutor {
   ): Promise<{
     child: ChildProcessWithoutNullStreams
     cwd: string
-    beginSandboxExecution: () => () => void
+    beginSandboxExecution: NonNullable<
+      import('./process-sandbox').NotebookSandboxedSpawn['beginExecution']
+    >
+    waitForNetworkApprovals?: () => Promise<void>
     annotateStderr: (stderr: string) => string
     teardownProcess: () => Promise<ProcessTreeKillResult>
     cleanupSandbox: (
@@ -1238,6 +1263,14 @@ class NotebookKernelExecutor implements NotebookExecutor {
     // One owner supplies both executor and sandbox admission with evidence for this exact spawn.
     // Keep successful proof before settling the receipt; failed observations remain retryable.
     const teardownProcess = async (): Promise<ProcessTreeKillResult> => {
+      recordResourceEvent('kernel-teardown-started', {
+        kernelEpochId,
+        sessionId: request.sessionId,
+        projectId: request.projectId,
+        kind,
+        pid: child?.pid,
+        attempt: terminationAttempt + 1
+      })
       if (!processProof) {
         const attempt = ++terminationAttempt
         const proof = (async () => {
@@ -1308,6 +1341,16 @@ class NotebookKernelExecutor implements NotebookExecutor {
                 }
               : {}),
             ...result
+          })
+          recordResourceEvent('kernel-teardown-proof', {
+            kernelEpochId,
+            sessionId: request.sessionId,
+            projectId: request.projectId,
+            kind,
+            pid: child.pid,
+            attempt,
+            osReaped: osResult.reaped,
+            reaped: result.reaped
           })
           return result
         })()
@@ -1439,6 +1482,27 @@ class NotebookKernelExecutor implements NotebookExecutor {
       throw error
     }
     child.once('spawn', () => spawnAdmission?.started())
+    try {
+      // laneKey is the existing owner's serialized identity, not a path or an inferred session.
+      const lane = JSON.parse(this.laneKey ?? '[]') as unknown[]
+      observeResourceProcess(
+        child,
+        {
+          kernelEpochId,
+          sessionId: request.sessionId ?? lane[1],
+          projectId: request.projectId ?? lane[0],
+          kind,
+          role: 'notebook',
+          lane: lane[2],
+          frameId: lane[3],
+          attempt: lane[4],
+          receiptId: ownershipIntent?.record.receiptId
+        },
+        () => terminationAttempt > 0
+      )
+    } catch {
+      /* Missing diagnostic lane metadata cannot affect process admission. */
+    }
     child.once('error', () => spawnAdmission?.notStarted())
     if (this.platform !== 'win32' && this.canTrackPosixProcesses)
       this.registerOwnedProcessGroup(child, processTreeOwnership.token)
@@ -1507,6 +1571,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
       child,
       cwd: spawnCwd ?? process.cwd(),
       beginSandboxExecution: sandboxed?.beginExecution ?? (() => () => undefined),
+      waitForNetworkApprovals: sandboxed?.waitForNetworkApprovals,
       annotateStderr: sandboxed?.annotateStderr ?? ((stderr) => stderr),
       teardownProcess,
       cleanupSandbox

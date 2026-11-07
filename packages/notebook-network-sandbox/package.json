@@ -12,6 +12,10 @@
       "types": "./runtime/src/gateway/execution-confinement.d.cts",
       "import": "./runtime/src/gateway/execution-confinement.cjs",
       "require": "./runtime/src/gateway/execution-confinement.cjs"
+    },
+    "./network-address": {
+      "types": "./src/network-address.ts",
+      "default": "./src/network-address.ts"
     }
   },
   "scripts": {

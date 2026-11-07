@@ -13,6 +13,7 @@ import { createPackageTestPlan, validatePackageTestRegistry } from './package-te
 import {
   collectCodeGraphTests,
   createAffectedTestPlan,
+  createFullPlanFloor,
   createModuleTestPlan,
   executeModuleTestPlan,
   formatModuleTestPlan,
@@ -331,6 +332,18 @@ function captureNpmInvocation(): {
   }
   return { spawn, invocation }
 }
+
+// Argument transport is independent of the repository's changing module-routing policy.
+const selectiveTransportPlan = (): ReturnType<typeof createModuleTestPlan> => ({
+  mode: 'selective',
+  modules: [],
+  testFiles: ['src/transport-fixture.test.ts'],
+  capabilityOverlays: [],
+  fallbackCapabilities: [],
+  graphStatus: 'not-requested',
+  graphReason: undefined,
+  reasonChains: []
+})
 
 const currentStatus = JSON.stringify({
   initialized: true,
@@ -664,6 +677,7 @@ describe('module test impact commands', () => {
   })
 
   it.each([
+    ['upload_repository', 'src/main/uploads/pdf-ocr.ts'],
     ['user_skills_repository', 'src/main/skills/catalog.ts'],
     ['user_skills_repository', 'src/main/skills/user-skill-repository.ts'],
     ['user_skills_repository', 'src/main/skills/source-repository.ts'],
@@ -1082,7 +1096,7 @@ describe('module test impact commands', () => {
   it.each(['win32', 'darwin', 'linux'])(
     'transports large selections without dropping filters or options on %s',
     (platform) => {
-      const plan = createModuleTestPlan('upload_repository', selectionModel())
+      const plan = selectiveTransportPlan()
       plan.testFiles = Array.from(
         { length: 2200 },
         (_, index) => `src/renderer/src/components/long-consumer-${index}.test.ts`
@@ -1132,7 +1146,7 @@ describe('module test impact commands', () => {
   )
 
   it.each(['return', 'throw'])('cleans temporary arguments when spawn errors %s', (failure) => {
-    const plan = createModuleTestPlan('upload_repository', selectionModel())
+    const plan = selectiveTransportPlan()
     plan.testFiles = ['x'.repeat(10000) + '.test.ts']
     let argumentFile = ''
     const error = new Error('spawn failed')
@@ -1237,7 +1251,7 @@ describe('module test impact commands', () => {
   it.each(['npm_execpath', 'NPM_EXECPATH', 'Npm_ExecPath'])(
     'launches npm through Node with the Windows environment key %s',
     (key) => {
-      const plan = createModuleTestPlan('upload_repository', selectionModel())
+      const plan = selectiveTransportPlan()
       const { spawn, invocation } = captureNpmInvocation()
       executeModuleTestPlan(plan, {
         platform: 'win32',
@@ -1254,7 +1268,7 @@ describe('module test impact commands', () => {
   )
 
   it('prints the exact file list before invoking portable npm test arguments', () => {
-    const plan = createModuleTestPlan('upload_repository', selectionModel())
+    const plan = selectiveTransportPlan()
     const { spawn, invocation } = captureNpmInvocation()
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
@@ -1357,6 +1371,80 @@ describe('module test impact commands', () => {
       )
       expect(invocation.mock.calls[0]?.[1]).toContain(`--coverage.include=${include}`)
       expect(invocation.mock.calls[0]?.[1]).not.toContain('--coverage.changed')
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  it('runs the full-plan floor selectively with coverage scoped to its own changes', async () => {
+    const owned = 'src/main/literature/mcp-server.ts'
+    const unowned = 'src/shared/new-unregistered-contract.ts'
+    const options = (spawn: NpmInvocation): Parameters<typeof runModuleTestCli>[1] => ({
+      execute: (command: string, args: string[]) => {
+        if (command === 'git' && args[0] === 'merge-base') return 'base\n'
+        if (command === 'git' && args[0] === 'diff')
+          return Buffer.from(`M\0${owned}\0A\0${unowned}\0M\0package.json\0`)
+        throw new Error('CodeGraph unavailable in CI')
+      },
+      spawn,
+      derivedConsumers: { schemaVersion: 1, modules: {} },
+      environment: { npm_execpath: '/npm/bin/npm-cli.js' }
+    })
+    const args = ['affected', '--base', 'base', '--head', 'head', '--coverage-changed', 'base']
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const { spawn, invocation } = captureNpmInvocation()
+      await expect(
+        runModuleTestCli([...args, '--require-selective'], options(spawn))
+      ).rejects.toThrow('Selective test plan required')
+      await runModuleTestCli([...args, '--require-selective', '--full-floor'], options(spawn))
+      const npm = invocation.mock.calls[0]?.[1]
+      expect(npm).toContain('src/main/acp/auto-operation-inventory.test.ts')
+      expect(npm).toContain(`--coverage.include=${owned}`)
+      expect(npm).not.toContain(`--coverage.include=${unowned}`)
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  it('never builds a full-plan floor from graph candidates of excluded changes', async () => {
+    const graphTest = 'src/main/graph-only-candidate.test.ts'
+    const options = (
+      diff: string,
+      spawn: NpmInvocation
+    ): Parameters<typeof runModuleTestCli>[1] => ({
+      execute: (command: string, args: string[]) => {
+        if (command === 'git' && args[0] === 'merge-base') return 'base\n'
+        if (command === 'git' && args[0] === 'diff') return Buffer.from(diff)
+        if (command === 'codegraph' && args[0] === 'status') return currentStatus
+        if (command === 'codegraph') return JSON.stringify({ affectedTests: [graphTest] })
+        throw new Error(`Unexpected command: ${command}`)
+      },
+      pathExists: () => true,
+      spawn,
+      derivedConsumers: { schemaVersion: 1, modules: {} },
+      environment: { npm_execpath: '/npm/bin/npm-cli.js' }
+    })
+    const args = ['affected', '--base', 'base', '--head', 'head', '--require-selective']
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const { spawn, invocation } = captureNpmInvocation()
+      // Only excluded paths changed: graph candidates alone must not create a floor.
+      await expect(
+        runModuleTestCli(
+          [...args, '--full-floor'],
+          options('M\0package.json\0A\0src/shared/new-unregistered-contract.ts\0', spawn)
+        )
+      ).rejects.toThrow('Selective test plan required')
+      expect(invocation).not.toHaveBeenCalled()
+      // An owned path keeps its declared floor without graph candidates from other paths.
+      await runModuleTestCli(
+        [...args, '--full-floor'],
+        options('M\0src/main/literature/mcp-server.ts\0M\0package.json\0', spawn)
+      )
+      const npm = invocation.mock.calls[0]?.[1]
+      expect(npm).toContain('src/main/acp/auto-operation-inventory.test.ts')
+      expect(npm).not.toContain(graphTest)
     } finally {
       write.mockRestore()
     }
@@ -1519,14 +1607,19 @@ it.each([
   'src/main/process-tree-windows.ts',
   'src/main/process-tree.windows.integration.test.ts'
 ])('selects process ownership and lifecycle tests with Windows coverage for %s', (path) => {
-  const plan = createAffectedTestPlan(
-    [{ path, status: 'added' }],
-    {
-      status: 'unavailable-manifest-only',
-      testFiles: []
-    },
-    selectionModel()
-  )
+  const manifest = loadModuleImpactManifest(resolve('scripts/ci/module-impact.json'))
+  const graph = { status: 'unavailable-manifest-only', testFiles: [] }
+  const changes = [{ path, status: 'added' }]
+  if (path.startsWith('src/main/delegation/')) {
+    const guarded = createAffectedTestPlan(changes, graph, manifest)
+    expect(guarded.mode).toBe('full')
+    expect(guarded.reasonChains.join('\n')).toContain(
+      manifest.modules.main_delegation.fullTestReason
+    )
+  }
+  // Test process routing separately while retaining the production full-validation guard above.
+  delete manifest.modules.main_delegation.fullTestReason
+  const plan = createAffectedTestPlan(changes, graph, manifest)
 
   expect(plan.mode).toBe('selective')
   expect(plan.modules).toContain(
@@ -1613,9 +1706,11 @@ it.each(['genomes-ensembl', 'rxnorm', 'dailymed', 'biosamples', 'wikipathways'])
 it.each([
   'src/main/session-diagnostics/notebook.ts',
   'src/main/session-diagnostics/worker-entry.ts',
-  'src/main/session-diagnostics/desktop.ts'
-])('keeps Session export selective with storage, transport and UI contracts for %s', (path) => {
-  const manifest = selectionModel()
+  'src/main/session-diagnostics/desktop.ts',
+  'src/main/session-diagnostics/resources.ts'
+])('retains full validation and export contracts for the expanded diagnostics owner %s', (path) => {
+  const manifest = loadModuleImpactManifest(resolve('scripts/ci/module-impact.json'))
+  const module = manifest.modules.session_diagnostics
   const plan = createAffectedTestPlan(
     [{ path, status: 'modified' }],
     {
@@ -1624,20 +1719,31 @@ it.each([
     },
     manifest
   )
-  expect(plan.mode).toBe('selective')
-  expect(plan.modules).toEqual(['session_diagnostics'])
-  expect(plan.testFiles).toEqual(
+  expect(module.fullTestReason).toBeTruthy()
+  for (const candidate of [plan, createModuleTestPlan('session_diagnostics', manifest)]) {
+    expect(candidate.mode).toBe('full')
+    expect(candidate.reasonChains).toEqual([
+      `session_diagnostics -> ${module.fullTestReason} -> full`
+    ])
+  }
+  // Full plans do not enumerate individual tests; retain the registered contracts for
+  // review and any future reclassification of this expanded source boundary.
+  const registeredTests = Object.values(module.testFiles).flat()
+  expect(registeredTests).toEqual(
     expect.arrayContaining([
-      ...Object.values(manifest.modules.session_diagnostics.testFiles).flat(),
       'src/main/session-diagnostics/desktop.test.ts',
       'src/main/session-diagnostics/collector.test.ts',
+      'src/main/session-diagnostics/database.test.ts',
+      'src/main/session-diagnostics/resources.test.ts',
+      'src/renderer/src/pages/workspace/SessionDiagnosticsDialog.interaction.test.tsx',
+      'src/shared/session-diagnostics-contracts.test.ts',
       'src/main/desktop-runtime-transport.integration.test.ts'
     ])
   )
-  expect(plan.capabilityOverlays).toEqual(
+  expect(module.capabilityOverlays).toEqual(
     expect.arrayContaining(['e2e_regressions', 'windows_sensitive'])
   )
-  expect(plan.testFiles.some((file) => file.startsWith('packages/connector-'))).toBe(false)
+  expect(registeredTests.some((file) => file.startsWith('packages/connector-'))).toBe(false)
 })
 
 it.each([
@@ -1878,26 +1984,86 @@ it('keeps literature command consumers covered by the explicit full fallback', (
   )
 })
 
-it.each([
-  [
-    'src/main/session-persistence/coordinator.ts',
-    'src/renderer/src/hooks/useLifecycleSync.test.tsx'
-  ],
-  [
-    'src/main/tags/repository.ts',
-    'src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationsProvider.test.tsx'
-  ]
-])('preserves the explicit command or event consumer for %s', (path, test) => {
+it('keeps declared contract tests as the deferred full-plan floor', () => {
+  const manifest = loadModuleImpactManifest()
+  const graph = { status: 'not-used', testFiles: [] }
+  const literature = { path: 'src/main/literature/mcp-server.ts', status: 'modified' }
+  // #3979: a full marker and a global input together removed the Auto inventory before merge.
+  const changes = [literature, { path: 'package.json', status: 'modified' }]
+  expect(createAffectedTestPlan(changes, graph, manifest).mode).toBe('full')
+  const floor = createFullPlanFloor(changes, manifest)
+  expect(floor?.mode).toBe('selective')
+  expect(floor?.modules).toContain('main_literature')
+  expect(floor?.testFiles).toContain('src/main/acp/auto-operation-inventory.test.ts')
+  expect(floor?.testFiles).toEqual(createFullPlanFloor([literature], manifest)?.testFiles)
+  const unownedPath = { path: 'src/shared/new-unregistered-contract.ts', status: 'added' }
+  expect(createFullPlanFloor([...changes, unownedPath], manifest)?.floorPaths).toEqual([
+    literature.path
+  ])
+  expect(floor?.reasonChains).toContain(
+    'full plan -> declared module test floor; complete portable suite deferred to scheduled acceptance'
+  )
+  for (const unowned of [
+    [{ path: 'package.json', status: 'modified' }],
+    [{ path: 'src/shared/new-unregistered-contract.ts', status: 'added' }],
+    ...['deleted', 'type-changed', 'unmerged', 'unknown'].map((status) => [
+      { path: literature.path, status }
+    ]),
+    // A rename whose source has no bounded selection cannot be covered from its destination.
+    [
+      {
+        path: 'src/renderer/src/lib/format-star-count.ts',
+        previousPath: 'src/shared/new-unregistered-contract.ts',
+        status: 'renamed'
+      }
+    ]
+  ]) {
+    expect(createFullPlanFloor(unowned, manifest)).toBeUndefined()
+  }
+})
+
+it('keeps both owners of a cross-module rename in the full-plan floor', () => {
+  const manifest = loadModuleImpactManifest()
+  const source = 'src/main/literature/mcp-server.ts'
+  const destination = 'src/renderer/src/lib/format-star-count.ts'
+  const rename = createFullPlanFloor(
+    [{ path: destination, previousPath: source, status: 'renamed' }],
+    manifest
+  )
+  expect(rename?.floorPaths).toEqual([source, destination])
+  for (const path of [source, destination]) {
+    expect(rename?.testFiles).toEqual(
+      expect.arrayContaining(
+        createFullPlanFloor([{ path, status: 'modified' }], manifest)?.testFiles ?? ['missing']
+      )
+    )
+  }
+  expect(rename?.testFiles).toContain('src/main/acp/auto-operation-inventory.test.ts')
+})
+
+it('keeps tag event consumers covered by the explicit full fallback', () => {
+  const manifest = loadModuleImpactManifest()
+  const reason = manifest.modules.main_tags.fullTestReason
+  expect(reason).toBeTruthy()
   const plan = createAffectedTestPlan(
-    [{ path, status: 'modified' }],
-    {
-      status: 'not-used',
-      testFiles: []
-    },
-    selectionModel()
+    [{ path: 'src/main/tags/repository.ts', status: 'modified' }],
+    { status: 'not-used', testFiles: [] },
+    manifest
+  )
+  expect(plan.mode).toBe('full')
+  expect(plan.reasonChains).toEqual([`main_tags -> ${reason} -> full`])
+  expect(manifest.modules.main_tags.testFiles.consumer).toContain(
+    'src/renderer/src/pages/workspace/pdf-annotations/PdfAnnotationsProvider.test.tsx'
+  )
+})
+
+it('preserves the explicit command or event consumer for src/main/session-persistence/coordinator.ts', () => {
+  const plan = createAffectedTestPlan(
+    [{ path: 'src/main/session-persistence/coordinator.ts', status: 'modified' }],
+    { status: 'not-used', testFiles: [] }
   )
   expect(plan.mode).toBe('selective')
-  expect(plan.testFiles).toContain(test)
+  expect(plan.testFiles).toContain('src/renderer/src/hooks/useLifecycleSync.test.tsx')
 })
 
 // Independently pinned production contracts accompany the controlled policy examples above.

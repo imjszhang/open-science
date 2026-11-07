@@ -2781,10 +2781,11 @@ describe('WorkspaceSidebar accessible render', () => {
     expect(onDeleteSession).toHaveBeenCalledWith(sessions[0])
   })
 
-  it('renders Customize, Files, Compute, and Literature after New and wires their entries', async () => {
+  it('renders Customize, Files, Compute, Literature, and Marketplace after New and wires their entries', async () => {
     const { WorkspaceSidebarView } = await import('./WorkspaceSidebar')
     const onOpenFiles = vi.fn()
     const onOpenLiterature = vi.fn()
+    const onOpenMarketplace = vi.fn()
     const onOpenSettings = vi.fn()
     const onOpenCompute = vi.fn()
     const tree = WorkspaceSidebarView({
@@ -2800,6 +2801,8 @@ describe('WorkspaceSidebar accessible render', () => {
       isFilesOpen: true,
       onOpenFiles,
       onOpenLiterature,
+      onOpenMarketplace,
+      isMarketplaceOpen: true,
       isLibraryOpen: true,
       isComputeOpen: false,
       onOpenCompute,
@@ -2824,6 +2827,19 @@ describe('WorkspaceSidebar accessible render', () => {
     const literatureButton = buttons.find((button) => getTextContent(button).trim() === 'Library')
     const computeButton = buttons.find((button) => getTextContent(button).trim() === 'Compute')
 
+    const marketplaceButton = buttons.find(
+      (button) => getTextContent(button).trim() === 'Resource center'
+    )
+    expect(buttons[newButtonIndex + 5]).toBe(marketplaceButton)
+    expect(marketplaceButton?.props['aria-controls']).toBe('right-panel')
+    expect(marketplaceButton?.props['aria-pressed']).toBe(true)
+    expect(marketplaceButton?.props.title).toBe('Resource center')
+    const marketplaceLabel = collectElements(marketplaceButton).find(
+      (element) => element.type === 'span' && getTextContent(element).trim() === 'Resource center'
+    )
+    expect(String(marketplaceLabel?.props.className ?? '')).toContain('truncate')
+    ;(marketplaceButton?.props.onClick as () => void)()
+    expect(onOpenMarketplace).toHaveBeenCalledTimes(1)
     expect(newButtonIndex).toBeGreaterThanOrEqual(0)
     expect(buttons[newButtonIndex + 1]).toBe(customizeButton)
     expect(buttons[newButtonIndex + 2]).toBe(filesButton)

@@ -1,5 +1,7 @@
 {
   "ownerPaths": [
+    "src/main/update/windows-recovery-identity.integration.test.ts",
+    "src/main/update/windows-signature-verification.test.ts",
     "src/main/update/create-strategy.test.ts",
     "src/main/update/create-strategy.ts",
     "src/main/update/differential-download-cancellation.test.ts",
@@ -53,7 +55,8 @@
     "src/main/update/installation-file-occupancy.integration.test.ts",
     "src/main/update/current-installer.ts",
     "src/main/update/current-installer.test.ts",
-    "src/main/update/installer-reveal.test.ts"
+    "src/main/update/installer-reveal.test.ts",
+    "scripts/windows-extraction-partitions.test.ts"
   ],
   "interfacePaths": [
     "src/main/update/create-strategy.ts",
@@ -76,6 +79,8 @@
   "consumerModules": [],
   "testFiles": {
     "owner": [
+      "src/main/update/windows-recovery-identity.integration.test.ts",
+      "src/main/update/windows-signature-verification.test.ts",
       "src/main/update/create-strategy.test.ts",
       "src/main/update/differential-download-cancellation.test.ts",
       "src/main/update/downloader.test.ts",
@@ -106,7 +111,8 @@
       "scripts/windows-install-publication.test.ts",
       "scripts/windows-installer-extractor.test.ts",
       "src/main/update/installation-file-occupancy.integration.test.ts",
-      "src/main/update/current-installer.test.ts"
+      "src/main/update/current-installer.test.ts",
+      "scripts/windows-extraction-partitions.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",

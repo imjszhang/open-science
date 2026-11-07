@@ -382,7 +382,8 @@ class HeadlessTaskApi {
       'claude-code': preflight.claudeReady,
       opencode: preflight.opencodeReady,
       codex: preflight.codexReady,
-      codebuddy: preflight.codebuddyReady
+      codebuddy: preflight.codebuddyReady,
+      pi: preflight.piReady === true
     } as const
     const runtimeByFramework = {
       'claude-code': {
@@ -404,6 +405,12 @@ class HeadlessTaskApi {
         configured: Boolean(settings.codebuddy.resolvedPath),
         version: settings.codebuddy.version,
         managed: settings.codebuddyManaged
+      },
+      pi: {
+        configured: preflight.piReady === true,
+        version: undefined,
+        // Readiness alone does not say whether the runtime is app-managed or external.
+        managed: undefined
       }
     } as const
 
@@ -418,7 +425,7 @@ class HeadlessTaskApi {
         framework,
         status,
         ...(runtime.version ? { version: runtime.version } : {}),
-        ...(runtime.configured
+        ...(runtime.configured && runtime.managed !== undefined
           ? { source: runtime.managed ? ('managed' as const) : ('external' as const) }
           : {})
       }

@@ -80,7 +80,8 @@
     "packages/notebook-network-sandbox/src/local-service.test.ts",
     "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.ts",
     "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.cjs",
-    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.d.cts"
+    "packages/notebook-network-sandbox/runtime/src/gateway/execution-confinement.d.cts",
+    "packages/notebook-network-sandbox/src/destination-review.test.ts"
   ],
   "interfacePaths": [
     "packages/notebook-network-sandbox/src/index.ts",
@@ -125,7 +126,8 @@
       "packages/notebook-network-sandbox/src/wsl2-isolation.integration.test.ts",
       "packages/notebook-network-sandbox/src/wsl2-isolation.test.ts",
       "packages/notebook-network-sandbox/src/installed-package.test.ts",
-      "packages/notebook-network-sandbox/src/local-service.test.ts"
+      "packages/notebook-network-sandbox/src/local-service.test.ts",
+      "packages/notebook-network-sandbox/src/destination-review.test.ts"
     ],
     "contract": [
       "src/main/host-layer-dependencies.architecture.test.ts",
@@ -494,7 +496,6 @@
       "src/main/acp/approved-handoff-outcome.integration.test.ts",
       "src/main/acp/approved-handoff-outcome.test.ts",
       "src/main/literature/pdf-translation/ipc.test.ts",
-      "src/main/literature/pdf-translation/local.test.ts",
       "src/main/local-models/ipc.test.ts",
       "src/main/notebook/code-risk-admission.test.ts",
       "src/main/runtime-network-node.integration.test.ts",

@@ -28,7 +28,7 @@ import {
 } from './desktop-startup-recovery'
 import { RUNTIME_STARTUP_CHANNELS, type RuntimeStartupState } from '../shared/runtime-startup'
 import { projectDiagnosticError } from './session-diagnostics/detail'
-import { DesktopBackendStartupError } from './backend-startup'
+import { DesktopBackendStartupError, type BackendStartupStatus } from './backend-startup'
 import { recoverDesktopBackendStartup } from './backend-startup-recovery'
 import { createDesktopRecoveryEventBuffer } from './desktop-recovery-event-buffer'
 import { createDesktopRuntimeRecovery } from './desktop-runtime-recovery'
@@ -512,7 +512,13 @@ async function startDesktop(): Promise<void> {
     process.platform === 'win32' ? { light: trayLightWindows, dark: trayDarkWindows } : undefined
 
   startupDiagnostics?.phase('load-native-shell')
-  const { createMainWindow, configureMainWindow, isMainWindow } = await import('./windows')
+  const {
+    createMainWindow,
+    configureMainWindow,
+    isMainWindow,
+    isConnectMobileWindow,
+    openConnectMobileWindow
+  } = await import('./windows')
   const { applyInterfaceScaleShortcut, installWindowShortcuts } = await import('./window-shortcuts')
   const { registerWindowZoomIpcHandler, registerWindowCloseIpcHandler } =
     await import('./window-ipc')
@@ -533,7 +539,15 @@ async function startDesktop(): Promise<void> {
     notifyRendererSessionPersistenceFlushAborted,
     rendererSessionPersistenceFlushBlocksShutdown
   } = await import('./session-persistence/renderer-flush')
-  const { installSystemLifecycleAdapters } = await import('./system-lifecycle-adapters')
+  const { installSystemLifecycleAdapters, installResourceActivityRelay } =
+    await import('./system-lifecycle-adapters')
+  const resourceActivityRelay = installResourceActivityRelay({
+    app,
+    powerMonitor,
+    hasFocusedWindow: () => BrowserWindow.getAllWindows().some((window) => window.isFocused()),
+    send: (state) => client?.resourceActivity?.(state)
+  })
+  app.once('will-quit', () => resourceActivityRelay.dispose())
   if (process.platform === 'darwin')
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -558,6 +572,7 @@ async function startDesktop(): Promise<void> {
   registerWindowsTitleBarIpc({ isMainWindow })
   registerWindowCloseIpcHandler()
   registerWindowFindIpcHandlers()
+  ipcMainHandle('window:open-connect-mobile', () => openConnectMobileWindow())
   startupDiagnostics?.phase('native-shell-configured')
   let requestSystemShutdown = (): void => app.quit()
   const system = installSystemLifecycleAdapters({
@@ -573,6 +588,10 @@ async function startDesktop(): Promise<void> {
   const isApplicationWindow = (sender: WebContents): boolean => {
     const window = BrowserWindow.fromWebContents(sender)
     return Boolean(window && isMainWindow(window))
+  }
+  const isApplicationCommandWindow = (sender: WebContents): boolean => {
+    const window = BrowserWindow.fromWebContents(sender)
+    return Boolean(window && (isMainWindow(window) || isConnectMobileWindow(window)))
   }
   let getMainWindow = (): BrowserWindow | undefined => undefined
   let isMainWindowHidden = (): boolean => false
@@ -737,7 +756,7 @@ async function startDesktop(): Promise<void> {
         },
         release: (id) => attached.release(id)
       },
-      isApplicationWindow
+      isApplicationCommandWindow
     )
   }
   const publishStartup = (next: DatabaseStartupState): void => {
@@ -1153,10 +1172,23 @@ async function startDesktop(): Promise<void> {
           recovery?.disconnect(attached)
       }
     })
+    attached.resourceActivity?.(resourceActivityRelay.state())
     return attached
   }
   let repairAuthorization: Awaited<ReturnType<typeof readServiceLifetime>>
   let repairStartupOptions: RuntimeStartupOptions | undefined
+  const reportRecoveryStartup = (status: BackendStartupStatus & { elapsedMs: number }): void => {
+    // Persist progress even when a recovery deadline cancels the launch before it throws.
+    // Inventory diagnostics belong to the transient recovery surface, not the log sink.
+    bootstrapLog.info('backend recovery startup status', {
+      requestId: status.attemptId,
+      startupStage: status.stage,
+      status: status.kind,
+      errorCategory: status.code,
+      credentialReason: status.reason,
+      elapsedMs: status.elapsedMs
+    })
+  }
   const repairBackend = async (signal: AbortSignal): Promise<void> => {
     let config =
       client?.runtimeInfo().startupOptions ?? preservedStartupOptions ?? repairStartupOptions
@@ -1178,6 +1210,7 @@ async function startDesktop(): Promise<void> {
     else {
       if (config) validatePreservedConfiguration(config)
       launch = await startOrAttachDesktopBackend({
+        onStatus: reportRecoveryStartup,
         configRoot,
         profilePath,
         version: app.getVersion(),
@@ -1261,6 +1294,7 @@ async function startDesktop(): Promise<void> {
         await verifyRestartIntent()
         const config = client!.runtimeInfo().startupOptions
         launch = await startOrAttachDesktopBackend({
+          onStatus: reportRecoveryStartup,
           configRoot,
           profilePath,
           version: app.getVersion(),
@@ -1516,6 +1550,16 @@ async function startDesktop(): Promise<void> {
     client: () => client!,
     currentVersion: app.getVersion(),
     allowedProcessIds: allowedInstallationProcessIds,
+    ...(process.platform === 'win32'
+      ? {
+          ownedRuntimeProcessIds: async (runtime): Promise<number[]> => {
+            const pids = await runtime.invokeHost('desktop:update-owned-processes')
+            if (!Array.isArray(pids) || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0))
+              throw new Error('The service returned invalid process ownership evidence.')
+            return pids as number[]
+          }
+        }
+      : {}),
     preparedDebGate: () => preparedMacInstallation?.debGate,
     verifyInstallerReady: async () => {
       const gate = preparedMacInstallation?.debGate

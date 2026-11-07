@@ -20,6 +20,7 @@
     "src/main/pdf-annotations/sharing.ts": "repository",
     "src/main/pdf-annotations/native-import-core.ts": "host-infrastructure",
     "src/main/pdf-documents/identity.ts": "repository",
+    "src/main/tags/tag-write.ts": "repository",
     "src/main/reviewer/submission-limits.ts": "policy",
     "src/main/uploads/atomic-no-replace-publisher.ts": "host-infrastructure",
     "src/shared/in-flight-promise.ts": "foundation",
@@ -1884,6 +1885,7 @@
         "src/main/local-models/download-sources.ts",
         "src/main/local-models/download.ts",
         "src/main/local-models/ipc.ts",
+        "src/main/local-models/ocr-owner.ts",
         "src/main/local-models/owner.ts"
       ],
       "layer": "host-owner",
@@ -1892,6 +1894,7 @@
       "requiredTests": [
         "src/main/local-models/download.test.ts",
         "src/main/local-models/owner.test.ts",
+        "src/main/local-models/ocr-owner.test.ts",
         "src/preload/index.test.ts",
         "src/renderer/web/api-installer.test.ts",
         "src/shared/renderer-contract-catalog.test.ts",
@@ -2021,7 +2024,10 @@
         "src/main/remote-access/remoteit.ts",
         "src/main/remote-access/repository.ts",
         "src/main/remote-access/service.ts",
-        "src/main/remote-access/command-port.ts"
+        "src/main/remote-access/command-port.ts",
+        "src/main/remote-access/lan.ts",
+        "src/main/remote-access/pair-token.ts",
+        "src/main/remote-access/pinggy.ts"
       ],
       "layer": "host-owner",
       "sourceLayers": {},
@@ -2030,6 +2036,7 @@
         "src/main/remote-access/ipc.test.ts",
         "src/main/remote-access/pairing-page.test.ts",
         "src/main/remote-access/pairing.test.ts",
+        "src/main/remote-access/pinggy.test.ts",
         "src/main/remote-access/remoteit.test.ts",
         "src/main/remote-access/repository.test.ts",
         "src/main/remote-access/service.test.ts",
@@ -2045,6 +2052,7 @@
         "node:crypto",
         "node:fs",
         "node:fs/promises",
+        "node:os",
         "node:path",
         "node:util"
       ],
@@ -5138,7 +5146,8 @@
         "src/renderer/src/components/notice.tsx",
         "src/renderer/src/lib/utils.ts",
         "src/renderer/src/pages/literature/imports/LiteratureImportDialogFrame.tsx",
-        "src/renderer/src/components/ui/workflow-dialog-frame.tsx"
+        "src/renderer/src/components/ui/workflow-dialog-frame.tsx",
+        "src/renderer/src/components/ui/split-button.tsx"
       ],
       "layer": "presentation-runtime",
       "sourceLayers": {
@@ -5173,7 +5182,8 @@
         "src/renderer/src/components/notice.tsx": "presentation-adapter",
         "src/renderer/src/lib/utils.ts": "presentation-model",
         "src/renderer/src/pages/literature/imports/LiteratureImportDialogFrame.tsx": "presentation-adapter",
-        "src/renderer/src/components/ui/workflow-dialog-frame.tsx": "presentation-adapter"
+        "src/renderer/src/components/ui/workflow-dialog-frame.tsx": "presentation-adapter",
+        "src/renderer/src/components/ui/split-button.tsx": "presentation-adapter"
       },
       "consumerModules": [],
       "requiredTests": [
@@ -5185,7 +5195,8 @@
         "src/renderer/src/components/ui/resizable.modal-isolation.test.tsx",
         "src/renderer/src/components/ui/resizable.test.tsx",
         "src/renderer/src/components/ui/use-retained-dialog-value.test.tsx",
-        "src/main/host-layer-dependencies.architecture.test.ts"
+        "src/main/host-layer-dependencies.architecture.test.ts",
+        "src/renderer/src/components/ui/split-button.test.tsx"
       ],
       "externalImports": [
         "@shadcn/react/message-scroller",
@@ -5200,7 +5211,10 @@
       ],
       "pureExternalImports": {
         "src/renderer/src/lib/utils.ts": ["clsx", "tailwind-merge"]
-      }
+      },
+      "resourcePaths": ["src/renderer/src/components/ui/split-button.css"],
+      "resourceImports": ["src/renderer/src/components/ui/split-button.css"],
+      "resourceTests": ["src/renderer/src/components/ui/split-button.test.tsx"]
     },
     "renderer_utilities": {
       "sources": [
@@ -5739,6 +5753,7 @@
         "src/renderer/src/pages/settings/AppIconSection.tsx",
         "src/renderer/src/pages/settings/AppVersionSection.preview.tsx",
         "src/renderer/src/pages/settings/AppVersionSection.tsx",
+        "src/renderer/src/pages/settings/AppearancePanel.tsx",
         "src/renderer/src/pages/settings/ArchivedPanel.tsx",
         "src/renderer/src/pages/settings/ClaudeIsolatedSignInModal.tsx",
         "src/renderer/src/pages/settings/ComputeAddForm.tsx",
@@ -5760,6 +5775,7 @@
         "src/renderer/src/pages/settings/NotebookNetworkProtectionBanner.preview.tsx",
         "src/renderer/src/pages/settings/NotebookNetworkProtectionBanner.tsx",
         "src/renderer/src/pages/settings/NotebookRecoveryNotice.tsx",
+        "src/renderer/src/pages/settings/NotificationsPanel.tsx",
         "src/renderer/src/pages/settings/PdfParsingCacheAction.tsx",
         "src/renderer/src/pages/settings/PermissionsPanel.tsx",
         "src/renderer/src/pages/settings/RestoreDefaultPermissionsButton.preview.tsx",
@@ -5797,6 +5813,7 @@
         "src/renderer/src/pages/settings/AppIconSection.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/AppVersionSection.preview.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/AppVersionSection.tsx": "presentation-adapter",
+        "src/renderer/src/pages/settings/AppearancePanel.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/ArchivedPanel.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/ClaudeIsolatedSignInModal.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/ComputeAddForm.tsx": "presentation-adapter",
@@ -5818,6 +5835,7 @@
         "src/renderer/src/pages/settings/NotebookNetworkProtectionBanner.preview.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/NotebookNetworkProtectionBanner.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/NotebookRecoveryNotice.tsx": "presentation-adapter",
+        "src/renderer/src/pages/settings/NotificationsPanel.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/PdfParsingCacheAction.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/PermissionsPanel.tsx": "presentation-adapter",
         "src/renderer/src/pages/settings/RestoreDefaultPermissionsButton.preview.tsx": "presentation-adapter",
@@ -7560,6 +7578,7 @@
         "src/renderer/src/lib/acp/workspace-runtime-event-owner.ts",
         "src/renderer/src/lib/acp/workspace-runtime-prompt-preparation-owner.ts",
         "src/renderer/src/lib/acp/workspace-runtime-session-branch-owner.ts",
+        "src/renderer/src/lib/acp/workspace-runtime-session-cleanup-owner.ts",
         "src/renderer/src/lib/acp/workspace-runtime-attachment-owner.ts",
         "src/renderer/src/lib/acp/workspace-runtime-command-owner.ts",
         "src/renderer/src/lib/acp/workspace-runtime-session-lifecycle-owner.ts",
@@ -7579,6 +7598,7 @@
         "src/renderer/src/lib/acp/workspace-runtime-event-owner.ts": "presentation-adapter",
         "src/renderer/src/lib/acp/workspace-runtime-prompt-preparation-owner.ts": "presentation-adapter",
         "src/renderer/src/lib/acp/workspace-runtime-session-branch-owner.ts": "presentation-adapter",
+        "src/renderer/src/lib/acp/workspace-runtime-session-cleanup-owner.ts": "presentation-adapter",
         "src/renderer/src/lib/acp/workspace-runtime-attachment-owner.ts": "presentation-adapter",
         "src/renderer/src/lib/acp/workspace-runtime-command-owner.ts": "presentation-adapter",
         "src/renderer/src/lib/acp/workspace-runtime-session-lifecycle-owner.ts": "presentation-adapter",
@@ -7608,6 +7628,8 @@
         "src/renderer/src/lib/acp/workspace-runtime-interrupted-recovery.test.ts",
         "src/renderer/src/lib/acp/workspace-prompt-admission.test.ts",
         "src/renderer/src/lib/acp/workspace-prompt-preparation.test.ts",
+        "src/renderer/src/lib/acp/workspace-first-prompt-preparation.test.ts",
+        "src/renderer/src/pages/workspace/WorkspacePage.send-gate.test.tsx",
         "src/renderer/src/lib/acp/workspace-prompt-rollback-failure.test.ts",
         "src/renderer/src/lib/acp/workspace-runtime-overflow-recovery-failures.test.ts",
         "src/renderer/src/lib/acp/useWorkspaceAgentRuntime.first-output.render.test.tsx",
@@ -9075,6 +9097,7 @@
     "renderer_session_persistence": {
       "sources": [
         "src/renderer/src/lib/session-persistence/session-persistence.ts",
+        "src/renderer/src/lib/session-persistence/session-write-recovery.ts",
         "src/renderer/src/lib/acp/runtime-writer-client.ts"
       ],
       "layer": "presentation-runtime",
@@ -9083,6 +9106,7 @@
       "requiredTests": [
         "src/renderer/src/lib/session-persistence/session-persistence.render.test.tsx",
         "src/renderer/src/lib/session-persistence/session-persistence.test.ts",
+        "src/renderer/src/lib/session-persistence/session-write-recovery.test.ts",
         "src/renderer/src/lib/acp/runtime-writer-client.test.ts",
         "src/main/host-layer-dependencies.architecture.test.ts"
       ],
@@ -9250,6 +9274,7 @@
     },
     "settings_remote_presentation": {
       "sources": [
+        "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.tsx",
         "src/renderer/src/pages/settings/RemoteControlPanel.tsx",
         "src/renderer/src/pages/settings/RepairFrameworkDialog.tsx"
       ],
@@ -9257,6 +9282,7 @@
       "sourceLayers": {},
       "consumerModules": [],
       "requiredTests": [
+        "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.test.tsx",
         "src/renderer/src/pages/settings/RemoteControlPanel.render.test.tsx",
         "src/renderer/src/pages/settings/RepairFrameworkDialog.render.test.tsx",
         "src/main/host-layer-dependencies.architecture.test.ts"
@@ -9330,8 +9356,6 @@
         "src/renderer/src/pages/workspace/session-permissions.ts": "presentation-model",
         "src/renderer/src/pages/workspace/PermissionScopeButton.tsx": "presentation-adapter"
       },
-      "resourcePaths": ["src/renderer/src/pages/workspace/question-skip-button.css"],
-      "resourceImports": ["src/renderer/src/pages/workspace/question-skip-button.css"],
       "resourceTests": [
         "src/renderer/src/pages/workspace/WorkspaceElicitationCard.interaction.test.tsx"
       ],

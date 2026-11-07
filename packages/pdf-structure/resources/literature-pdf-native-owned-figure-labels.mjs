@@ -5,8 +5,17 @@ import { proveNativeUniqueWholeFonts } from './literature-pdf-table-evidence.mjs
 import { collectClosedFigureFrames } from './literature-pdf-graphics.mjs'
 import { isDeepStrictEqual as sameNativeHeader } from 'node:util'
 import { nativeFigureLabelBounds } from './literature-pdf-figure-crop-geometry.mjs'
+import { nativeFigurePathPaint } from './literature-pdf-figure-native-complete-form.mjs'
 import { tableTextToken } from './literature-pdf-orientation.mjs'
-import { nativePageTextPacketInventory } from './literature-pdf-figure-native-plot-labels.mjs'
+import {
+  nativePageTextPacketInventory,
+  nativeClosedProgramInkPacket
+} from './literature-pdf-figure-native-plot-labels.mjs'
+import {
+  retainNativeRecoveryInputs,
+  nativeRecoveryOwnValues
+} from './literature-pdf-native-figure-recovery-profile.mjs'
+const nativeVectorFigureLabelCertificates = new WeakMap()
 
 // The same proved margin exclusion must reach face association and completion.
 // Otherwise a later label pass can reattach the printed page number. An explicit
@@ -818,6 +827,32 @@ export function nativeRasterRowLabels(page, caption, captions, tables, rect, tok
   }
   if (rows.length < 2 || rows.length > 12 || (rows.length < 3 && rows.some((r) => r.length < 2)))
     return []
+  // A terminal period can belong to a single abbreviated row key. Preserve
+  // the prose guard unless one complete native record proves that exact key.
+  const abbreviations = new Map()
+  for (const line of page.lines.filter((l) => /^\p{L}+\.$/u.test(l.text.trim()))) {
+    const matching = tokens.filter(
+      (t) =>
+        t.text === line.text &&
+        t.sourceItem?.pageNumber === page.pageNumber &&
+        t.rect?.every((v, n) => Math.abs(v - lineRect(line)[n]) < 1e-6)
+    )
+    if (matching.length !== 1 || !proveNativeUniqueWholeFonts(matching, tokens)) continue
+    const token = matching[0],
+      ink = token.nativeLabelRect
+    if (
+      !Array.isArray(ink) ||
+      ink.length !== 4 ||
+      !ink.every(Number.isFinite) ||
+      ink[2] <= ink[0] ||
+      ink[3] <= ink[1] ||
+      ink[1] < rect[1] ||
+      ink[3] > rect[3] ||
+      ink.some((v, n) => Math.abs(v - token.rect[n]) > token.height)
+    )
+      continue
+    abbreviations.set(line, union([lineRect(line), ink]))
+  }
   const candidates = page.lines.filter(
     (l) =>
       l.fontSize > 0 &&
@@ -826,7 +861,7 @@ export function nativeRasterRowLabels(page, caption, captions, tables, rect, tok
       l.height <= font * 1.5 &&
       l.text.trim().length > 1 &&
       l.text.length < 40 &&
-      !/[.!?]$/.test(l.text.trim()) &&
+      (!/[.!?]$/.test(l.text.trim()) || abbreviations.has(l)) &&
       l.width > 0 &&
       l.width <= font * 8 &&
       l.x >= rect[0] - font * 7 &&
@@ -853,12 +888,21 @@ export function nativeRasterRowLabels(page, caption, captions, tables, rect, tok
     )
   )
     return []
-  const strip = [Math.min(...labels.map((l) => l.x)), rect[1], rect[0], rect[3]]
+  const hasAbbreviation = labels.some((line) => abbreviations.has(line))
+  const strip = [
+    Math.min(...labels.map((l) => abbreviations.get(l)?.[0] ?? l.x)),
+    rect[1],
+    rect[0],
+    rect[3]
+  ]
   if (
     tables.some((t) => intersection(t, strip) > 0) ||
     captions.some((c) => c.page === caption.page && intersection(c.rect, strip) > 0) ||
     page.lines.some(
-      (l) => !labels.includes(l) && l.text.length >= 40 && intersection(lineRect(l), strip) > 0
+      (l) =>
+        !labels.includes(l) &&
+        (hasAbbreviation || l.text.length >= 40) &&
+        intersection(lineRect(l), strip) > 0
     )
   )
     return []
@@ -919,7 +963,12 @@ export function nativeRasterRowLabels(page, caption, captions, tables, rect, tok
         }))
       )
   }
-  return [...new Set(labels)]
+  return [...new Set(labels)].map((line) => {
+    const ink = abbreviations.get(line)
+    return ink
+      ? { ...line, x: ink[0], y: ink[1], width: ink[2] - ink[0], height: ink[3] - ink[1] }
+      : line
+  })
 }
 // Preserve complete native font boxes already intersecting owned drawing ink.
 // Detached rows require independent repeated panel/label column evidence.
@@ -1937,8 +1986,20 @@ export function nativeOwnedFigureBottomLabels(
   rect,
   frames,
   tokens,
-  foreignOwns = () => false
+  foreignOwns = () => false,
+  context
 ) {
+  const vectorKeys = nativeOwnedScriptedVectorSubcaptions(
+    page,
+    caption,
+    captions,
+    tables,
+    rect,
+    tokens,
+    foreignOwns,
+    context
+  )
+  if (vectorKeys) return vectorKeys
   const cutRow = nativeCutRasterLabelRow(page, caption, captions, tables, rect, tokens, foreignOwns)
   if (cutRow.length) return cutRow
   const pairedFaces = nativeOwnedPairedFacePanelKeys(
@@ -2159,6 +2220,221 @@ export function nativeOwnedFigureBottomLabels(
   )
     return []
   return result
+}
+
+// Two already owned, disjoint vector components can have complete explanatory
+// subcaptions with native scripts. This is preview geometry, never Source roles.
+function nativeOwnedScriptedVectorSubcaptions(
+  page,
+  caption,
+  captions,
+  tables,
+  rect,
+  tokens,
+  foreignOwns,
+  context
+) {
+  try {
+    const valid = (r) =>
+        Array.isArray(r) &&
+        r.length === 4 &&
+        r.every(Number.isFinite) &&
+        r[0] < r[2] &&
+        r[1] < r[3],
+      inside = (a, b) => b.every((x, i) => (i < 2 ? x >= a[i] - 1e-6 : x <= a[i] + 1e-6)),
+      hit = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1],
+      compact = (s) => s.normalize('NFD').replace(/\s/gu, ''),
+      retained =
+        context &&
+        retainNativeRecoveryInputs(
+          [page, caption, captions, tables, rect, tokens, context],
+          context.viewport
+        )
+    if (
+      !retained ||
+      !valid(rect) ||
+      !valid(caption.rect) ||
+      caption.page !== page.pageNumber ||
+      !captions.includes(caption) ||
+      !Array.isArray(page.lines)
+    )
+      return
+    const lines = page.lines.filter(
+      (l) =>
+        /^\([ab]\)\s+\p{L}/u.test(l.text) &&
+        valid(lineRect(l)) &&
+        l.y > rect[3] &&
+        l.y + l.height < caption.rect[1]
+    )
+    if (
+      lines.length !== 2 ||
+      lines[0].text[1] !== 'a' ||
+      lines[1].text[1] !== 'b' ||
+      Math.abs(lines[0].y - lines[1].y) > 1e-6 ||
+      lines[0].x + lines[0].width >= lines[1].x
+    )
+      return
+    const rows = lines.map((l) =>
+      tokens.filter((t) => t.text?.trim() && valid(t.rect) && inside(lineRect(l), t.rect))
+    )
+    if (
+      rows.some(
+        (row, i) =>
+          !row.length ||
+          row.length > 32 ||
+          !row[0].text.startsWith(`(${String.fromCharCode(97 + i)})`) ||
+          compact(row.map((t) => t.text).join('')) !== compact(lines[i].text)
+      )
+    )
+      return
+    const source = rows.flat(),
+      sourceItems = source.map((t) => t.sourceItem),
+      packet = nativeClosedProgramInkPacket(page, tokens, context, sourceItems)
+    if (
+      !packet ||
+      packet.evidence.images.length ||
+      packet.records.length > 4096 ||
+      packet.evidence.paths.size > 4096
+    )
+      return
+    const records = rows.map((row) =>
+        row.map((t) => packet.records.find((r) => r.index === t.sourceItem.index))
+      ),
+      captionRows = packet.records.filter((r) => inside(caption.rect, r.rect)),
+      captionText = captionRows.map((r) => r.r.str).join('')
+    if (
+      !captionRows.length ||
+      compact(captionText) !== compact(caption.lines.join('')) ||
+      [...new Set([...captionText.matchAll(/\(([a-z])\)/gu)].map((m) => m[1]))].join('') !== 'ab'
+    )
+      return
+    if (records.some((row) => row.some((r) => !r?.advanceComplete))) return
+    const bodyRecords = packet.records.filter((r) => inside(rect, r.rect))
+    if (bodyRecords.some((r) => !r.advanceComplete)) return
+    const ownRecords = [...records.flat(), ...bodyRecords],
+      ownGlyphs = new Set(ownRecords.flatMap((r) => r.part.map((z) => z.g))),
+      sourceIndices = new Set(ownRecords.map((r) => r.index)),
+      full = (r) => {
+        const style = context.content.styles[r.r.fontName],
+          font = style && nativeFigureLabelBounds(r.r, style, packet.v)
+        if (
+          !font ||
+          !valid(font) ||
+          !Number.isFinite(style.ascent) ||
+          !Number.isFinite(style.descent) ||
+          style.ascent <= 0 ||
+          style.descent > 0 ||
+          style.vertical !== false
+        )
+          return
+        return union([r.rect, font, ...r.part.map((z) => z.g.ink)])
+      },
+      labels = records.map((row) => {
+        const rs = row.map(full)
+        return rs.every(valid) ? union(rs) : undefined
+      })
+    if (
+      labels.some((r) => !valid(r)) ||
+      packet.records.some(
+        (r) => !sourceIndices.has(r.index) && r.part.some((z) => ownGlyphs.has(z.g))
+      )
+    )
+      return
+    const paths = [...packet.evidence.paths]
+      .filter(([i]) => ![OPS.endPath, OPS.clip, OPS.eoClip].includes(packet.o.argsArray[i]?.[0]))
+      .map(([i, state]) => ({
+        i,
+        state,
+        paint: nativeFigurePathPaint(packet, i, state),
+        geometry: packet.box(
+          packet.o.argsArray[i][2],
+          Util.transform(packet.v.transform, state.transform)
+        )
+      }))
+    if (
+      paths.some(
+        (p) =>
+          !valid(p.paint?.rect) ||
+          !Array.isArray(p.geometry) ||
+          p.geometry.length !== 4 ||
+          !p.geometry.every(Number.isFinite) ||
+          p.geometry[0] > p.geometry[2] ||
+          p.geometry[1] > p.geometry[3]
+      )
+    )
+      return
+    const body = paths.filter((p) => hit(p.paint.rect, rect))
+    // Admit only path geometry already inside the existing crop. Its conservative
+    // miter envelope is still used below to exclude paint from the added strip;
+    // that envelope is not permission to enlarge the diagram's original sides.
+    if (body.some((p) => !inside(rect, p.geometry))) return
+    // Connected horizontal projections establish the two existing components;
+    // a shallow diagram needs no guessed minimum height to become a panel.
+    const components = []
+    for (const p of [...body].sort((a, b) => a.paint.rect[0] - b.paint.rect[0])) {
+      const last = components.at(-1)
+      if (last && p.paint.rect[0] <= last.rect[2]) {
+        last.paths.push(p)
+        last.rect = union([last.rect, p.paint.rect])
+      } else components.push({ paths: [p], rect: p.paint.rect })
+    }
+    if (
+      components.length !== 2 ||
+      components.some((c) => c.paths.length < 3) ||
+      components[0].rect[2] >= components[1].rect[0]
+    )
+      return
+    if (
+      components[0].rect[1] >= components[1].rect[3] ||
+      components[1].rect[1] >= components[0].rect[3]
+    )
+      return
+    if (
+      labels.some(
+        (r, i) =>
+          r[0] < components[i].rect[0] ||
+          r[2] > components[i].rect[2] ||
+          r[1] <= rect[3] ||
+          r[3] >= caption.rect[1] ||
+          lines[i].y - rect[3] > lines[i].fontSize * 2
+      )
+    )
+      return
+    const expanded = union([rect, ...labels]),
+      strip = [expanded[0], rect[3], expanded[2], expanded[3]]
+    if (
+      bodyRecords.some((r) => r.part.some(({ g }) => hit(g.ink, strip) && !inside(expanded, g.ink)))
+    )
+      return
+    if (
+      !inside([0, 0, page.width, page.height], expanded) ||
+      foreignOwns(expanded) ||
+      tables.some((r) => !valid(r) || hit(r, expanded)) ||
+      captions.some((c) => c.page === page.pageNumber && hit(c.rect, expanded))
+    )
+      return
+    if (
+      paths.some((p) => hit(p.paint.rect, strip)) ||
+      packet.glyphs.some((g) => !ownGlyphs.has(g) && valid(g.ink) && hit(g.ink, strip))
+    )
+      return
+    if (
+      packet.records.some((r) => !sourceIndices.has(r.index) && hit(r.rect, strip)) ||
+      tokens.some((t) => t.text?.trim() && hit(t.rect, strip) && !source.includes(t))
+    )
+      return
+    if (page.lines.some((l) => hit(lineRect(l), strip) && !lines.includes(l))) return
+    if (
+      !ownRecords.every((r) =>
+        r.part.every(({ g }) => valid(g.ink) && inside(packet.evidence.texts.get(g.i).clip, g.ink))
+      )
+    )
+      return
+    if (!retained()) return
+    return labels
+  } catch {
+    return
+  }
 }
 
 // Two independently closed, already owned faces can have ordinary explanatory
@@ -3342,4 +3618,275 @@ function proveRepeatedFigureHeader(page, tokens, captions, tables, context) {
   )
     return
   return { lines, tokens: owned }
+}
+
+// Only complete ordinary vector-label packets can acquire existing figure text
+// ownership. The separate pixel observer cannot be used as a Source witness.
+export function createNativeVectorFigureLabelCertificate(
+  page,
+  figure,
+  captions,
+  tables,
+  tokens,
+  context,
+  peers,
+  cropRect
+) {
+  try {
+    const ctx = nativeRecoveryOwnValues(context),
+      current =
+        ctx &&
+        retainNativeRecoveryInputs(
+          [page, figure, captions, tables, tokens, context, peers, cropRect],
+          ctx.viewport
+        )
+    if (!current) return
+    const valid = (r) =>
+        Array.isArray(r) &&
+        r.length === 4 &&
+        r.every(Number.isFinite) &&
+        r[0] < r[2] &&
+        r[1] < r[3],
+      inside = (a, b) => b.every((v, i) => (i < 2 ? v >= a[i] - 1e-8 : v <= a[i] + 1e-8)),
+      hit = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+    if (
+      figure.sourceItems?.length ||
+      !valid(cropRect) ||
+      ![captions, tables, tokens, peers].every(Array.isArray) ||
+      !valid(figure.rect) ||
+      !valid(figure.caption?.rect) ||
+      figure.caption.page !== page.pageNumber ||
+      captions.filter((c) => c === figure.caption).length !== 1 ||
+      captions.some(
+        (c) => c.page === page.pageNumber && (!valid(c.rect) || hit(c.rect, cropRect))
+      ) ||
+      tables.some((t) => !valid(t) || hit(t, cropRect)) ||
+      peers.some((f) => f !== figure && f.rect && (!valid(f.rect) || hit(f.rect, cropRect))) ||
+      !inside([0, 0, page.width, page.height], cropRect) ||
+      context.pageNumber !== page.pageNumber ||
+      !/^[a-f0-9]{64}$/u.test(context.sourceSha256 ?? '')
+    )
+      return
+    const p = nativePageTextPacketInventory(page, tokens, context, true)
+    if (!p || p.evidence.images.length || !p.evidence.paths.size) return
+    const full = (r) => {
+      const style = context.content.styles[r.r.fontName]
+      if (
+        style?.vertical !== false ||
+        !Number.isFinite(style.ascent) ||
+        !Number.isFinite(style.descent) ||
+        style.ascent <= 0 ||
+        style.descent > 0 ||
+        style.ascent <= style.descent
+      )
+        return
+      const font = nativeFigureLabelBounds(r.r, style, p.v)
+      return font && union([r.rect, font, ...r.part.map((z) => z.g.ink)])
+    }
+    const bounds = new Map(p.records.map((r) => [r, full(r)]))
+    // A complete descriptive panel caption remains translatable. Require the
+    // whole native packet, a consecutive paired family referenced by the native
+    // main caption, and a common lower band below every other body glyph.
+    // Bare panel keys and ordinary axis/legend labels do not establish this role.
+    const compact = (text) => text.normalize('NFD').replace(/\s/gu, ''),
+      panelCandidates = p.records
+        .flatMap((r) => {
+          const match = /^\(([a-l])\)\s+(.+)$/u.exec(r.r.str),
+            packetSet = [...new Set(r.part.map((z) => z.g.packet))]
+          if (
+            !match ||
+            (match[2].match(/\p{L}{2,}/gu)?.length ?? 0) < 3 ||
+            packetSet.length !== 1 ||
+            !valid(bounds.get(r)) ||
+            !inside(cropRect, bounds.get(r)) ||
+            compact(packetSet[0].text) !== compact(r.r.str) ||
+            p.records.some(
+              (other) => other !== r && other.part.some((z) => z.g.packet === packetSet[0])
+            )
+          )
+            return []
+          return [{ r, packet: packetSet[0], key: match[1] }]
+        })
+        .sort((a, b) => a.key.localeCompare(b.key)),
+      captionText = p.records
+        .filter((r) => inside(figure.caption.rect, r.rect))
+        .map((r) => r.r.str)
+        .join(' '),
+      panelPackets = new Set(panelCandidates.map((c) => c.packet)),
+      otherBody = p.glyphs.filter(
+        (g) =>
+          !g.rendererSkipped &&
+          valid(g.ink) &&
+          inside(cropRect, g.ink) &&
+          !panelPackets.has(g.packet)
+      ),
+      panelFloor = Math.min(...panelCandidates.map((c) => bounds.get(c.r)[1])),
+      panelHeight = panelCandidates[0]?.r.r.height,
+      closedPanelFamily =
+        panelCandidates.length >= 2 &&
+        panelCandidates.length <= 12 &&
+        panelCandidates.every(
+          (c, i) =>
+            c.key === String.fromCharCode(97 + i) &&
+            c.r.r.fontName === panelCandidates[0].r.r.fontName &&
+            c.r.r.height > 0 &&
+            Math.abs(c.r.r.height - panelHeight) < 1e-6 &&
+            Math.abs(c.r.rect[3] - panelCandidates[0].r.rect[3]) <= panelHeight * 0.25 &&
+            captionText.includes('(' + c.key + ')')
+        ) &&
+        otherBody.length > 0 &&
+        otherBody.every((g) => g.ink[3] < panelFloor),
+      captionPackets = closedPanelFamily ? panelPackets : new Set()
+    const packets = new Set()
+    for (const r of p.records) {
+      if (
+        r.part.some((z) => captionPackets.has(z.g.packet)) ||
+        !valid(bounds.get(r)) ||
+        !inside(cropRect, bounds.get(r)) ||
+        !/\p{L}{2}/u.test(r.r.str)
+      )
+        continue
+      for (const z of r.part) packets.add(z.g.packet)
+    }
+    const owners = p.records.filter((r) => r.part.some((z) => packets.has(z.g.packet)))
+    if (
+      !owners.length ||
+      owners.length > 64 ||
+      owners.some(
+        (r) =>
+          r.r.width <= 0 ||
+          !valid(bounds.get(r)) ||
+          !inside(cropRect, bounds.get(r)) ||
+          !r.part.every((z) => packets.has(z.g.packet))
+      )
+    )
+      return
+    // A packet remains whole, even where PDF.js splits mixed-font fragments.
+    for (const packet of packets)
+      if (
+        p.glyphs.some(
+          (g) =>
+            g.packet === packet && !g.rendererSkipped && valid(g.ink) && !inside(cropRect, g.ink)
+        )
+      )
+        return
+    const claims = owners.map((r) => r.r.sourceItem).sort((a, b) => a.index - b.index)
+    const forms = [],
+      stack = []
+    let matrix = [1, 0, 0, 1, 0, 0]
+    for (let i = 0; i < p.o.fnArray.length; i++) {
+      const op = p.o.fnArray[i],
+        a = p.o.argsArray[i]
+      if (op === OPS.save || op === OPS.paintFormXObjectBegin) {
+        const part = { begin: i, op, parent: stack.at(-1), matrix: [...matrix] }
+        stack.push(part)
+        if (op === OPS.paintFormXObjectBegin) {
+          if (a[0]) matrix = Util.transform(matrix, a[0])
+          if (valid(Array.from(a[1] ?? [])))
+            part.rect = p.box(Array.from(a[1]), Util.transform(p.v.transform, matrix))
+          forms.push(part)
+        }
+      } else if (op === OPS.restore || op === OPS.paintFormXObjectEnd) {
+        const part = stack.pop()
+        if (!part || part.op !== (op === OPS.restore ? OPS.save : OPS.paintFormXObjectBegin)) return
+        part.end = i
+        matrix = part.matrix
+      } else if (op === OPS.transform) matrix = Util.transform(matrix, a)
+    }
+    if (stack.length) return
+    const body = forms
+      .filter(
+        (s) =>
+          valid(s.rect) &&
+          inside(cropRect, s.rect) &&
+          owners.every((r) => r.part.every((z) => z.g.i > s.begin && z.g.i < s.end)) &&
+          [...p.evidence.paths.keys()].filter((i) => i > s.begin && i < s.end).length >= 3 &&
+          p.glyphs
+            .filter((g) => g.i > s.begin && g.i < s.end && !g.rendererSkipped && valid(g.ink))
+            .every((g) => inside(cropRect, g.ink))
+      )
+      .filter(
+        (s) =>
+          !forms.some(
+            (t) =>
+              t !== s &&
+              valid(t.rect) &&
+              inside(cropRect, t.rect) &&
+              t.begin < s.begin &&
+              t.end > s.end
+          )
+      )
+    if (body.length !== 1) return
+    const scoped = nativeClosedProgramInkPacket(page, tokens, context, claims)
+    if (
+      !scoped ||
+      claims.some(
+        (s) =>
+          !scoped.records.some(
+            (r) => r.index === s.index && r.advanceComplete && r.r.sourceItem === s
+          )
+      )
+    )
+      return
+    if (
+      owners.some(
+        (r) =>
+          tokens.filter(
+            (t) =>
+              t.sourceItem?.pageNumber === page.pageNumber &&
+              t.sourceItem.index === r.index &&
+              t.sourceItem.text === r.r.str &&
+              t.text === r.r.str
+          ).length !== 1
+      )
+    )
+      return
+    const details = { sourceItems: claims },
+      outputCurrent = retainNativeRecoveryInputs([details])
+    if (!outputCurrent || !current()) return
+    const handle = Object.freeze({})
+    nativeVectorFigureLabelCertificates.set(handle, {
+      page,
+      figure,
+      captions,
+      tables,
+      tokens,
+      context,
+      peers,
+      cropRect,
+      current,
+      outputCurrent,
+      details
+    })
+    return handle
+  } catch {
+    return
+  }
+}
+export function nativeVectorFigureLabelCertificateData(
+  handle,
+  page,
+  figure,
+  captions,
+  tables,
+  tokens,
+  context,
+  peers,
+  cropRect
+) {
+  try {
+    const p = nativeVectorFigureLabelCertificates.get(handle)
+    return p &&
+      [page, figure, captions, tables, tokens, context, peers, cropRect].every(
+        (v, i) =>
+          v ===
+          [p.page, p.figure, p.captions, p.tables, p.tokens, p.context, p.peers, p.cropRect][i]
+      ) &&
+      p.current() &&
+      p.outputCurrent()
+      ? p.details
+      : undefined
+  } catch {
+    return
+  }
 }

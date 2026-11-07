@@ -56,10 +56,16 @@ it('upgrades the 0050 schema with unread defaults while preserving items, relati
   expect(await migrateApplicationDatabase(client)).toMatchObject({
     from: '0050_literature_translation',
     to: currentMigrationId,
-    applied: [migrationId, currentMigrationId]
+    applied: [
+      migrationId,
+      '0052_literature_personal_note_search',
+      '0053_literature_doi_identity',
+      '0054_slurm_job_reliability',
+      currentMigrationId
+    ]
   })
   expect(await client.$queryRaw`SELECT * FROM "LiteratureItem" WHERE id = 'paper'`).toEqual([
-    { ...item, readingStatus: 'unread' }
+    { ...item, readingStatus: 'unread', normalizedPersonalNote: '' }
   ])
   expect(await client.literatureCollection.findMany({ include: { items: true } })).toEqual(
     collections
@@ -134,7 +140,13 @@ it('rolls back the added column and ledger entry if migration verification fails
   )
   expect(await client.$queryRaw`PRAGMA foreign_key_check`).toEqual([])
   expect(await migrateApplicationDatabase(client)).toMatchObject({
-    applied: [migrationId, currentMigrationId]
+    applied: [
+      migrationId,
+      '0052_literature_personal_note_search',
+      '0053_literature_doi_identity',
+      '0054_slurm_job_reliability',
+      currentMigrationId
+    ]
   })
   expect(await client.literatureItem.findUnique({ where: { id: 'paper' } })).toMatchObject({
     readingStatus: 'unread',

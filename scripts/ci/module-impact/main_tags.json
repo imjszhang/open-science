@@ -7,14 +7,16 @@
     "src/main/tags/resource-catalog.ts",
     "src/main/tags/service.test.ts",
     "src/main/tags/service.ts",
-    "src/main/tags/resource-contract.ts"
+    "src/main/tags/resource-contract.ts",
+    "src/main/tags/tag-write.ts"
   ],
   "interfacePaths": [
     "src/main/tags/application-commands.ts",
     "src/main/tags/repository.ts",
     "src/main/tags/resource-catalog.ts",
     "src/main/tags/service.ts",
-    "src/main/tags/resource-contract.ts"
+    "src/main/tags/resource-contract.ts",
+    "src/main/tags/tag-write.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -69,10 +71,12 @@
       "src/main/composition/handoff.test.ts",
       "src/main/composition/artifact-surfaces.test.ts",
       "src/main/research-demos/owner.macos.integration.test.ts",
-      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts"
+      "src/main/notebook/managed-research-acceptance.macos.integration.test.ts",
+      "src/main/literature/collector.test.ts",
+      "src/main/literature/collector-identity.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],
   "fallbackCapability": "main_runtime",
-  "fullTestReason": "The main_tags owner retains 5 explicit research consumer obligations beyond its reviewed source-derived edges, including managed-execution.integration.test.ts, handoff.test.ts, artifact-surfaces.test.ts. 5 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes."
+  "fullTestReason": "The main_tags owner retains 5 explicit research consumer obligations beyond its reviewed source-derived edges, including managed-execution.integration.test.ts, handoff.test.ts, artifact-surfaces.test.ts. 5 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes. Transactional tag writes add a shared writer beyond the reviewed tags source boundary; retain full CI validation until the expanded source and import transaction contracts are reviewed."
 }

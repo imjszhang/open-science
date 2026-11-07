@@ -93,6 +93,7 @@ const ownerNames = [
   'workspace-runtime-event-owner',
   'workspace-runtime-prompt-preparation-owner',
   'workspace-runtime-session-branch-owner',
+  'workspace-runtime-session-cleanup-owner',
   'workspace-runtime-attachment-owner',
   'workspace-runtime-command-owner',
   'workspace-runtime-session-lifecycle-owner',
@@ -490,12 +491,15 @@ const hookKeys = [
   'saveAsSkillInFlightSessionIds',
   'nativeContextCompactionSessionIds',
   'subagentTranscripts',
+  'sessionCleanups',
   'compactContext',
   'ensureSessionReady',
   'saveAsSkill',
   'sendMessage',
   'resendEditedMessage',
   'cancelRun',
+  'deleteSession',
+  'retrySessionCleanup',
   'steerFollowUp',
   'resumeInterruptedSession',
   'respondToPermission',
@@ -506,6 +510,7 @@ const hookKeys = [
 ] as const
 const sendIntentKeys = [
   'onPreparationRejected',
+  'onPreparationCancelled',
   'expectedFrameworkId',
   'sessionId',
   'messageId',
@@ -654,10 +659,12 @@ describe('workspace runtime architecture', () => {
       'workspace-runtime-event-owner': [],
       'workspace-runtime-prompt-preparation-owner': [],
       'workspace-runtime-session-branch-owner': [],
+      'workspace-runtime-session-cleanup-owner': [],
       'workspace-runtime-attachment-owner': [],
       'workspace-runtime-command-owner': [
         'workspace-runtime-prompt-preparation-owner',
         'workspace-runtime-session-branch-owner',
+        'workspace-runtime-session-cleanup-owner',
         'workspace-runtime-attachment-owner'
       ],
       'workspace-runtime-session-lifecycle-owner': [
@@ -866,6 +873,7 @@ describe('workspace runtime architecture', () => {
       'src/renderer/src/lib/acp/workspace-runtime-event-owner.ts',
       'src/renderer/src/lib/acp/workspace-runtime-prompt-preparation-owner.ts',
       'src/renderer/src/lib/acp/workspace-runtime-session-branch-owner.ts',
+      'src/renderer/src/lib/acp/workspace-runtime-session-cleanup-owner.ts',
       'src/renderer/src/lib/acp/workspace-runtime-attachment-owner.ts',
       'src/renderer/src/lib/acp/workspace-runtime-command-owner.ts',
       'src/renderer/src/lib/acp/workspace-runtime-session-lifecycle-owner.ts',
@@ -912,7 +920,6 @@ describe('workspace runtime architecture', () => {
     expect(workspaceRuntime.fullTestReason).toBe(
       'The workspace_runtime owner retains 23 explicit research consumer obligations beyond its reviewed source-derived edges, including ResearchDemoPanel.test.tsx, ReplayPanel.layout.test.tsx, RecordedRunObservationPreview.test.tsx. 23 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full renderer_view validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes.'
     )
-
     expect(workspaceRuntime.interfacePaths).toEqual(
       expect.arrayContaining([
         'src/renderer/src/lib/acp/useWorkspaceAgentRuntime.ts',

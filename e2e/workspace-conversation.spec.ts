@@ -397,9 +397,10 @@ test('edits and navigates message revisions that persist after relaunch', async 
   await expect(conversation.getByLabel('Message revision', { exact: true })).toHaveText(['2/2'])
 })
 
-test('keeps Memory reversible while the replacement session awaits history replay', async ({
+test('persists Memory toggles after idle provider release and restart', async ({
   app
-}) => {
+}, testInfo) => {
+  test.setTimeout(180_000)
   let page = await app.completeOnboarding()
   page = await app.configureFakeAgent()
   await page.evaluate(async () => window.api.memory.setEnabled({ enabled: true }))
@@ -407,6 +408,12 @@ test('keeps Memory reversible while the replacement session awaits history repla
 
   await submitPromptViaUi(page, USER_MESSAGE)
   await expect(page.getByText(AGENT_REPLY, { exact: true })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(async () => (await window.api.acp.getState()).sessionIds), {
+      // The provider remains warm for 60 seconds after its last activity.
+      timeout: 90_000
+    })
+    .toEqual([])
 
   await page.getByRole('button', { name: /Agent controls:/ }).click()
   const memory = page.getByRole('menuitem', { name: 'Memory', exact: true })
@@ -418,7 +425,7 @@ test('keeps Memory reversible while the replacement session awaits history repla
     .toEqual({
       memoryEnabled: false,
       autoReviewEnabled: false,
-      pendingHistoryReplay: { kind: 'all' }
+      pendingHistoryReplay: null
     })
 
   await page.keyboard.press('Escape')
@@ -439,8 +446,9 @@ test('keeps Memory reversible while the replacement session awaits history repla
     .toEqual({
       memoryEnabled: true,
       autoReviewEnabled: false,
-      pendingHistoryReplay: { kind: 'all' }
+      pendingHistoryReplay: null
     })
+  await page.screenshot({ path: testInfo.outputPath('memory-restored-after-restart.png') })
 })
 
 test('resolves Agent permission requests through both Allow and Deny decisions @pr-mainline-conversation', async ({
@@ -1208,6 +1216,9 @@ test('archives a completed session from its mobile sidebar actions', async ({ ap
     if (attempt < 2) await advanceRevision()
     await archive.click()
     if (attempt < 2) {
+      const error = page.getByTestId('composer-notice-slot')
+      await expect(error.locator('pre')).toContainText('Session revision conflict:')
+      if (!(await error.locator('pre').isVisible())) await error.locator('summary').click()
       await expect(conflict).toBeVisible()
       await expect(undo).toBeHidden()
     } else {

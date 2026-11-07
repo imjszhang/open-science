@@ -5,7 +5,7 @@ import {
 } from './local-service-cleanup'
 import { expect, test as base, type TestInfo } from '@playwright/test'
 import { buildShellProcessEnvironment } from '@aipoch/environment'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   appendFile,
   chmod,
@@ -59,6 +59,21 @@ const FAKE_AGENT_PATH = resolve(APP_ROOT, 'e2e', 'fixtures', 'fake-opencode.mjs'
 const FAKE_REMOTEIT_PATH = resolve(APP_ROOT, 'e2e', 'fixtures', 'fake-remoteit.cjs')
 const FAKE_PROVIDER_NAME = 'Electron E2E provider'
 type E2eWindowMode = 'hidden' | 'normal'
+
+const assertPackagedElectronIdentity = (
+  evidence: { packaged: boolean; appPath: string; executable: string; version: string },
+  environment: NodeJS.ProcessEnv = process.env
+): void => {
+  const revision = environment.OPEN_SCIENCE_E2E_EXPECTED_BUILD_SHA
+  if (
+    !evidence.packaged ||
+    !evidence.appPath.endsWith('app.asar') ||
+    evidence.executable !== environment.OPEN_SCIENCE_E2E_EXECUTABLE ||
+    (revision && !evidence.version.endsWith(`-nightly.g${revision.slice(0, 7)}`))
+  ) {
+    throw new Error(`Packaged Electron identity mismatch: ${JSON.stringify(evidence)}`)
+  }
+}
 
 const electronLaunchTarget = (
   userDataRoot: string,
@@ -363,6 +378,7 @@ type ElectronApp = {
     credentialProfile?: string
   ) => Promise<Page>
   createTestDirectory: (name: string) => Promise<string>
+  holdNextFakeSessionCreate: () => Promise<{ started: string; release: string; closed: string }>
   configureSessionPackageDialogs: (options?: { availableBytes?: number }) => Promise<string>
   restartWithPackage: (path: string) => Promise<Page>
   emitPackageFileOpen: (path: string) => Promise<void>
@@ -450,7 +466,9 @@ const launchEnvironment = (
       'kde_session_version'
     ])
     if (process.platform === 'win32')
-      for (const key of ['programfiles', 'programfiles(x86)', 'programw6432']) osInputs.add(key)
+      // Native OpenSSH requires ProgramData during initialization, even for version/config queries.
+      for (const key of ['programfiles', 'programfiles(x86)', 'programw6432', 'programdata'])
+        osInputs.add(key)
     for (const key of Object.keys(environment)) {
       if (
         !osInputs.has(key.toLowerCase()) &&
@@ -557,7 +575,10 @@ const setFixtureServiceReconnectBlocked = (_electron: unknown, blocked: boolean)
 }
 
 /** Playwright serializes this callback into Electron's main process; keep it self-contained. */
-const disconnectFixtureServiceConnection = (): { url: string; destroyed: boolean } => {
+const disconnectFixtureServiceConnection = (
+  electron?: Pick<typeof import('electron'), 'BrowserWindow' | 'ipcMain'>,
+  timing?: 'during-preflight' | 'after-preflight' | void
+): { url: string; destroyed: boolean } | Promise<{ url: string; destroyed: boolean }> => {
   type Socket = {
     readable?: boolean
     writable?: boolean
@@ -592,7 +613,30 @@ const disconnectFixtureServiceConnection = (): { url: string; destroyed: boolean
   if (matches.length !== 1)
     throw new Error(`Expected one verified Desktop service pipe, found ${matches.length}.`)
   const { socket, websocket } = matches[0]
-  socket.destroy()
+  if (timing) {
+    if (!electron) throw new Error('Electron is required to schedule service disconnection.')
+    if (timing === 'after-preflight') {
+      electron.ipcMain.prependOnceListener('sessions:flush-response', () => socket.destroy())
+    } else {
+      const contents = electron.BrowserWindow.getAllWindows()[0].webContents
+      const send = contents.send
+      contents.send = (channel, ...args) => {
+        if (channel === 'sessions:flush-request') {
+          contents.send = send
+          socket.destroy()
+        }
+        send.call(contents, channel, ...args)
+      }
+    }
+  } else {
+    // Inspector evaluation can interrupt a native Pipe read; destroy on the normal event loop.
+    return new Promise((resolve) => {
+      setImmediate(() => {
+        socket.destroy()
+        resolve({ url: websocket.url!, destroyed: socket.destroyed === true })
+      })
+    })
+  }
   return { url: websocket.url!, destroyed: socket.destroyed === true }
 }
 
@@ -606,6 +650,19 @@ const hasFixtureReconnected = (
   after.phase === 'connected' &&
   after.epoch > before.epoch &&
   previousGeneration === currentGeneration
+
+const configurePackagedMacKeychain = async (environment: NodeJS.ProcessEnv): Promise<void> => {
+  const keychain = environment.OPEN_SCIENCE_E2E_MACOS_KEYCHAIN
+  if (process.platform !== 'darwin' || !environment.OPEN_SCIENCE_E2E_EXECUTABLE || !keychain) return
+  // Keychain search preferences follow HOME, so configure only this fixture's isolated home.
+  if (!environment.HOME) throw new Error('Packaged Keychain setup requires an isolated HOME.')
+  await mkdir(join(environment.HOME, 'Library', 'Preferences'), { recursive: true })
+  execFileSync('/usr/bin/security', ['list-keychains', '-d', 'user', '-s', keychain], {
+    env: environment,
+    timeout: 10_000,
+    stdio: 'pipe'
+  })
+}
 
 const launchOpenScience = async (
   { storageRoot, userDataRoot, fakeAgentBinRoot }: LaunchRoots,
@@ -624,19 +681,21 @@ const launchOpenScience = async (
       mkdir(directory, { recursive: true })
     )
   )
+  const environment = launchEnvironment(
+    storageRoot,
+    fakeAgentEnabled ? fakeAgentBinRoot : undefined,
+    process.env,
+    fakeRemoteItEnabled ? fakeRemoteItRoot : undefined,
+    windowMode,
+    sessionPerformanceTrace
+  )
+  await configurePackagedMacKeychain(environment)
   const application = await electron.launch({
     ...electronLaunchTarget(userDataRoot),
     args: [...electronLaunchTarget(userDataRoot).args, ...(packagePath ? [packagePath] : [])],
     cwd: fakeRemoteItEnabled ? fakeRemoteItRoot : APP_ROOT,
     env: {
-      ...launchEnvironment(
-        storageRoot,
-        fakeAgentEnabled ? fakeAgentBinRoot : undefined,
-        process.env,
-        fakeRemoteItEnabled ? fakeRemoteItRoot : undefined,
-        windowMode,
-        sessionPerformanceTrace
-      ),
+      ...environment,
       ...(process.platform === 'darwin' && !process.env.OPEN_SCIENCE_E2E_EXECUTABLE
         ? {
             NODE_OPTIONS: `--require=${JSON.stringify(resolve(APP_ROOT, 'e2e/fixtures/mock-node-credentials.cjs'))}`
@@ -814,6 +873,14 @@ const openMainWindow = async (
   onFirstReady?: (page: Page) => Promise<void>
 ): Promise<Page> => {
   const page = await application.firstWindow()
+  if (process.env.OPEN_SCIENCE_E2E_USE_CASE_GATE) {
+    await page.route('https://statics.aipoch.com/open-science/usecases/**/cover.png', (route) =>
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><rect width="640" height="360" fill="#e7e5df"/></svg>'
+      })
+    )
+  }
   await applyHiddenWindowPresentation(page, windowMode)
   await rendererFailures.observe(page)
   await waitForRendererReady(page)
@@ -1309,6 +1376,21 @@ class ElectronAppHarness implements ElectronApp {
     const path = join(this.testRoot, name)
     await mkdir(path, { recursive: true })
     return path
+  }
+
+  async holdNextFakeSessionCreate(): Promise<{ started: string; release: string; closed: string }> {
+    const directory = await this.createTestDirectory('session-create-gate')
+    const gate = {
+      started: join(directory, 'started'),
+      release: join(directory, 'release'),
+      closed: join(directory, 'closed')
+    }
+    await writeFile(
+      join(this.roots.storageRoot, 'e2e-session-create-gate.json'),
+      JSON.stringify(gate),
+      'utf8'
+    )
+    return gate
   }
 
   async emitSessionPackageProgress(snapshot: PackageOperationSnapshot): Promise<void> {
@@ -1920,15 +2002,7 @@ class ElectronAppHarness implements ElectronApp {
           executable: process.execPath,
           version: app.getVersion()
         }))
-        const revision = process.env.OPEN_SCIENCE_E2E_EXPECTED_BUILD_SHA
-        if (
-          !evidence.packaged ||
-          !evidence.appPath.endsWith('app.asar') ||
-          evidence.executable !== process.env.OPEN_SCIENCE_E2E_EXECUTABLE ||
-          (revision && !evidence.version.endsWith(`-nightly.${revision.slice(0, 7)}`))
-        ) {
-          throw new Error(`Packaged Electron identity mismatch: ${JSON.stringify(evidence)}`)
-        }
+        assertPackagedElectronIdentity(evidence)
         console.info('Packaged Electron identity:', JSON.stringify(evidence))
       }
       this.currentPage = await openMainWindow(
@@ -1949,7 +2023,11 @@ class ElectronAppHarness implements ElectronApp {
           : undefined
       )
       this.recordResourceTiming(timingName, performance.now() - launchStartedAt)
-      if (process.platform === 'win32' || process.env.OPEN_SCIENCE_E2E_FLUSH_DIAGNOSTICS === '1') {
+      if (
+        process.platform === 'win32' ||
+        this.resourceProfiler ||
+        process.env.OPEN_SCIENCE_E2E_FLUSH_DIAGNOSTICS === '1'
+      ) {
         this.stopFlushDiagnostics = await observeElectronFlushDiagnostics(
           this.application,
           this.currentPage,
@@ -2152,6 +2230,8 @@ const test = base.extend<{ app: ElectronApp; windowMode: E2eWindowMode }>({
 })
 
 export {
+  assertPackagedElectronIdentity,
+  configurePackagedMacKeychain,
   runWithCleanup,
   closeElectronApplicationForCleanup,
   installRestartPersistenceRetry,

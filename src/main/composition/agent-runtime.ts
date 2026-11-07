@@ -1,3 +1,4 @@
+import type { PdfAnnotationAgentTools } from '../pdf-annotations/agent-tools'
 import type { SandboxNetworkApprovalOwner } from '../acp/sandbox-network-approval-owner'
 import { runtimeMetadata } from '../runtime-metadata'
 import { ImageInputCompatibilityOwner } from '../acp/image-input-compatibility-owner'
@@ -63,6 +64,7 @@ export async function composeAgentRuntime({
   runtimeSessionOwner,
   stopManagedSession,
   sandboxNetworkApprovalOwner,
+  pdfAnnotationAgent,
   pdfElementReader,
   literatureDocumentReader,
   mainPromptSideChatRelay,
@@ -113,6 +115,7 @@ export async function composeAgentRuntime({
     Pick<SessionPersistenceCommands, 'sessionProjectId'>
   runtimeSessionOwner?: import('../session-persistence/runtime-session-owner').RuntimeSessionOwner
   stopManagedSession?: (projectId: string, sessionId: string) => Promise<void>
+  pdfAnnotationAgent: PdfAnnotationAgentTools
   pdfElementReader: PdfElementAgentReader
   literatureDocumentReader: LiteratureDocumentReader
   mainPromptSideChatRelay: ReturnType<typeof createMainPromptSideChatRelay>
@@ -211,6 +214,7 @@ export async function composeAgentRuntime({
       },
       literatureReader: literatureDocumentReader,
       pdfElementReader,
+      pdfAnnotationAgent,
       literatureAttachments: literatureAttachmentAuthority,
       literatureCatalog,
       literaturePdfAcquisition,

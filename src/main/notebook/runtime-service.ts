@@ -640,19 +640,32 @@ class NotebookRuntimeService {
       const candidates = runtimes.filter(
         (runtime) => runtime.language === language && runtime.runnable
       )
+      let selected = candidates.length === 1 ? candidates[0] : undefined
+      for (const candidate of candidates) {
+        if (candidate.provenance !== 'app-managed') continue
+        const target = await this.runtimeBindingOwner.resolveBindingTarget(
+          language,
+          candidate.runtimeId
+        )
+        if (target.readyDefault) {
+          selected = candidate
+          break
+        }
+      }
       signal?.throwIfAborted()
-      if (candidates.length > 1) {
+      if (!selected && candidates.length > 1) {
         throw new Error(
           `Several ${language} environments are enabled. Choose the kernel/environment with list_notebook_runtimes and notebook_bind_runtime before executing code.`
         )
       }
-      // No installed default yet: retain the existing provisioning policy. The sole ready default
-      // uses the same host-owned decision as explicit binding, including Ask's one-shot prompt.
-      if (candidates.length === 1) {
+      // Prefer the verified app-managed default even when other runtimes are enabled. Binding uses
+      // the same host-owned decision as explicit selection, including Ask's one-shot prompt. With
+      // no candidates, retain the existing provisioning policy.
+      if (selected) {
         const result = await this.runtimeBindingOwner.bind(
           session,
           language,
-          candidates[0].runtimeId,
+          selected.runtimeId,
           (binding) =>
             this.reviewRuntimeBinding(
               session,
@@ -2349,9 +2362,15 @@ class NotebookRuntimeService {
     request: RequestNotebookNetworkAccessRequest,
     signal?: AbortSignal
   ): Promise<RequestNotebookNetworkAccessResult> {
+    if (!request.recordId)
+      return {
+        hostname: '',
+        status: 'blocked',
+        message: 'A trusted sandbox block record ID is required. No access was granted.'
+      }
     if (!this.options.processSandbox?.requestNetworkAccess) {
       return {
-        hostname: request.hostname,
+        hostname: request.hostname ?? '',
         status: 'unavailable',
         message:
           'Network access approval is unavailable for the current Notebook runtime. No user decision was requested and no access was granted.'
@@ -2360,7 +2379,8 @@ class NotebookRuntimeService {
     return this.options.processSandbox.requestNetworkAccess({
       sessionId: request.sessionId,
       projectId: resolveProjectId(request),
-      hostname: request.hostname,
+      hostname: request.hostname ?? '',
+      ...(request.recordId ? { recordId: request.recordId } : {}),
       reason: request.reason,
       ...(request.runtime ? { runtime: request.runtime } : {}),
       ...(request.command ? { command: request.command } : {}),
