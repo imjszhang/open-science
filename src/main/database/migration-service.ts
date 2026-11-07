@@ -1,4 +1,4 @@
-import { sessionResearchMembershipMigration } from './migrations/0052-session-research-membership'
+import { sessionResearchMembershipMigration } from './migrations/10052-session-research-membership'
 import { pascalcaseTableNamesMigration } from './migrations/0049-pascalcase-table-names'
 import { pdfAnnotationSharingMigration } from './migrations/0048-pdf-annotation-sharing'
 import { journalAttributesMigration } from './migrations/0046-journal-attributes'
@@ -226,6 +226,9 @@ const BASELINE_ID = runtimeSchemaBaselineMigration.id
 const LEGACY_RESEARCH_MEMBERSHIP_ID = '0051_session_research_membership'
 const LEGACY_RESEARCH_MEMBERSHIP_CHECKSUM =
   'fbba1e83ef4fb800b7713330a1c1f34e1a758017236ec8fac9bf5cd7eac746db'
+const RELEASED_RESEARCH_MEMBERSHIP_ID = '0052_session_research_membership'
+const RELEASED_RESEARCH_MEMBERSHIP_CHECKSUM =
+  '549bd69cfebeeb1420d3d9787b0a1c7a80f4c3f758f339e2c781a0e535d640b3'
 
 const checksumMigrationPayload = (
   id: string,
@@ -1719,11 +1722,42 @@ const validateLedger = (
   return ledger.length
 }
 
+const aliasReleasedResearchMembership = (
+  ledger: readonly LedgerRow[],
+  manifest: readonly MigrationManifestEntry[]
+): readonly LedgerRow[] => {
+  const released = ledger.filter(({ id }) => id === RELEASED_RESEARCH_MEMBERSHIP_ID)
+  if (released.length === 0) return ledger
+  const canonical = manifest.find(({ id }) => id === sessionResearchMembershipMigration.id)
+  const expected = MIGRATION_MANIFEST.find(({ id }) => id === sessionResearchMembershipMigration.id)
+  if (
+    released.length !== 1 ||
+    released[0]!.checksum !== RELEASED_RESEARCH_MEMBERSHIP_CHECKSUM ||
+    ledger.some(({ id }) => id === sessionResearchMembershipMigration.id) ||
+    !expected ||
+    canonical?.checksum !== expected.checksum
+  ) {
+    throw new DatabaseMigrationError(
+      'database_history_invalid',
+      'The released research migration history does not match its compatibility contract.',
+      false,
+      RELEASED_RESEARCH_MEMBERSHIP_ID
+    )
+  }
+  // Keep the 0052 row on disk. Five-digit 10052 is the in-memory identity only.
+  return ledger.map((row) =>
+    row.id === RELEASED_RESEARCH_MEMBERSHIP_ID
+      ? { id: expected.id, checksum: expected.checksum }
+      : row
+  )
+}
+
 const normalizeLegacyResearchLedger = async (
   client: PrismaClient,
   ledger: readonly LedgerRow[],
   manifest: readonly MigrationManifestEntry[]
 ): Promise<readonly LedgerRow[]> => {
+  ledger = aliasReleasedResearchMembership(ledger, manifest)
   const legacy = ledger.filter(({ id }) => id === LEGACY_RESEARCH_MEMBERSHIP_ID)
   if (legacy.length === 0) return ledger
   const research = manifest.find(({ id }) => id === sessionResearchMembershipMigration.id)
@@ -1753,7 +1787,7 @@ const normalizeLegacyResearchLedger = async (
     )
   }
   // Keep the original row, checksum and appliedAt on disk. This one exact released
-  // payload is equivalent to 0052; do not sort away holes or accept both identities.
+  // payload is equivalent to 10052; do not sort away holes or accept both identities.
   const normalized = ledger.map((row) =>
     row.id === LEGACY_RESEARCH_MEMBERSHIP_ID
       ? { id: canonicalResearch.id, checksum: canonicalResearch.checksum }
@@ -2304,7 +2338,8 @@ const migrateApplicationDatabaseWithManifest = async (
 
   const applied: string[] = []
   // Only the released legacy fork may lack the independently published reading-status
-  // predecessor. A canonical 0052 ledger with that hole remains invalid.
+  // predecessor. A canonical 10052 ledger, including one aliased from 0052, remains
+  // invalid when that predecessor is missing.
   const bridgesLegacyReadingStatus =
     ledger.some(({ id }) => id === LEGACY_RESEARCH_MEMBERSHIP_ID) &&
     !ledger.some(({ id }) => id === literatureReadingStatusMigration.id)

@@ -13,9 +13,11 @@ import {
   type MigrationManifestEntry
 } from './migration-service'
 
-const researchId = '0052_session_research_membership'
+const researchId = '10052_session_research_membership'
 const legacyResearchId = '0051_session_research_membership'
 const legacyResearchChecksum = 'fbba1e83ef4fb800b7713330a1c1f34e1a758017236ec8fac9bf5cd7eac746db'
+const releasedResearchId = '0052_session_research_membership'
+const releasedResearchChecksum = '549bd69cfebeeb1420d3d9787b0a1c7a80f4c3f758f339e2c781a0e535d640b3'
 const readingId = '0051_literature_reading_status'
 const researchMigration: MigrationManifestEntry = MIGRATION_MANIFEST.find(
   ({ id }) => id === researchId
@@ -29,7 +31,7 @@ afterEach(async () => {
 })
 
 const seedHistoricalDatabase = async (
-  variant: 'upstream' | 'research' | 'research-with-reading'
+  variant: 'upstream' | 'research' | 'research-with-reading' | 'released-0052'
 ): Promise<void> => {
   root = await mkdtemp(join(tmpdir(), 'research-membership-migration-'))
   client = createProjectDbClient(root)
@@ -38,11 +40,12 @@ const seedHistoricalDatabase = async (
     MIGRATION_MANIFEST.filter(
       ({ id }) =>
         id !== (variant === 'upstream' ? researchId : variant === 'research' ? readingId : '')
-    ).map((migration) =>
-      variant !== 'upstream' && migration.id === researchId
-        ? { ...migration, id: legacyResearchId, checksum: legacyResearchChecksum }
-        : migration
-    )
+    ).map((migration) => {
+      if (migration.id !== researchId || variant === 'upstream') return migration
+      return variant === 'released-0052'
+        ? { ...migration, id: releasedResearchId, checksum: releasedResearchChecksum }
+        : { ...migration, id: legacyResearchId, checksum: legacyResearchChecksum }
+    })
   )
   await client.project.create({ data: { id: 'p', name: 'Project' } })
   // The generated client selects the research columns that the upstream fixture lacks.
@@ -61,15 +64,20 @@ const expectReadingStatusAbsent = async (): Promise<void> => {
   )
 }
 
-it('pins the old research identity to exactly the canonical projection payload', () => {
-  expect(
-    checksumMigrationPayload(
-      legacyResearchId,
-      researchMigration.statements,
-      researchMigration.verifiers,
-      researchMigration.operations
-    )
-  ).toBe(legacyResearchChecksum)
+it('pins the old research identities to exactly the canonical projection payload', () => {
+  for (const [id, checksum] of [
+    [legacyResearchId, legacyResearchChecksum],
+    [releasedResearchId, releasedResearchChecksum]
+  ] as const) {
+    expect(
+      checksumMigrationPayload(
+        id,
+        researchMigration.statements,
+        researchMigration.verifiers,
+        researchMigration.operations
+      )
+    ).toBe(checksum)
+  }
 })
 
 it('adds nullable research projections without changing existing Session or PDF translation records', async () => {
@@ -214,7 +222,7 @@ it('rolls back a failed bridge and can retry without altering the released resea
 })
 
 const futureMigration = (): MigrationManifestEntry => {
-  const id = '0053_research_test_marker'
+  const id = '10053_research_test_marker'
   const statements = ['UPDATE "Project" SET "name" = "name" WHERE 0'] as const
   const verifiers = [{ kind: 'table-exists', version: 1, table: 'Project' }] as const
   return {
@@ -280,7 +288,19 @@ it.each(['research', 'research-with-reading'] as const)(
   }
 )
 
-it('does not bridge missing reading status for a canonical 0052 history', async () => {
+it('recognizes a released 0052 ledger as the five-digit research migration', async () => {
+  await seedHistoricalDatabase('released-0052')
+  const ledger = await readLedger()
+  await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({
+    from: releasedResearchId,
+    to: researchId,
+    applied: []
+  })
+  expect(await readLedger()).toEqual(ledger)
+  await expect(migrateApplicationDatabase(client)).resolves.toMatchObject({ applied: [] })
+})
+
+it('does not bridge missing reading status for a canonical 10052 history', async () => {
   await seedHistoricalDatabase('research')
   await client.$executeRaw`UPDATE "_open_science_migrations"
     SET id = ${researchId}, checksum = ${researchMigration.checksum} WHERE id = ${legacyResearchId}`
