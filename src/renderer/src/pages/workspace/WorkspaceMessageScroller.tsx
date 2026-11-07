@@ -140,6 +140,7 @@ type WorkspaceMessageScrollerProps = {
   credentialPending?: boolean
   visiblePermissionPending?: boolean
   isResumingSession?: boolean
+  sendPreparing?: boolean
   notebookReference?: NotebookSessionReference
   onSendEditedMessage: SendEditedMessage
   onStartResearch?: (prompt: string) => void
@@ -158,6 +159,7 @@ type WorkspaceMessageScrollerProps = {
   forkSourceContent?: ReactNode
   trailingContent?: ReactNode
   pendingElicitations?: PendingElicitationRequest[]
+  pendingElicitationControl?: { activityId: string; onReveal: () => void }
   // Events are read-only projections; retry sends an intent that main validates against its state.
   handoffLifecycleSource?: HandoffLifecycleEventSource
   onRetryHandoff?: (request: HandoffRetryRequest) => Promise<void>
@@ -534,6 +536,7 @@ const WorkspaceMessageScrollerImpl = ({
   credentialPending = false,
   visiblePermissionPending = false,
   isResumingSession = false,
+  sendPreparing = false,
   notebookReference,
   onSendEditedMessage,
   onOpenLibraryMention,
@@ -551,6 +554,7 @@ const WorkspaceMessageScrollerImpl = ({
   forkSourceContent,
   trailingContent,
   pendingElicitations = [],
+  pendingElicitationControl,
   handoffLifecycleSource,
   onRetryHandoff,
   reportPresentationRevealing = false,
@@ -1281,7 +1285,10 @@ const WorkspaceMessageScrollerImpl = ({
       )
     )
   }, [conversationItems])
-  const agentLoadingPhase = getAgentLoadingPhase(activeSession, { credentialPending })
+  const agentLoadingPhase = getAgentLoadingPhase(activeSession, {
+    credentialPending,
+    sendPreparing
+  })
   const [terminalAnnouncement, setTerminalAnnouncement] = useState<
     TerminalAnnouncement | undefined
   >()
@@ -2195,6 +2202,11 @@ const WorkspaceMessageScrollerImpl = ({
                             key={elicitationRequest?.requestId ?? item.activity.id}
                             elicitation={item.activity.elicitation}
                             request={elicitationRequest}
+                            onReveal={
+                              pendingElicitationControl?.activityId === item.activity.id
+                                ? pendingElicitationControl.onReveal
+                                : undefined
+                            }
                             variant={
                               item.activity.elicitation.state === 'pending'
                                 ? 'pending-placeholder'
@@ -2472,6 +2484,7 @@ const areWorkspaceMessageScrollerPropsEqual = (
   previous.forkSourceContent === next.forkSourceContent &&
   previous.trailingContent === next.trailingContent &&
   previous.isResumingSession === next.isResumingSession &&
+  previous.sendPreparing === next.sendPreparing &&
   previous.onAddAnnotation === next.onAddAnnotation &&
   previous.onRemoveAnnotation === next.onRemoveAnnotation &&
   previous.onUpdateAnnotationNote === next.onUpdateAnnotationNote &&

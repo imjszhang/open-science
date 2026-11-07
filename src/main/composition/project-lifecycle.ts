@@ -1,4 +1,5 @@
 import type { ComputeJobOwnerLiveness } from '@aipoch/compute/node'
+import type { ResearchFilmLifecycle } from '../research-video/lifecycle'
 import { createLogger, diagnosticErrorFields } from '@aipoch/diagnostics/node'
 import { LIFECYCLE_CHANNELS } from '../../shared/lifecycle-events'
 import { createAcpRuntime } from '../acp/runtime-composition'
@@ -72,12 +73,14 @@ export function composeProjectLifecycle({
   getActiveDelegatedSessions,
   getActiveSideChatSessions,
   sessionPersistenceCoordinator,
+  researchFilmLifecycle,
   clearSessionCredentials,
   getNotebookService,
   stopManagedProject
 }: {
   applicationEvents: ApplicationEvents
   notificationInbox: ReturnType<typeof createNotificationInboxController>
+  researchFilmLifecycle: ResearchFilmLifecycle
   uploadRepository: ReturnType<typeof createDefaultUploadRepository>
   managedFileVersionService: ManagedFileVersionService
   runtimeRef: { current: ReturnType<typeof createAcpRuntime> | undefined }
@@ -317,11 +320,15 @@ export function composeProjectLifecycle({
         sessionEnabledComputeHostsOwnerRef.current?.clear(sessionIds),
         sideChatOwnerRef.current?.invalidateParents(sessionIds),
         visionEvidenceRepository.deleteSessions(sessionIds),
-        bookmarkRepository.deleteSessions(sessionIds)
+        bookmarkRepository.deleteSessions(sessionIds),
+        researchFilmLifecycle.deleteSessions(sessionIds)
       ])
     },
     onSessionsReconciled: async (sessionIds) => {
-      await visionEvidenceRepository.reconcileSessions(sessionIds)
+      await Promise.all([
+        visionEvidenceRepository.reconcileSessions(sessionIds),
+        researchFilmLifecycle.reconcileSessions(sessionIds)
+      ])
     }
   })
   const projectHandlers = createProjectHandlers(projectRepository, projectDeletionCoordinator, {

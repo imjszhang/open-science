@@ -1,3 +1,6 @@
+import { composeResearchFilm } from './composition/research-film'
+import { createLocalModelApi } from './local-models/owner'
+import { registerLocalModelIpcHandlers } from './desktop-surface-declarations'
 import { hasPendingLifecycleSettlement, waitForLifecycleSettlement } from './lifecycle-settlement'
 import { type DiagnosticOperation } from '@aipoch/diagnostics/node'
 import type { ArtifactReproducibilityCheckState } from '../shared/artifact-reproducibility'
@@ -91,6 +94,7 @@ import {
 import type { TaskControlPorts } from './tasks/task-control-ports'
 import type { TaskAgentPort } from './tasks/task-runner'
 import type { TrayNavigationSession } from './tray-navigation'
+import { defaultOcrLanguagesForLocale } from '../shared/local-models'
 
 export type IpcRegistrationOptions = {
   invokeObservationNative?: import('./observation-desktop/contract').ObservationNativeInvoke
@@ -320,7 +324,6 @@ export const createApplicationModules = async (
   })
   const documentReading = await composeDocumentReading({
     sessionPackageService: sessionPackages.sessionPackageService,
-    declareElectronAdapter,
     applicationEvents,
     pdfUploadImporter: uploadStorage.pdfUploadImporter,
     uploadRepository: uploadStorage.uploadRepository,
@@ -328,8 +331,24 @@ export const createApplicationModules = async (
     ...managedFiles,
     ...sessionAuthority,
     modules,
-    settingsService: settingsBootstrap.settingsService
+    settingsService: settingsBootstrap.settingsService,
+    defaultOcrLanguages: () => defaultOcrLanguagesForLocale(localeOwner.snapshot().locale)
   })
+  const researchFilm = await composeResearchFilm({
+    ...settingsBootstrap,
+    ...sessionFoundation,
+    ...sessionAuthority,
+    ...sessionPackages,
+    modules
+  })
+  const localModels = createLocalModelApi(
+    documentReading.localModelOwner,
+    documentReading.localTranslationModels,
+    documentReading.ocrModels,
+    researchFilm.researchNarrationModels,
+    researchFilm.videoExportModels
+  )
+  declareElectronAdapter('local-models', () => registerLocalModelIpcHandlers(localModels))
   const projectLifecycle = composeProjectLifecycle({
     stopManagedProject: (projectId) => managedExecution.stopProject(projectId),
     applicationEvents,
@@ -827,6 +846,8 @@ export const createApplicationModules = async (
     managedFiles,
     sessionAuthority,
     documentReading,
+    researchFilm,
+    localModels,
     projectLifecycle,
     notebookRuntime,
     researchCatalog,

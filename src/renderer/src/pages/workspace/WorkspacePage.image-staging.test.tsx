@@ -23,7 +23,7 @@ import {
   type ChatSession
 } from '@/stores/session-store'
 import type { UploadedAttachment } from '../../../../shared/uploads'
-import { VISION_MODEL_NOT_CONFIGURED_MESSAGE } from '../../../../shared/run-error-classification'
+import { VISION_MODEL_NOT_CONFIGURED_MESSAGE } from '../../../../shared/failure/messages'
 import { usePdfContextAction } from './use-pdf-context-action'
 import { markWorkspaceReviewHistoryLoaded } from './workspace-page-test-fixtures'
 
@@ -51,6 +51,7 @@ vi.mock('@/components/ui/resizable', () => ({
 
 vi.mock('@/lib/acp/useWorkspaceAgentRuntime', () => ({
   useWorkspaceAgentRuntime: () => ({
+    sessionCleanups: {},
     actionError: null,
     pendingPermissions: [],
     sendMessage: runtime.sendMessage,

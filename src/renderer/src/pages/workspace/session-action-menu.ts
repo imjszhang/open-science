@@ -24,6 +24,7 @@ import type {
   ActionMenuRecipeEntry
 } from '@/components/action-menu'
 import type { ChatSession, SessionStatus } from '@/stores/session-store-contract'
+import { isSessionDeletionAllowed } from '@/stores/session-actionability'
 import { projectPresentedSessionActionability } from './session-wait-reason'
 
 export type SessionActionId =
@@ -237,8 +238,10 @@ export const createSessionActionBindings = (
     disabled: ({ session }) => !options.canArchiveSession?.(session)
   },
   delete: {
-    execute: ({ session }) => options.onDeleteSession?.(session),
-    hidden: !options.onDeleteSession,
+    execute: ({ session }) => {
+      if (isSessionDeletionAllowed(session)) options.onDeleteSession?.(session)
+    },
+    hidden: ({ session }) => !options.onDeleteSession || !isSessionDeletionAllowed(session),
     disabled: !options.canDeleteConversations
   }
 })

@@ -59,7 +59,7 @@ const NOTEBOOK_SYSTEM_PROMPT_APPEND = [
   'Use `inspect_packages` for versions and `manage_packages` for installs. Never install in cells/shells or outside `$OPEN_SCIENCE_RUNTIME_DIR`.',
   'MCP replies are bounded; full output stays in preview. Check errors and workingFiles. The notebook runtime does not classify files for you.',
   'kernelDispatched: false = not sent; true = sent, not completed; absent means unknown. After kernel failure/timeout, check possible side effects before retrying.',
-  'Beyond restricted reads, call `request_network_access`. A failed connection is not required. Shell prompts at blocked destinations; approval never replays commands. Retry ended commands explicitly after checking side effects.',
+  'For a network block record, call `request_network_access` with its recordId and purpose. Shell prompts at blocked destinations; approval never replays commands. Retry ended commands explicitly after checking side effects.',
   'Never bypass protection/TLS. Check settings for setup failures.',
   'Reads send URLs; grants permit uploads. Once: next matching command/session/runtime. Reconnect; side effects persist.',
   'Dependency status is not an execution verdict: `clear` means unchanged; `stale` means a tracked dependency changed after that run; `unknown` means incomplete tracking. `stale` does not mean the run failed or its captured output is incorrect; rerun only for current state.',
@@ -133,10 +133,12 @@ const backgroundRunToolSchema = {
 }
 
 const requestNetworkAccessToolSchema = {
-  hostname: z.string().trim().min(1).max(253),
-  reason: z.string().trim().min(1).max(1_000),
-  runtime: z.enum(['python', 'r', 'repl', 'bash']).optional(),
-  command: z.string().min(1).optional().describe('Exact bash command, not Notebook source.')
+  recordId: z
+    .string()
+    .min(1)
+    .max(256)
+    .describe('Trusted network block record ID returned by the sandbox.'),
+  reason: z.string().trim().min(1).max(1_000)
 }
 
 const managePackagesToolSchema = {
@@ -175,7 +177,7 @@ const bindRuntimeToolSchema = {
 }
 
 const userChoiceOptionSchema = z.object({
-  label: z.string().trim().min(1).max(MAX_ELICITATION_LABEL_CHARS),
+  label: z.string().trim().min(1).max(MAX_ELICITATION_LABEL_CHARS).regex(/\S/),
   description: z.string().trim().min(1).max(MAX_ELICITATION_MESSAGE_CHARS).optional()
 })
 
@@ -185,6 +187,7 @@ const userChoiceQuestionSchema = z.object({
     .trim()
     .min(1)
     .max(MAX_ELICITATION_MESSAGE_CHARS)
+    .regex(/\S/)
     .describe('NEVER mention selection mode/count in any language ("可多选"); UI labels kind.'),
   header: z.string().trim().min(1).max(MAX_ELICITATION_LABEL_CHARS).optional(),
   kind: z
@@ -245,8 +248,7 @@ const MANAGE_ENVIRONMENTS_DOC = [
 ].join('\n')
 
 const LIST_NOTEBOOK_RUNTIMES_DOC = [
-  `List enabled managed/external Python/R runtimes and their runtimeId, source, version, runnable, and bound status in pages of at most ${MAX_RUNTIME_RESULTS} using optional offset/limit and nextOffset. Disabled runtimes are omitted.`,
-  'No binding is required for the app-managed default; bind only to select another listed runtime.'
+  `List enabled managed/external Python/R runtimes and their runtimeId, source, version, runnable, and bound status in pages of at most ${MAX_RUNTIME_RESULTS} using optional offset/limit and nextOffset. Disabled runtimes are omitted.`
 ].join('\n')
 
 const BIND_RUNTIME_DOC = [
@@ -1226,10 +1228,16 @@ const registerNotebookRpcTool = (
         )
         const rejected =
           definition.method === 'memoryRemember' && asRecord(raw)?.status === 'rejected'
+        const exitCode = asRecord(raw)?.exitCode
+        const shellFailed =
+          rpcMethod === 'executeShell' &&
+          asRecord(input)?.background !== true &&
+          typeof exitCode === 'number' &&
+          exitCode !== 0
         return {
           content: buildNotebookToolContent(raw, definition, input),
           ...(definition.outputSchema && asRecord(raw) ? { structuredContent: asRecord(raw) } : {}),
-          ...(rejected ? { isError: true } : {})
+          ...(rejected || shellFailed ? { isError: true } : {})
         }
       } finally {
         if (heartbeat) clearInterval(heartbeat)
@@ -1562,10 +1570,11 @@ const NOTEBOOK_RPC_TOOLS: NotebookRpcToolDefinition[] = [
     name: 'notebook_execute',
     title: 'Execute notebook code',
     description: [
-      "artifactVersionInputs: this Run's provenance inputs (Version IDs). Use runId as producerRunId.",
-      'Use foreground when reasoning needs the result now; use background:true for longer independent work.',
-      'Save the returned runId; follow its dependency-point query guidance.',
-      'Turn end or MCP disconnect does not stop an accepted background Run; explicitly cancel with background_run.'
+      'Uses the session binding, else the installed, enabled app-managed default. Multiple runtimes require explicit binding only without a usable default.',
+      "artifactVersionInputs: this Run's provenance inputs (Version IDs); producerRunId=runId.",
+      'Foreground for results needed now; background:true for longer independent work.',
+      'Save the returned runId; follow dependency-point query guidance.',
+      'Accepted background Runs survive Turn end/MCP disconnect; explicitly cancel with background_run.'
     ].join(' '),
     method: 'execute',
     inputSchema: executeToolSchema,
@@ -1619,7 +1628,7 @@ const NOTEBOOK_RPC_TOOLS: NotebookRpcToolDefinition[] = [
     name: 'request_network_access',
     title: 'Request Notebook network access',
     description:
-      'Request before connecting or after OPEN_SCIENCE_NETWORK_DOMAIN_BLOCKED. Once: bash runtime+command or matching failure; otherwise Global. Execute or retry only when the result is allowed.',
+      'Request or query access using a trusted sandbox block record ID and purpose. The user approves in this conversation. Never supply addresses or an approval decision. Retry explicitly only after approval and after checking side effects.',
     method: 'requestNetworkAccess',
     inputSchema: requestNetworkAccessToolSchema,
     mapResult: (raw) => raw,

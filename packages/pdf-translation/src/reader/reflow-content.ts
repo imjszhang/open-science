@@ -1,4 +1,8 @@
 import type { PdfTranslationSource } from './source.js'
+import {
+  hasNativeCaptionEligibility,
+  hasNativeOrdinaryProseEligibility
+} from './caption-eligibility.js'
 
 export type PdfReflowContentKind = 'text' | 'reference' | 'visual'
 
@@ -9,6 +13,13 @@ export function pdfReflowContentKinds(
   const kinds = new Map<string, PdfReflowContentKind>()
   let reference: PdfTranslationSource['units'][number]['fragments'][number] | undefined
   for (const unit of source.units) {
+    if (
+      hasNativeCaptionEligibility(source, unit) ||
+      hasNativeOrdinaryProseEligibility(source, unit)
+    ) {
+      kinds.set(unit.id, 'text')
+      continue
+    }
     if (unit.figure || (unit.preserve && unit.preserve !== 'reference')) {
       kinds.set(unit.id, 'visual')
       continue
@@ -18,6 +29,7 @@ export function pdfReflowContentKinds(
     const heading = text
       .replace(/^(?:\d+(?:\.\d+)*[.)]?|[IVXLCDM]+[.)])\s+/u, '')
       .replace(/[:：]$/u, '')
+      .trimEnd()
     if (unit.referenceBoundary && !unit.sourceOnly) reference = undefined
     else if (
       /^(?:references|bibliography|literature cited|works cited|参考文献|參考文獻)[:：]?$/iu.test(
@@ -28,7 +40,7 @@ export function pdfReflowContentKinds(
     else if (
       reference &&
       fragment.pageNumber > reference.pageNumber &&
-      (/^(?:appendix|appendices|supplementary material|acknowledgments?|acknowledgements?|funding|author contributions|disclosures|conflicts? of interest|data availability|code availability|附录|附錄)(?:\s+.+)?$/iu.test(
+      (/^(?:appendix|appendices|supplementary material|acknowledgments?|acknowledgements?|funding|author contributions|disclosures|conflicts? of interest|data availability|code availability|附录|附錄)(?:\s+\S.*)?$/iu.test(
         heading
       ) ||
         (!unit.sourceOnly && /^[A-Z][.\s]+[A-Z][A-Za-z\s-]{3,70}$/u.test(heading))) &&

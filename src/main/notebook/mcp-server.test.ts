@@ -73,7 +73,8 @@ import { NotebookRunRepository } from './repository'
 import {
   NotebookRuntimeService,
   type NotebookExecutionRequest,
-  type NotebookExecutionResult
+  type NotebookExecutionResult,
+  type NotebookShellResult
 } from './runtime-service'
 
 const tokenizer = new Tiktoken(cl100kBase)
@@ -391,15 +392,18 @@ describe('notebook MCP server config', () => {
     ])
   })
 
-  it('allows explicit network approval before a connection while preserving scoped grants', () => {
-    const tool = NOTEBOOK_RPC_TOOLS.find((candidate) => candidate.name === 'request_network_access')
-
-    expect(NOTEBOOK_SYSTEM_PROMPT_APPEND).toContain('A failed connection is not required')
-    expect(NOTEBOOK_SYSTEM_PROMPT_APPEND).toContain('call `request_network_access`')
-    expect(tool?.description).toContain(
-      'before connecting or after OPEN_SCIENCE_NETWORK_DOMAIN_BLOCKED'
-    )
-    expect(tool?.description).toContain('Execute or retry only when the result is allowed')
+  it('requires a trusted block record and an access purpose', () => {
+    const tool = NOTEBOOK_RPC_TOOLS.find(
+      (candidate) => candidate.name === 'request_network_access'
+    )!
+    expect(
+      z.object(tool.inputSchema).safeParse({ hostname: 'example.org', reason: 'Download data' })
+        .success
+    ).toBe(false)
+    expect(
+      z.object(tool.inputSchema).safeParse({ recordId: 'trusted-record', reason: 'Download data' })
+        .success
+    ).toBe(true)
   })
 
   it.each(['aborted', 'user-decision', 'approval-surface-unavailable'])(
@@ -436,9 +440,8 @@ describe('notebook MCP server config', () => {
         const delivered = await client.callTool({
           name: 'request_network_access',
           arguments: {
-            hostname: 'data.example.org',
-            reason: 'Download the dataset.',
-            runtime: 'python'
+            recordId: 'trusted-record',
+            reason: 'Download the dataset.'
           }
         })
         expect(delivered.content).toEqual([{ type: 'text', text: JSON.stringify(result, null, 2) }])
@@ -493,8 +496,7 @@ describe('notebook MCP server config', () => {
               toolName === 'bash_execute'
                 ? { command: 'sample-client request' }
                 : {
-                    hostname: 'service.example.test',
-                    runtime: 'python',
+                    recordId: 'trusted-record',
                     reason: 'Read the fixture.'
                   }
           },
@@ -866,6 +868,38 @@ describe('ask_user_question tool', () => {
         questions: [{ ...question, kind: 'single-select' }]
       })?.questions[0].kind
     ).toBe('single-select')
+  })
+
+  it('exposes non-blank constraints to schema-level validation and keeps sanitize as the semantic boundary', () => {
+    const emitted = z.toJSONSchema(z.object(tool!.inputSchema))
+    const questionItems = (
+      emitted.properties?.questions as { items?: { properties?: Record<string, unknown> } }
+    ).items?.properties
+    const optionItems = (
+      questionItems?.options as { items?: { properties?: Record<string, unknown> } }
+    ).items?.properties
+    // Pi validates the emitted JSON Schema before its permission hook, so a whitespace-only
+    // required string fails without reaching the app. Optional fields stay pattern-free to fit
+    // the static context budget; zod and the sanitizer still reject them.
+    expect((questionItems?.question as { pattern?: string }).pattern).toBe('\\S')
+    expect((optionItems?.label as { pattern?: string }).pattern).toBe('\\S')
+
+    const schema = z.object(tool!.inputSchema)
+    const malformed = [
+      // Whitespace-only strings: JSON Schema pattern and the zod chain both reject.
+      { question: '   ', options: [{ label: 'A' }, { label: 'B' }] },
+      { question: 'Pick?', header: ' ', options: [{ label: 'A' }, { label: 'B' }] },
+      { question: 'Pick?', options: [{ label: ' ' }, { label: 'B' }] },
+      { question: 'Pick?', options: [{ label: 'A', description: ' ' }, { label: 'B' }] },
+      // Duplicate labels are unexpressible in JSON Schema; both layers must reject them.
+      { question: 'Pick?', options: [{ label: 'A' }, { label: 'A' }] }
+    ]
+    for (const question of malformed) {
+      expect(schema.safeParse({ questions: [question] }).success).toBe(false)
+      expect(
+        sanitizeAgentUserChoiceRequest({ sessionId: 'session-1', questions: [question] })
+      ).toBeUndefined()
+    }
   })
 
   it('validates multiple answers without losing label boundaries or custom text', () => {
@@ -1891,6 +1925,43 @@ describe('repl_execute tool', () => {
 })
 
 describe('bash_execute tool', () => {
+  it.each([0, 1])('reports Shell exit %s through the MCP failure flag', async (exitCode) => {
+    const server = createNotebookMcpServer({
+      endpoint: 'http://127.0.0.1:4567',
+      token: 'test-token',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      workspaceCwd: process.cwd()
+    })
+    const client = new ModelContextProtocolClient({ name: 'notebook-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const stderr = exitCode === 0 ? '' : 'ls: input: Operation not permitted'
+    const shellResult: NotebookShellResult = { stdout: '', stderr, exitCode }
+    // Reproduce the reported runtime result at the existing RPC boundary, not an OS denial.
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: shellResult })
+    } as Response)
+    try {
+      await server.connect(serverTransport)
+      await client.connect(clientTransport)
+      const result = await client.callTool({
+        name: 'bash_execute',
+        arguments: { command: 'ls input' }
+      })
+      expect(fetch).toHaveBeenCalledTimes(1)
+      const text = (result.content as Array<{ type: string; text?: string }>).find(
+        (item) => item.type === 'text'
+      )?.text
+      expect(JSON.parse(text!)).toMatchObject({ exitCode, ...(stderr ? { stderr } : {}) })
+      expect(result.isError === true).toBe(exitCode !== 0)
+    } finally {
+      fetch.mockRestore()
+      await client.close()
+      await server.close()
+    }
+  })
+
   const tool = NOTEBOOK_RPC_TOOLS.find((entry) => entry.name === 'bash_execute')
 
   it('supports foreground compatibility and durable background Shell receipts', () => {

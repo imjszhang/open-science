@@ -126,8 +126,8 @@ describe('AgentStep', () => {
     )
     expect(panel?.querySelector('button')?.textContent).toContain('Re-detect')
     expect(container.textContent).not.toContain('Agent framework')
-    expect(container.textContent).toContain('Installed · 1')
-    expect(container.textContent).toContain('Available · 3')
+    expect(container.textContent).toContain('Installed / 1')
+    expect(container.textContent).toContain('Available / 3')
     expect(container.querySelector('[aria-label="Use Claude Agent"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Install OpenCode"]')).not.toBeNull()
     expect(container.textContent).not.toContain('Uninstall')
@@ -983,6 +983,12 @@ describe('AgentStep', () => {
           installError: undefined
         },
         codebuddy: {
+          isInstalling: false,
+          installLogs: [],
+          installProgress: null,
+          installError: undefined
+        },
+        pi: {
           isInstalling: false,
           installLogs: [],
           installProgress: null,

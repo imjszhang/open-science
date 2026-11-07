@@ -51,6 +51,77 @@ const step = (job: Job, name: string): Step => {
 }
 
 describe('release and scheduled workflow topology', () => {
+  it('validates a source-only baseline before installing and restores the candidate before packaging', () => {
+    const document = workflow('windows-full-test.yml')
+    const job = document.jobs.windows_dependencies
+    const guard = step(job, 'Validate and select native source baseline')
+    const steps = job.steps ?? []
+    const sourceSteps = [
+      guard,
+      step(job, 'Restore candidate source'),
+      step(job, 'Setup native producer Node'),
+      step(job, 'Build candidate process-tree source'),
+      step(job, 'Restore test Node'),
+      step(job, 'Rebuild candidate packages')
+    ]
+    for (const sourceStep of sourceSteps) {
+      expect(sourceStep.if).toBe("${{ inputs.native_source_base != '' }}")
+    }
+    expect(steps.indexOf(guard)).toBeLessThan(steps.indexOf(step(job, 'Install dependencies')))
+    expect(steps.indexOf(sourceSteps[1])).toBeGreaterThan(
+      steps.indexOf(step(job, 'Install dependencies'))
+    )
+    expect(sourceSteps.map((entry) => steps.indexOf(entry))).toEqual(
+      sourceSteps.map((entry) => steps.indexOf(entry)).sort((a, b) => a - b)
+    )
+    expect(steps.indexOf(sourceSteps.at(-1)!)).toBeLessThan(
+      steps.indexOf(step(job, 'Pack dependencies'))
+    )
+    expect(step(job, 'Restore candidate source').run).toBe('git checkout --detach "$GITHUB_SHA"')
+    expect(document.jobs.notebook_mutation.if).not.toContain("inputs.mode == 'portable'")
+
+    const root = mkdtempSync(join(tmpdir(), 'native-source-baseline-'))
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+      }).trim()
+    const commit = (path: string, contents: string): string => {
+      writeFileSync(join(root, path), contents)
+      git('add', path)
+      git('commit', '-qm', 'fixture')
+      return git('rev-parse', 'HEAD')
+    }
+    const runGuard = (base: string, head: string, mode = 'portable'): string =>
+      execFileSync('bash', ['-e', '-c', guard.run!], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, SOURCE_BASE: base, GITHUB_SHA: head, SOURCE_MODE: mode }
+      })
+    try {
+      git('init', '-q')
+      git('config', 'user.email', 'fixture@example.invalid')
+      git('config', 'user.name', 'Fixture')
+      git('config', 'commit.gpgsign', 'false')
+      const base = commit('package-lock.json', '{}')
+      const head = commit('candidate.txt', 'diagnostic source')
+      expect(() => runGuard(base, head)).not.toThrow()
+      expect(git('rev-parse', 'HEAD')).toBe(base)
+      git('checkout', '--detach', head)
+      expect(() => runGuard(base, head, 'full')).toThrow()
+      expect(() => runGuard('--help', head)).toThrow()
+      expect(() => runGuard(head, base)).toThrow()
+      expect(git('rev-parse', 'HEAD')).toBe(head)
+      const incompatible = commit('package-lock.json', '{"changed":true}')
+      expect(() => runGuard(base, incompatible)).toThrow()
+      expect(git('rev-parse', 'HEAD')).toBe(incompatible)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it.each(['0189093', '0000000', '1234567', 'abc1234', null])(
     'keeps backend and installer versions identical for commit %s (null is stable)',
     (shortSha) => {
@@ -194,7 +265,14 @@ describe('release and scheduled workflow topology', () => {
     expect(schedule).toEqual([{ cron: '47 16 * * *' }])
     expect(dispatch.inputs?.mode).toMatchObject({
       default: 'full',
-      options: ['full', 'notebook-sandbox', 'notebook-mutation', 'regressions', 'scheduled-fixes']
+      options: [
+        'full',
+        'portable',
+        'notebook-sandbox',
+        'notebook-mutation',
+        'regressions',
+        'scheduled-fixes'
+      ]
     })
     expect(windows.permissions).toEqual({ actions: 'read', contents: 'read' })
     expect(plan).toMatchObject({
@@ -207,7 +285,7 @@ describe('release and scheduled workflow topology', () => {
     })
     expect(job).toMatchObject({
       needs: ['plan', 'windows_dependencies'],
-      if: "${{ needs.plan.outputs.should_test == 'true' && needs.windows_dependencies.result == 'success' && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' || inputs.mode == 'regressions' || inputs.mode == 'scheduled-fixes')) }}",
+      if: "${{ needs.plan.outputs.should_test == 'true' && needs.windows_dependencies.result == 'success' && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' || inputs.mode == 'portable' || inputs.mode == 'regressions' || inputs.mode == 'scheduled-fixes')) }}",
       'timeout-minutes': 60
     })
     expect(sandbox).toMatchObject({
@@ -219,7 +297,9 @@ describe('release and scheduled workflow topology', () => {
     expect(sandboxSmoke.run).toContain('vendor/windows-src/ci/smoke.ps1')
     expect(sandboxSmoke.run).toContain('vendor/windows/x64/notebook-appcontainer-host.exe')
     expect(sandboxSmoke.run).toContain('-Mode Full')
-    expect(test.if).toBe("${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'full' }}")
+    expect(test.if).toBe(
+      "${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'full' || inputs.mode == 'portable' }}"
+    )
     const regressions = step(job, 'Test recent Windows regressions')
     expect(regressions.if).toBe(
       "${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'regressions' }}"
@@ -264,6 +344,10 @@ describe('release and scheduled workflow topology', () => {
       'packages/notebook-analysis/src/source-file-access-analysis.workflow-orchestration.test.ts',
       'src/main/session-package/archive.test.ts',
       'src/main/session-package/service.test.ts',
+      'src/main/acp/permission-broker-registry.test.ts',
+      'src/main/cli-install/launcher.test.ts',
+      'scripts/ci/pr-gate-workflow.test.ts',
+      'src/renderer/src/pages/workspace/previews/renderers/use-pdf-translation-document.test.tsx',
       'packages/environment/src/package-manager.test.ts',
       'src/main/notebook/package-process-sandbox.test.ts',
       'src/main/notebook/network-sandbox-owner.test.ts',
@@ -287,7 +371,7 @@ describe('release and scheduled workflow topology', () => {
       'packages/notebook-network-sandbox/src/gateway.test.ts',
       'packages/notebook-network-sandbox/src/public-read-lifecycle.test.ts'
     ]) {
-      expect(regressions.run).toContain(file)
+      expect(regressions.run?.split(/\s+/).filter((argument) => argument === file)).toHaveLength(1)
     }
   })
 
@@ -1038,17 +1122,13 @@ describe('website mirror publication intent', () => {
 })
 
 describe('build verification throughput', () => {
-  it('uses bundled ONNX CPU binaries in every verification job without changing packaging', () => {
-    for (const name of ['verify', 'verify_tests', 'verify_coverage', 'verify_macos']) {
+  it('installs locked dependencies without the retired local translation runtime', () => {
+    for (const name of ['verify', 'verify_tests', 'verify_coverage', 'verify_macos', 'build']) {
       const job = workflow('build.yml').jobs[name]
-      expect(step(job, 'Install dependencies').env).toEqual({ ONNXRUNTIME_NODE_INSTALL: 'skip' })
-      expect(step(job, 'Verify ONNX native loading').run).toBe(
-        `node -e "require('onnxruntime-node')"`
-      )
+      expect(step(job, 'Install dependencies').run).toBe('node scripts/ci/npm-ci.mjs')
+      expect(step(job, 'Install dependencies').env?.ONNXRUNTIME_NODE_INSTALL).toBeUndefined()
+      expect(job.steps?.some(({ run }) => run?.includes('onnxruntime-node'))).toBe(false)
     }
-    expect(
-      step(workflow('build.yml').jobs.build, 'Install dependencies').env?.ONNXRUNTIME_NODE_INSTALL
-    ).toBeUndefined()
   })
 
   it('runs Ubuntu static checks independently from six complete portable shards', () => {
@@ -1056,10 +1136,6 @@ describe('build verification throughput', () => {
     expect(verify['runs-on']).toBe('ubuntu-latest')
     expect(verify.needs).toBeUndefined()
     expect(tests.needs).toBeUndefined()
-    expect(step(tests, 'Install dependencies').env).toEqual({ ONNXRUNTIME_NODE_INSTALL: 'skip' })
-    expect(step(tests, 'Verify ONNX native loading').run).toBe(
-      `node -e "require('onnxruntime-node')"`
-    )
     expect(tests['runs-on']).toBe('ubuntu-latest')
     expect(tests.strategy?.matrix?.shard).toEqual([1, 2, 3, 4, 5, 6])
     expect(tests['timeout-minutes']).toBe(60)

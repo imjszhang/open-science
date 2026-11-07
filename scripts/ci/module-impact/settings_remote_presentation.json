@@ -1,11 +1,14 @@
 {
   "ownerPaths": [
+    "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.test.tsx",
+    "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.tsx",
     "src/renderer/src/pages/settings/RemoteControlPanel.render.test.tsx",
     "src/renderer/src/pages/settings/RemoteControlPanel.tsx",
     "src/renderer/src/pages/settings/RepairFrameworkDialog.render.test.tsx",
     "src/renderer/src/pages/settings/RepairFrameworkDialog.tsx"
   ],
   "interfacePaths": [
+    "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.tsx",
     "src/renderer/src/pages/settings/RemoteControlPanel.tsx",
     "src/renderer/src/pages/settings/RepairFrameworkDialog.tsx",
     "src/renderer/src/pages/settings/file-browser-remote-error.ts"
@@ -13,6 +16,7 @@
   "consumerModules": [],
   "testFiles": {
     "owner": [
+      "src/renderer/src/pages/connect-mobile/ConnectMobileWindow.test.tsx",
       "src/renderer/src/pages/settings/RemoteControlPanel.render.test.tsx",
       "src/renderer/src/pages/settings/RepairFrameworkDialog.render.test.tsx"
     ],
@@ -140,5 +144,5 @@
   },
   "capabilityOverlays": [],
   "fallbackCapability": "renderer_view",
-  "fullTestReason": "The settings_remote_presentation owner retains 24 explicit research consumer obligations beyond its reviewed source-derived edges, including use-research-run-launcher.test.tsx, ReplayPanel.layout.test.tsx, RecordedRunObservationPreview.test.tsx. 24 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full renderer_view validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes."
+  "fullTestReason": "The settings_remote_presentation owner retains 24 explicit research consumer obligations beyond its reviewed source-derived edges, including use-research-run-launcher.test.tsx, ReplayPanel.layout.test.tsx, RecordedRunObservationPreview.test.tsx. 24 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full renderer_view validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes. The Connect mobile panel adds a standalone window surface beyond the reviewed remote presentation sources; retain full CI validation until the expanded boundary is reviewed and reclassified."
 }

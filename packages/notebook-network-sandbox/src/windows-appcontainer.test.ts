@@ -326,6 +326,8 @@ describe('Windows AppContainer launch', () => {
   })
 
   it('supervises standard-mode commands without requiring AppContainer setup', () => {
+    vi.stubEnv('SystemRoot', 'C:\\Windows')
+    vi.stubEnv('PATH', '')
     const request = {
       command: 'Write-Output ready',
       cwd: 'C:\\workspace',
@@ -350,7 +352,7 @@ describe('Windows AppContainer launch', () => {
     expect(launch.confirmProcessTreeTermination).toBeTypeOf('function')
     expect(launch.requestProcessTreeTermination).toBeTypeOf('function')
     expect(specification).toMatchObject({
-      executable: 'powershell.exe',
+      executable: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
       arguments: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', request.command],
       cwd: request.cwd,
       terminationProofPath: expect.stringContaining('.open-science-process-tree-terminated-'),
@@ -489,7 +491,7 @@ describe('Windows AppContainer launch', () => {
   })
 
   it('passes managed Skill read grants and write denials to the native Windows host', () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'windows-skill-policy-')))
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'windows-skill-policy-')))
     const skills = join(root, 'Application data 科研', 'codex', 'skills')
     mkdirSync(skills, { recursive: true })
     try {

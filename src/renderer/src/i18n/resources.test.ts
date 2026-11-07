@@ -1705,7 +1705,6 @@ describe('mandatory product glossary', () => {
     // inventories were intentionally removed. Keep glossary/structure checks, not stale copy.
     for (const heading of [
       '🚀 Schnellstart',
-      'Produkttour',
       'Benchmark-Ergebnisse',
       'Kernkompetenzen',
       'Modellanbieter',
@@ -2103,7 +2102,7 @@ describe('mandatory product glossary', () => {
       'Notebook runtime',
       'Notebook runtime (optional)',
       'Notebook runtimes',
-      'The selection is saved, but the Agent runtime has not applied it yet. Your draft and queued messages are preserved.',
+      'Check the required runtime, files and permissions, then retry.',
       'Set up the agent runtime',
       'Setting up the notebook runtime — wait for it to finish, or cancel it, to continue.',
       'Setting up {{language}} runtime',
@@ -5023,6 +5022,7 @@ const NOT_TRANSLATABLE = new Set([
   'Claude',
   'Codex',
   'opencode',
+  'Pi',
   'Nvidia',
   'TencentCloud',
   // A literal DOI example; translating its suffix would change the identifier.

@@ -22,6 +22,8 @@ export const RELOCATABLE_DATA_DIRS = [
   'notebooks',
   ...MANAGED_EXECUTION_DATA_DIRS,
   'models',
+  'research-video-jobs',
+  'research-video-presentations',
   'pdf-structure',
   'execution-file-evidence',
   'uploads',

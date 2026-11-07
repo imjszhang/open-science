@@ -440,6 +440,8 @@ test('exports a Session package and opens its research workspace and read-only s
   // Local package import belongs to the project menu; gallery examples have their own Import action.
   await expect(homeHeader.getByRole('button', { name: 'Import', exact: true })).toHaveCount(0)
   await expect(homeHeader.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Projects', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('session-package-home.png') })
   await page
     .getByRole('region', { name: 'Projects', exact: true })

@@ -1,4 +1,4 @@
-import { sessionResearchMembershipMigration } from './migrations/0052-session-research-membership'
+import { sessionResearchMembershipMigration } from './migrations/10052-session-research-membership'
 import { pascalcaseTableNamesMigration } from './migrations/0049-pascalcase-table-names'
 import { pdfAnnotationSharingMigration } from './migrations/0048-pdf-annotation-sharing'
 import { journalAttributesMigration } from './migrations/0046-journal-attributes'
@@ -7,7 +7,20 @@ import { literatureSmartCollectionsMigration } from './migrations/0044-literatur
 import { literatureSmartPauseRunMigration } from './migrations/0045-literature-smart-pause-run'
 import { literatureTranslationMigration } from './migrations/0050-literature-translation'
 import { literatureReadingStatusMigration } from './migrations/0051-literature-reading-status'
+import {
+  literaturePersonalNoteSearchMigration,
+  backfillLiteraturePersonalNoteSearch
+} from './migrations/0052-literature-personal-note-search'
+import {
+  slurmJobReliabilityMigration,
+  SLURM_JOB_RELIABILITY_ALLOWED_SUFFIX_CHECKS,
+  SLURM_JOB_RELIABILITY_ADDED_COLUMNS
+} from './migrations/0054-slurm-job-reliability'
 import { classificationUsageMigration } from './migrations/0042-classification-usage'
+import {
+  literatureDoiIdentityMigration,
+  backfillLiteratureDoiIdentity
+} from './migrations/0053-literature-doi-identity'
 import { literatureCollectionRevisionMigration } from './migrations/0040-literature-collection-revision'
 import { bookmarksMigration } from './migrations/0041-bookmarks'
 import { pdfAnnotationsMigration } from './migrations/0043-pdf-annotations'
@@ -226,6 +239,14 @@ const BASELINE_ID = runtimeSchemaBaselineMigration.id
 const LEGACY_RESEARCH_MEMBERSHIP_ID = '0051_session_research_membership'
 const LEGACY_RESEARCH_MEMBERSHIP_CHECKSUM =
   'fbba1e83ef4fb800b7713330a1c1f34e1a758017236ec8fac9bf5cd7eac746db'
+const RELEASED_RESEARCH_MEMBERSHIP_ID = '0052_session_research_membership'
+const RELEASED_RESEARCH_MEMBERSHIP_CHECKSUM =
+  '549bd69cfebeeb1420d3d9787b0a1c7a80f4c3f758f339e2c781a0e535d640b3'
+const UPSTREAM_MIGRATIONS_BEFORE_RESEARCH = new Set([
+  literaturePersonalNoteSearchMigration.id,
+  literatureDoiIdentityMigration.id,
+  slurmJobReliabilityMigration.id
+])
 
 const checksumMigrationPayload = (
   id: string,
@@ -255,10 +276,21 @@ const checksumMigrationPayload = (
   return hash.digest('hex')
 }
 
+const LITERATURE_DOI_IDENTITY_CHECKSUM = checksumMigrationPayload(
+  literatureDoiIdentityMigration.id,
+  literatureDoiIdentityMigration.statements,
+  literatureDoiIdentityMigration.verifiers
+)
 const LITERATURE_SEARCH_TEXT_CHECKSUM = checksumMigrationPayload(
   literatureSearchTextMigration.id,
   literatureSearchTextMigration.statements,
   literatureSearchTextMigration.verifiers
+)
+const LITERATURE_PERSONAL_NOTE_SEARCH_CHECKSUM = checksumMigrationPayload(
+  literaturePersonalNoteSearchMigration.id,
+  literaturePersonalNoteSearchMigration.statements,
+  literaturePersonalNoteSearchMigration.verifiers,
+  literaturePersonalNoteSearchMigration.operations
 )
 const BASELINE_CHECKSUM = checksumMigrationPayload(
   BASELINE_ID,
@@ -954,6 +986,30 @@ const MIGRATION_MANIFEST = [
     backupRetention: 'retain'
   },
   {
+    ...literaturePersonalNoteSearchMigration,
+    checksum: LITERATURE_PERSONAL_NOTE_SEARCH_CHECKSUM,
+    backupOnApply: 'required',
+    backupRetention: 'retain'
+  },
+  {
+    ...literatureDoiIdentityMigration,
+    checksum: LITERATURE_DOI_IDENTITY_CHECKSUM,
+    backupOnApply: 'required',
+    backupRetention: 'retain'
+  },
+  {
+    ...slurmJobReliabilityMigration,
+    checksum: checksumMigrationPayload(
+      slurmJobReliabilityMigration.id,
+      slurmJobReliabilityMigration.statements,
+      slurmJobReliabilityMigration.verifiers,
+      slurmJobReliabilityMigration.operations
+    ),
+    foreignKeysDuringApply: 'disabled',
+    backupOnApply: 'required',
+    backupRetention: 'retain'
+  },
+  {
     ...sessionResearchMembershipMigration,
     checksum: checksumMigrationPayload(
       sessionResearchMembershipMigration.id,
@@ -1367,6 +1423,8 @@ const verifyCurrentApplicationSchema = async (client: PrismaClient): Promise<voi
   await verifyCurrentRuntimeSchema(client, currentApplicationSchemaExtensions)
   await runMigrationVerifiers(client, literatureTranslationMigration.verifiers)
   await runMigrationVerifiers(client, literatureReadingStatusMigration.verifiers)
+  await runMigrationVerifiers(client, literaturePersonalNoteSearchMigration.verifiers)
+  await runMigrationVerifiers(client, slurmJobReliabilityMigration.verifiers)
   // The generated schema enforces the latest checks; frozen auxiliary verifiers also accept
   // the exact stronger expressions from the immutable suffix.
   await runMigrationVerifiers(
@@ -1389,7 +1447,10 @@ const verifyCurrentApplicationSchema = async (client: PrismaClient): Promise<voi
   await runMigrationVerifiers(
     client,
     computeJobOperationMigration.verifiers,
-    NUMERIC_AND_NULL_ALLOWED_SUFFIX_CHECKS
+    mergeAllowedSuffixChecks(
+      NUMERIC_AND_NULL_ALLOWED_SUFFIX_CHECKS,
+      SLURM_JOB_RELIABILITY_ALLOWED_SUFFIX_CHECKS
+    )
   )
   await runMigrationVerifiers(client, computeJobFileEvidenceMigration.verifiers)
   // The generated contract verifies the owner-scoped source indexes introduced by the suffix.
@@ -1401,7 +1462,11 @@ const verifyCurrentApplicationSchema = async (client: PrismaClient): Promise<voi
   )
   await runMigrationVerifiers(client, literatureInboxIntegrityMigration.verifiers)
   await runMigrationVerifiers(client, computeJobRemoteCleanupMigration.verifiers)
-  await runMigrationVerifiers(client, backgroundResultDeliveryMigration.verifiers)
+  await runMigrationVerifiers(
+    client,
+    backgroundResultDeliveryMigration.verifiers,
+    SLURM_JOB_RELIABILITY_ALLOWED_SUFFIX_CHECKS
+  )
   await runMigrationVerifiers(client, literaturePdfProvenanceMigration.verifiers)
   await runMigrationVerifiers(client, contentVerificationObservationMigration.verifiers)
   await runMigrationVerifiers(client, literatureMetadataCommitReceiptMigration.verifiers)
@@ -1719,11 +1784,42 @@ const validateLedger = (
   return ledger.length
 }
 
+const aliasReleasedResearchMembership = (
+  ledger: readonly LedgerRow[],
+  manifest: readonly MigrationManifestEntry[]
+): readonly LedgerRow[] => {
+  const released = ledger.filter(({ id }) => id === RELEASED_RESEARCH_MEMBERSHIP_ID)
+  if (released.length === 0) return ledger
+  const canonical = manifest.find(({ id }) => id === sessionResearchMembershipMigration.id)
+  const expected = MIGRATION_MANIFEST.find(({ id }) => id === sessionResearchMembershipMigration.id)
+  if (
+    released.length !== 1 ||
+    released[0]!.checksum !== RELEASED_RESEARCH_MEMBERSHIP_CHECKSUM ||
+    ledger.some(({ id }) => id === sessionResearchMembershipMigration.id) ||
+    !expected ||
+    canonical?.checksum !== expected.checksum
+  ) {
+    throw new DatabaseMigrationError(
+      'database_history_invalid',
+      'The released research migration history does not match its compatibility contract.',
+      false,
+      RELEASED_RESEARCH_MEMBERSHIP_ID
+    )
+  }
+  // Keep the 0052 row on disk. Five-digit 10052 is the in-memory identity only.
+  return ledger.map((row) =>
+    row.id === RELEASED_RESEARCH_MEMBERSHIP_ID
+      ? { id: expected.id, checksum: expected.checksum }
+      : row
+  )
+}
+
 const normalizeLegacyResearchLedger = async (
   client: PrismaClient,
   ledger: readonly LedgerRow[],
   manifest: readonly MigrationManifestEntry[]
 ): Promise<readonly LedgerRow[]> => {
+  ledger = aliasReleasedResearchMembership(ledger, manifest)
   const legacy = ledger.filter(({ id }) => id === LEGACY_RESEARCH_MEMBERSHIP_ID)
   if (legacy.length === 0) return ledger
   const research = manifest.find(({ id }) => id === sessionResearchMembershipMigration.id)
@@ -1734,6 +1830,9 @@ const normalizeLegacyResearchLedger = async (
   const reading = manifest.find(({ id }) => id === literatureReadingStatusMigration.id)
   const hasReading = ledger.some(({ id }) => id === literatureReadingStatusMigration.id)
   const knownPrefix = MIGRATION_MANIFEST.slice(0, canonicalResearchIndex + 1)
+  const historicalPrefix = knownPrefix.filter(
+    ({ id }) => !UPSTREAM_MIGRATIONS_BEFORE_RESEARCH.has(id)
+  )
   if (
     legacy.length !== 1 ||
     legacy[0]!.checksum !== LEGACY_RESEARCH_MEMBERSHIP_CHECKSUM ||
@@ -1742,7 +1841,7 @@ const normalizeLegacyResearchLedger = async (
     reading?.checksum !==
       MIGRATION_MANIFEST.find(({ id }) => id === literatureReadingStatusMigration.id)?.checksum ||
     (!hasReading &&
-      (ledger.length !== knownPrefix.length - 1 ||
+      (ledger.length !== historicalPrefix.length - 1 ||
         ledger.at(-1)?.id !== LEGACY_RESEARCH_MEMBERSHIP_ID))
   ) {
     throw new DatabaseMigrationError(
@@ -1752,22 +1851,28 @@ const normalizeLegacyResearchLedger = async (
       LEGACY_RESEARCH_MEMBERSHIP_ID
     )
   }
-  // Keep the original row, checksum and appliedAt on disk. This one exact released
-  // payload is equivalent to 0052; do not sort away holes or accept both identities.
+  // Keep the original row on disk until upstream migrations have to be inserted ahead of it.
+  // This one exact released payload is equivalent to 10052; do not sort away holes or accept both identities.
   const normalized = ledger.map((row) =>
     row.id === LEGACY_RESEARCH_MEMBERSHIP_ID
       ? { id: canonicalResearch.id, checksum: canonicalResearch.checksum }
       : row
   )
+  const withoutUpstream = (entries: readonly MigrationManifestEntry[]): MigrationManifestEntry[] =>
+    entries.filter(({ id }) => !UPSTREAM_MIGRATIONS_BEFORE_RESEARCH.has(id))
   validateLedger(
-    hasReading ? normalized.slice(0, knownPrefix.length) : normalized,
+    hasReading ? normalized.slice(0, historicalPrefix.length) : normalized,
     hasReading
-      ? knownPrefix
-      : knownPrefix.filter(({ id }) => id !== literatureReadingStatusMigration.id)
+      ? historicalPrefix
+      : historicalPrefix.filter(({ id }) => id !== literatureReadingStatusMigration.id)
   )
   validateLedger(
     normalized,
-    hasReading ? manifest : manifest.filter(({ id }) => id !== literatureReadingStatusMigration.id)
+    withoutUpstream(
+      hasReading
+        ? manifest
+        : manifest.filter(({ id }) => id !== literatureReadingStatusMigration.id)
+    )
   )
   try {
     await runMigrationVerifiers(client, sessionResearchMembershipMigration.verifiers)
@@ -1775,6 +1880,84 @@ const normalizeLegacyResearchLedger = async (
     throw classifyDatabaseFailure(error, 'validation', LEGACY_RESEARCH_MEMBERSHIP_ID)
   }
   return normalized
+}
+
+const promoteReleasedResearchIdentity = async (
+  client: PrismaClient,
+  canonical: MigrationManifestEntry
+): Promise<void> => {
+  await client.$executeRaw`
+    UPDATE "_open_science_migrations"
+    SET "id" = ${canonical.id}, "checksum" = ${canonical.checksum}
+    WHERE "id" = ${LEGACY_RESEARCH_MEMBERSHIP_ID}
+       OR "id" = ${RELEASED_RESEARCH_MEMBERSHIP_ID}
+  `
+}
+
+const spliceUpstreamMigrationsBeforeResearch = async (
+  client: PrismaClient,
+  ledger: readonly LedgerRow[],
+  manifest: readonly MigrationManifestEntry[],
+  applyMissing: (migration: MigrationManifestEntry) => Promise<void>
+): Promise<{ ledger: readonly LedgerRow[]; applied: readonly string[] }> => {
+  const researchId = sessionResearchMembershipMigration.id
+  const index = ledger.findIndex((row) => row.id === researchId)
+  if (index < 0) return { ledger, applied: [] }
+  const manifestIndex = manifest.findIndex((entry) => entry.id === researchId)
+  if (manifestIndex < 0) return { ledger, applied: [] }
+  const expectedBefore = manifest.slice(0, manifestIndex)
+  const prefix = ledger.slice(0, index)
+  const suffix = ledger.slice(index + 1)
+  const research = ledger[index]!
+  const expectedResearch = manifest[manifestIndex]!
+  const upstreamStart = expectedBefore.findIndex((entry) =>
+    UPSTREAM_MIGRATIONS_BEFORE_RESEARCH.has(entry.id)
+  )
+  if (upstreamStart < 0) return { ledger, applied: [] }
+  let matched = 0
+  while (
+    matched < prefix.length &&
+    matched < expectedBefore.length &&
+    prefix[matched]!.id === expectedBefore[matched]!.id &&
+    prefix[matched]!.checksum === expectedBefore[matched]!.checksum
+  ) {
+    matched += 1
+  }
+  // An earlier ledger problem belongs to the normal history check. Only a clean prefix
+  // that stops at the upstream gap is this bridge's job.
+  if (matched < upstreamStart || matched !== prefix.length) return { ledger, applied: [] }
+  const missing = expectedBefore.slice(matched)
+  if (!missing.every((entry) => UPSTREAM_MIGRATIONS_BEFORE_RESEARCH.has(entry.id))) {
+    return { ledger, applied: [] }
+  }
+  if (
+    research.checksum !== expectedResearch.checksum ||
+    (missing.length > 0 && suffix.length > 0)
+  ) {
+    throw new DatabaseMigrationError(
+      'database_history_invalid',
+      'The research migration history does not line up with the upstream migrations that now precede it.',
+      false,
+      researchId
+    )
+  }
+  if (missing.length === 0) return { ledger, applied: [] }
+  try {
+    await runMigrationVerifiers(client, sessionResearchMembershipMigration.verifiers)
+  } catch (error) {
+    throw classifyDatabaseFailure(error, 'validation', researchId)
+  }
+  // 0051/0052 sort between the upstream ids. Rename that one row so ORDER BY id matches the manifest.
+  await promoteReleasedResearchIdentity(client, expectedResearch)
+  const applied: string[] = []
+  for (const migration of missing) {
+    await applyMissing(migration)
+    applied.push(migration.id)
+  }
+  return {
+    ledger: await normalizeLegacyResearchLedger(client, await readLedger(client), manifest),
+    applied
+  }
 }
 
 const readForeignKeyState = async (client: PrismaClient): Promise<number> => {
@@ -1838,7 +2021,10 @@ const classifyDatabaseFailure = (
   if (validationFailure) {
     return new DatabaseMigrationError(
       'database_validation_failed',
-      'The existing database does not satisfy the required schema contract.',
+      error instanceof DatabaseValidationError &&
+        error.data.kind === 'literature-doi-identity-alias-conflict'
+        ? error.message
+        : 'The existing database does not satisfy the required schema contract.',
       false,
       migrationId,
       { cause: error }
@@ -1982,11 +2168,27 @@ const applyManifestMigration = async (
   } = {}
 ): Promise<void> => {
   const preserveCurrentSchema = await hasCurrentManagedFileVersionFoundation(client)
+  const hasSlurmColumns = async (table: string): Promise<boolean> => {
+    const columns = await migrationSqlExecutor.query<Array<{ name: string }>>(
+      client,
+      `PRAGMA table_info("${table}")`
+    )
+    return columns.some(({ name }) => SLURM_JOB_RELIABILITY_ADDED_COLUMNS[table]?.includes(name))
+  }
+  // These two frozen rebuilds need adaptation only when an earlier current-schema adoption has
+  // already introduced Slurm diagnostics. Otherwise retain their original replay boundaries.
+  const preservesSlurmColumns =
+    preserveCurrentSchema &&
+    (migration.id === computeJobRemoteCleanupMigration.id
+      ? (await hasSlurmColumns('ComputeJob')) || (await hasSlurmColumns('ComputeJobOperation'))
+      : migration.id === computeJobHarvestRetryMigration.id &&
+        (await hasSlurmColumns('ComputeJob')))
   const canAdaptCurrentSchema =
     preserveCurrentSchema &&
     migration.id !== managedFileVersionFoundationMigration.id &&
     (migration.id < managedFileVersionFoundationMigration.id ||
-      migration.id === numericAndNullConstraintsMigration.id) &&
+      migration.id === numericAndNullConstraintsMigration.id ||
+      preservesSlurmColumns) &&
     MIGRATION_MANIFEST.some(
       (candidate) => candidate.id === migration.id && candidate.checksum === migration.checksum
     )
@@ -2001,7 +2203,10 @@ const applyManifestMigration = async (
     migration.id < numericAndNullConstraintsMigration.id
       ? NUMERIC_AND_NULL_ALLOWED_SUFFIX_CHECKS
       : {},
-    migration.id < classificationUsageMigration.id ? CLASSIFICATION_ALLOWED_SUFFIX_CHECKS : {}
+    migration.id < classificationUsageMigration.id ? CLASSIFICATION_ALLOWED_SUFFIX_CHECKS : {},
+    migration.id < slurmJobReliabilityMigration.id
+      ? SLURM_JOB_RELIABILITY_ALLOWED_SUFFIX_CHECKS
+      : {}
   )
   const verifyMigrationTarget = async (targetClient: PrismaClient): Promise<void> => {
     if (
@@ -2132,6 +2337,18 @@ const applyManifestMigration = async (
           migration.checksum === LITERATURE_SEARCH_TEXT_CHECKSUM
         ) {
           await backfillLiteratureSearchText(transaction)
+        }
+        if (
+          migration.id === literaturePersonalNoteSearchMigration.id &&
+          migration.checksum === LITERATURE_PERSONAL_NOTE_SEARCH_CHECKSUM
+        ) {
+          await backfillLiteraturePersonalNoteSearch(transaction)
+        }
+        if (
+          migration.id === literatureDoiIdentityMigration.id &&
+          migration.checksum === LITERATURE_DOI_IDENTITY_CHECKSUM
+        ) {
+          await backfillLiteratureDoiIdentity(transaction)
         }
         if (options.repairVisionEvidenceReference && !contractAlreadySatisfied) {
           // The upstream history created VisionEvidence before this immutable migration. Rebuild it
@@ -2304,7 +2521,8 @@ const migrateApplicationDatabaseWithManifest = async (
 
   const applied: string[] = []
   // Only the released legacy fork may lack the independently published reading-status
-  // predecessor. A canonical 0052 ledger with that hole remains invalid.
+  // predecessor. A canonical 10052 ledger, including one aliased from 0052, remains
+  // invalid when that predecessor is missing.
   const bridgesLegacyReadingStatus =
     ledger.some(({ id }) => id === LEGACY_RESEARCH_MEMBERSHIP_ID) &&
     !ledger.some(({ id }) => id === literatureReadingStatusMigration.id)
@@ -2316,6 +2534,17 @@ const migrateApplicationDatabaseWithManifest = async (
     applied.push(readingStatus.id)
     ledger = await normalizeLegacyResearchLedger(client, await readLedger(client), manifest)
   }
+  const spliced = await spliceUpstreamMigrationsBeforeResearch(
+    client,
+    ledger,
+    manifest,
+    async (migration) => {
+      await ensureBackupBeforeMigration(migration)
+      await applyManifestMigration(client, migration)
+    }
+  )
+  ledger = spliced.ledger
+  applied.push(...spliced.applied)
   const appliedCount = validateLedger(ledger, manifest)
   if (appliedCount === manifest.length) {
     return complete({ adoptedLegacy: false, applied, from, to: latest.id })
@@ -2404,6 +2633,9 @@ const migrateApplicationDatabaseWithManifest = async (
     adoptsComputeJobOperation ? COMPUTE_JOB_OPERATION_ALLOWED_SUFFIX_CHECKS : {},
     manifest.some((entry) => entry.id === classificationUsageMigration.id)
       ? CLASSIFICATION_ALLOWED_SUFFIX_CHECKS
+      : {},
+    manifest.some((entry) => entry.id === slurmJobReliabilityMigration.id)
+      ? SLURM_JOB_RELIABILITY_ALLOWED_SUFFIX_CHECKS
       : {}
   )
 

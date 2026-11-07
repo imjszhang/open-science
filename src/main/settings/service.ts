@@ -93,6 +93,7 @@ import type {
   ImportSkillZipRequest,
   InstallClaudeRequest,
   InstallCodeBuddyRequest,
+  InstallPiRequest,
   InstallCodexRequest,
   InstallOpencodeRequest,
   OpenAlexCredentialValidation,
@@ -790,6 +791,20 @@ class SettingsService {
       )
     }
     return settings
+  }
+
+  async allowNotebookNetworkDestination(
+    grant: import('../../shared/network-destination-grants').NetworkDestinationGrant,
+    assertCurrent?: () => Promise<void>,
+    finalize?: () => Promise<void>
+  ): Promise<NotebookNetworkSettings> {
+    const result = await this.notebookNetwork.allowDestination(grant, assertCurrent, finalize)
+    try {
+      await this.onNotebookNetworkDomainAllowed?.()
+    } catch (error) {
+      this.log.warn('Network settings publication failed.', diagnosticErrorFields(error))
+    }
+    return result
   }
 
   getNotebookNetworkStatus(): Promise<NotebookNetworkStatus> {
@@ -1584,6 +1599,13 @@ class SettingsService {
     return this.runtimeManager.installCodeBuddy(request, onEvent)
   }
 
+  async installPi(
+    request: InstallPiRequest,
+    onEvent: (event: ClaudeInstallEvent) => void
+  ): Promise<ClaudeInstallResult> {
+    return this.runtimeManager.installPi(request, onEvent)
+  }
+
   async installCodex(
     request: InstallCodexRequest,
     onEvent: (event: ClaudeInstallEvent) => void
@@ -1613,6 +1635,11 @@ class SettingsService {
 
   async uninstallCodeBuddy(): Promise<UninstallResult> {
     const { activeBackendAffected } = await this.runtimeManager.uninstallCodeBuddy()
+    return { snapshot: await this.getSettingsView(), activeBackendAffected }
+  }
+
+  async uninstallPi(): Promise<UninstallResult> {
+    const { activeBackendAffected } = await this.runtimeManager.uninstallPi()
     return { snapshot: await this.getSettingsView(), activeBackendAffected }
   }
 

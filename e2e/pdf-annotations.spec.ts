@@ -1,7 +1,9 @@
 import { literatureItemInputSchema } from '@aipoch/literature-library/contracts'
 import { expect } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { Worker } from 'node:worker_threads'
+import type { PdfAnnotationGeometryResult } from '../src/main/pdf-annotations/agent-geometry-core'
 import { PDFDict, PDFDocument, PDFHexString, PDFName } from 'pdf-lib'
 import { test } from './fixtures/electron-app'
 import { createProjectViaUi } from './fixtures/project'
@@ -152,6 +154,50 @@ test('imports external notes, preserves provenance through undo, and persists an
   await page.getByRole('button', { name: 'Show navigation', exact: true }).click()
   await expect(notesSidebar).toBeVisible()
   const toolbar = page.getByRole('tablist', { name: 'PDF reading mode' })
+  // Exercise the production split controls in Electron, including the PDF-specific hover pin.
+  const markTrigger = page.getByRole('button', { name: 'Mark style', exact: true })
+  await markTrigger.hover()
+  const splitPanel = page.locator('[data-split-panel][data-state="open"]')
+  await expect(splitPanel).toBeVisible()
+  await expect(splitPanel).toHaveAttribute('data-connected', 'true')
+  await expect(splitPanel).toHaveCSS('animation-name', 'split-button-present')
+  await expect(splitPanel).toHaveCSS('transform', 'none')
+  await markTrigger.click()
+  await page.mouse.move(10, 700)
+  await expect(splitPanel).toBeVisible()
+  await splitPanel.getByRole('button', { name: 'Underline', exact: true }).click()
+  await expect(splitPanel.getByRole('button', { name: 'Underline', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await splitPanel.getByRole('button', { name: 'Blue', exact: true }).click()
+  await expect(splitPanel.getByRole('button', { name: 'Blue', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await splitPanel.getByRole('button', { name: 'Highlight', exact: true }).click()
+  await splitPanel.getByRole('button', { name: 'Yellow', exact: true }).click()
+  await page.screenshot({ path: testInfo.outputPath('connected-pdf-mark-panel.png') })
+  await page.keyboard.press('Escape')
+  await expect(splitPanel).toHaveCount(0)
+  const areaTrigger = page.getByRole('button', { name: 'Area selection actions' })
+  await areaTrigger.focus()
+  await areaTrigger.press('ArrowDown')
+  await expect(
+    page.getByRole('menuitem', { name: 'Select area to annotate', exact: true })
+  ).toBeVisible()
+  await expect(page.locator('[data-split-panel][data-state="open"]')).toHaveAttribute(
+    'data-connected',
+    'true'
+  )
+  // The first disabled item exposes its reason in a tooltip; move to the available action.
+  await page.keyboard.press('ArrowDown')
+  await expect(
+    page.getByRole('menuitem', { name: 'Select area to annotate', exact: true })
+  ).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(areaTrigger).toBeFocused()
+  await page.getByRole('button', { name: 'Annotate selected text' }).click()
   await expect(
     toolbar.getByRole('button', { name: 'Hide notes sidebar', exact: true })
   ).toBeEnabled()
@@ -690,4 +736,106 @@ test('shares independently imported native notes without duplication or resurrec
       versionId
     )
   ).toBe(0)
+})
+
+test('renders host-located Reading highlights and receives remote annotation updates', async ({
+  app
+}, testInfo) => {
+  const page = await app.completeOnboarding()
+  await page.evaluate(() => window.api.locale.setPreference({ preference: 'en' }))
+  const directory = await app.createTestDirectory('agent-annotation')
+  const file = join(directory, 'reading.pdf')
+  const pdf = await PDFDocument.create()
+  pdf.addPage([400, 500]).drawText('Before iii WWW after.', { x: 30, y: 420, size: 14 })
+  pdf.addPage([400, 500])
+  await writeFile(file, await pdf.save())
+  const metadata = JSON.parse(
+    await readFile(resolve('out/backend/dependencies.json'), 'utf8')
+  ) as Array<{
+    outputs: Record<string, { entryPoint?: string }>
+  }>
+  const entry = metadata
+    .flatMap((item) => Object.entries(item.outputs))
+    .find(
+      ([, output]) =>
+        output.entryPoint === 'src/main/pdf-annotations/agent-geometry-worker-entry.ts'
+    )?.[0]
+  if (!entry) throw new Error('Build the backend geometry worker before this regression')
+  const worker = new Worker(resolve(entry), {
+    execArgv: [],
+    workerData: { filePath: file, pageNumber: 1, quote: 'iii WWW' }
+  })
+  let located: PdfAnnotationGeometryResult
+  try {
+    located = await new Promise<PdfAnnotationGeometryResult>((resolveResult, reject) => {
+      worker.once('error', reject)
+      worker.once('message', (message: { result?: PdfAnnotationGeometryResult; error?: string }) =>
+        message.result ? resolveResult(message.result) : reject(new Error(message.error))
+      )
+    })
+  } finally {
+    await worker.terminate()
+  }
+  const selector = located.selectors[0]!
+  const reference = await page.evaluate(
+    (item) => window.api.literature.transact({ kind: 'create-item', item }),
+    literatureItemInputSchema.parse({
+      itemType: 'journalArticle',
+      title: 'Agent annotation geometry'
+    })
+  )
+  await openAllReferences(page)
+  await page.getByText('Agent annotation geometry', { exact: true }).click()
+  await page.locator('input[aria-label="Add files"]').setInputFiles({
+    name: 'reading.pdf',
+    mimeType: 'application/pdf',
+    buffer: await readFile(file)
+  })
+  await expect(page.getByRole('button', { name: 'Preview reading.pdf', exact: true })).toBeEnabled()
+  const versionId = await page.evaluate(
+    async (id) => (await window.api.literature.get(id))!.attachments[0].versions[0].id,
+    reference.id
+  )
+  await page.getByRole('button', { name: 'Preview reading.pdf', exact: true }).click()
+  await page.getByRole('tab', { name: 'Original PDF', exact: true }).click()
+  const text = page.locator('.textLayer span').filter({ hasText: 'Before iii WWW after.' })
+  await expect(text).toBeVisible()
+  // Write outside the mounted provider, like an agent tool, to exercise the existing subscription.
+  const mark = await page.evaluate(
+    async ({ versionId, selector }) => {
+      const { source } = await window.api.pdfAnnotations.list({ literatureVersionId: versionId })
+      if (!source) throw new Error('Verified source required')
+      return window.api.pdfAnnotations.create({
+        id: crypto.randomUUID(),
+        literatureVersionId: versionId,
+        kind: 'highlight',
+        note: 'Host-located evidence',
+        tagIds: [],
+        target: { source, selector }
+      })
+    },
+    { versionId, selector }
+  )
+  const overlay = page.locator(`[data-pdf-bookmark-highlight="${mark.id}"]`)
+  await expect(overlay).toBeVisible()
+  const quote = await text.evaluate((span) => {
+    const node = span.firstChild!
+    const range = document.createRange()
+    range.setStart(node, 7)
+    range.setEnd(node, 14)
+    const box = range.getBoundingClientRect()
+    return { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width }
+  })
+  const box = (await overlay.boundingBox())!
+  expect(Math.abs(box.x - quote.x)).toBeLessThan(5)
+  expect(Math.abs(box.x + box.width - quote.right)).toBeLessThan(5)
+  expect(box.y).toBeGreaterThanOrEqual(quote.y - 2)
+  expect(box.y + box.height).toBeLessThanOrEqual(quote.bottom + 2)
+  await page.getByRole('button', { name: 'Show notes sidebar', exact: true }).click()
+  await expect(
+    page
+      .locator('[data-pdf-notes-sidebar="true"]')
+      .getByText('Host-located evidence', { exact: true })
+  ).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('agent-highlight-geometry.png') })
 })

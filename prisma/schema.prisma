@@ -603,6 +603,7 @@ model LiteratureItem {
   normalizedTitle          String                            @default("")
   normalizedAbstract       String                            @default("")
   normalizedContainerTitle String                            @default("")
+  normalizedPersonalNote   String                            @default("")
   id                       String                            @id @default(cuid())
   itemType                 String
   title                    String
@@ -1138,6 +1139,7 @@ model ComputeJob {
   stdoutTail               String?
   stderrTail               String?
   errorCode                String?
+  errorMessage             String?
   // lastPollError: set when SSH connectivity fails during a poll tick (design.md §8 boundary 2).
   // The job status is NOT changed — this field surfaces the transient error to the UI.
   // Cleared on the next successful poll. retry_after_user_action is always true for this field.
@@ -1175,6 +1177,8 @@ model ComputeJobOperation {
   kind           String
   phase          String     @default("active")
   outcome        String?
+  errorCode      String?
+  errorMessage   String?
   revision       Int        @default(1)
   attemptCount   Int        @default(0)
   eligibleAt     DateTime?
@@ -1328,6 +1332,7 @@ model BackgroundResultDelivery {
   id                    String    @id
   sourceKind            String
   sourceId              String
+  sourceSnapshot        String?
   projectId             String
   sessionId             String
   agentFrameId          String?

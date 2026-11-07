@@ -346,18 +346,21 @@ for (const side of ['top', 'bottom'] as const) {
     const groupBox = (await group.boundingBox())!
     const menuBox = (await menu.boundingBox())!
     expect(Math.abs(menuBox.width - groupBox.width)).toBeLessThan(1)
-    expect(
-      Math.abs(
-        side === 'top'
-          ? menuBox.y + menuBox.height - groupBox.y
-          : menuBox.y - groupBox.y - groupBox.height
-      )
-    ).toBeLessThan(1)
+    const gap =
+      side === 'top'
+        ? groupBox.y - menuBox.y - menuBox.height
+        : menuBox.y - groupBox.y - groupBox.height
+    expect(gap).toBeLessThanOrEqual(0)
+    expect(gap).toBeGreaterThanOrEqual(-1.5)
     expect(menuBox.x).toBeGreaterThanOrEqual(0)
     expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(320)
     await expect
-      .poll(() => menu.evaluate((element) => getComputedStyle(element).clipPath))
-      .toBe('inset(0%)')
+      .poll(() =>
+        menu.evaluate((element) =>
+          Math.max(...(getComputedStyle(element).clipPath.match(/[\d.]+/g) ?? []).map(Number))
+        )
+      )
+      .toBe(0)
     const radii = await group.evaluate((element) => {
       const style = getComputedStyle(element)
       return {
@@ -382,39 +385,82 @@ test('skip menu reverses its edge animation smoothly and keeps the arrow in sync
   await page.goto('/ask-user.html?single=1')
   const trigger = page.getByRole('button', { name: 'More skip options' })
   const menu = page.getByTestId('question-skip-menu')
-  await page.evaluate(() => {
-    document.addEventListener('transitionrun', (event) => {
-      const target = event.target as HTMLElement
-      if (target.dataset.testid === 'question-skip-menu' && event.propertyName === 'clip-path') {
-        target.dataset.clipTransition = 'started'
-      }
-    })
-  })
   await trigger.click()
   await expect(menu).toBeVisible()
-  await expect(menu).toHaveAttribute('data-entered', 'true')
-  expect(await menu.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe(
-    '0.24s, 0.24s'
-  )
+  await expect(menu).toHaveAttribute('data-connected', 'true')
+  expect(
+    await menu.evaluate(
+      (element) =>
+        element
+          .getAnimations()
+          .find(
+            (animation) =>
+              animation.effect instanceof KeyframeEffect &&
+              animation.effect.getKeyframes().some((frame) => 'clipPath' in frame)
+          )
+          ?.effect?.getTiming().duration
+    )
+  ).toBe(240)
   expect(
     await trigger.locator('svg').evaluate((element) => getComputedStyle(element).transitionDuration)
   ).toBe('0.24s')
   await expect
-    .poll(() => menu.evaluate((element) => getComputedStyle(element).clipPath))
-    .toBe('inset(0%)')
-  await expect(menu).toHaveAttribute('data-clip-transition', 'started')
+    .poll(() =>
+      menu.evaluate((element) =>
+        Math.max(...(getComputedStyle(element).clipPath.match(/[\d.]+/g) ?? []).map(Number))
+      )
+    )
+    .toBe(0)
   await menu.evaluate((element) => {
     ;(element as HTMLElement).dataset.instance = 'original'
+    // Freeze both the clip and Radix Presence animation partway through the exit.
+    // Driver round trips on a busy CI runner must not consume the 160 ms reversal window.
+    let frame = 0
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame)
+      if (element.getAttribute('data-state') !== 'closed') return
+      frame = requestAnimationFrame(() => {
+        if (element.getAttribute('data-state') !== 'closed') return
+        for (const animation of element.getAnimations()) {
+          animation.pause()
+          animation.currentTime = 40
+        }
+      })
+    })
+    observer.observe(element, { attributes: true, attributeFilter: ['data-state'] })
+    element.addEventListener(
+      'stop-freezing-exit',
+      () => {
+        observer.disconnect()
+        cancelAnimationFrame(frame)
+        for (const animation of element.getAnimations()) {
+          if (animation.playState === 'paused') animation.play()
+        }
+      },
+      { once: true }
+    )
   })
   await page.keyboard.press('Escape')
-  expect(await menu.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe(
-    '0.16s, 0.16s'
-  )
+  await expect
+    .poll(() =>
+      menu.evaluate(
+        (element) =>
+          element
+            .getAnimations()
+            .find(
+              (animation) =>
+                animation.effect instanceof KeyframeEffect &&
+                animation.effect.getKeyframes().some((frame) => 'clipPath' in frame) &&
+                animation.playState === 'paused'
+            )
+            ?.effect?.getTiming().duration
+      )
+    )
+    .toBe(160)
   expect(
     await trigger.locator('svg').evaluate((element) => getComputedStyle(element).transitionDuration)
   ).toBe('0.16s')
-  // Reverse during the 160 ms exit, before Radix Presence removes the node.
-  await page.waitForTimeout(40)
+  // Reopen through the real trigger while the original node is still exiting.
   const before = await menu.evaluate((element) => getComputedStyle(element).clipPath)
   expect(before).not.toBe('inset(0%)')
   await trigger.click()
@@ -424,14 +470,18 @@ test('skip menu reverses its edge animation smoothly and keeps the arrow in sync
   expect(clip(after)).toBeLessThan(100)
   expect(Math.abs(clip(after) - clip(before))).toBeLessThan(35)
   await expect
-    .poll(() => menu.evaluate((element) => getComputedStyle(element).clipPath))
-    .toBe('inset(0%)')
+    .poll(() =>
+      menu.evaluate((element) =>
+        Math.max(...(getComputedStyle(element).clipPath.match(/[\d.]+/g) ?? []).map(Number))
+      )
+    )
+    .toBe(0)
   await page.keyboard.press('Escape')
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('menuitem', { name: 'Skip all' })).toBeFocused()
   await expect(menu).toHaveAttribute('data-instance', 'original')
+  await menu.dispatchEvent('stop-freezing-exit')
   await page.getByRole('heading', { name: 'Which outputs?' }).click()
-  await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(menu).toHaveCount(0)
 })
 
@@ -446,7 +496,11 @@ test('skip control honors reduced motion without delaying Escape focus return', 
   await expect(page.getByRole('menuitem', { name: 'Skip all' })).toBeFocused()
   expect(await menu.evaluate((element) => element.getAnimations().length)).toBe(0)
   expect(await trigger.locator('svg').evaluate((element) => element.getAnimations().length)).toBe(0)
-  await expect(menu).toHaveCSS('clip-path', 'inset(0%)')
+  expect(
+    await menu.evaluate((element) =>
+      Math.max(...(getComputedStyle(element).clipPath.match(/[\d.]+/g) ?? []).map(Number))
+    )
+  ).toBe(0)
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(trigger).toBeFocused()

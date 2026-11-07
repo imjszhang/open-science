@@ -1,7 +1,8 @@
-import { applyCachedPdfTableSources } from './table-source.js'
+import { applyCachedPdfTableSources, isCurrentPdfTableSources } from './table-source.js'
 import { applyCachedPdfFigureSources } from './figure-source.js'
 import { createPdfTranslationSource } from './source.js'
 import { structureRegionContains } from './structure-regions.js'
+import { carryNativeCaptionEligibility } from './caption-eligibility.js'
 import type { PdfTranslationExtraction } from './extraction.js'
 
 /** Prepare cached structure, or project safe crops onto an existing translation snapshot. */
@@ -24,7 +25,8 @@ export async function applyCachedPdfStructureSources(
   args.signal.throwIfAborted()
   if (
     original.source.fingerprint !== args.document.fingerprints[0] ||
-    original.source.pages.length !== args.document.numPages
+    original.source.pages.length !== args.document.numPages ||
+    !isCurrentPdfTableSources(tables)
   )
     return { extraction: original, retainedUnitIds: [] }
   // Preparation keeps cell replacements, whole-region retention and their diagnostics.
@@ -65,13 +67,16 @@ export async function applyCachedPdfStructureSources(
     retainedUnitIds: Object.freeze(retainedUnitIds),
     extraction: Object.freeze({
       ...original,
-      source: createPdfTranslationSource({
-        ...original.source,
-        originalRegions: [...originalRegions, ...additionalRegions],
-        units: original.source.units.map((unit) =>
-          retained.has(unit.id) ? { ...unit, sourceOnly: true as const } : unit
-        )
-      })
+      source: carryNativeCaptionEligibility(
+        original.source,
+        createPdfTranslationSource({
+          ...original.source,
+          originalRegions: [...originalRegions, ...additionalRegions],
+          units: original.source.units.map((unit) =>
+            retained.has(unit.id) ? { ...unit, sourceOnly: true as const } : unit
+          )
+        })
+      )
     })
   }
 }

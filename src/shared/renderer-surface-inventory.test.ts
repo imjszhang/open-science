@@ -50,6 +50,13 @@ const INSTALLED_BUT_NOT_DELIVERED_EVENTS = {} as const satisfies Record<
 // These functions exist on the real Electron preload API but the current AST generator does not
 // recognize their implementation shape or channel constants. T1b must make each omission explicit.
 const GENERATED_SOURCE_OMISSIONS = [
+  'previewResources.cancelResearchVideoExport',
+  'previewResources.exportResearchVideo',
+  'previewResources.researchVideoExportProgress',
+  'researchVideo.cancel',
+  'researchVideo.remove',
+  'researchVideo.start',
+  'researchVideo.status',
   'backgroundResultDelivery.getProjectActivity',
   'backgroundResultDelivery.getSessionActivity',
   'backgroundResultDelivery.onChanged',
@@ -145,7 +152,11 @@ const GENERATED_SOURCE_OMISSIONS = [
   'projectRecordings.stop',
   'remoteAccess.detect',
   'remoteAccess.disable',
+  'remoteAccess.refreshOffer',
+  'remoteAccess.selectLanAddress',
   'remoteAccess.setMode',
+  'remoteAccess.setPinggyRegion',
+  'remoteAccess.setPinggyToken',
   'researchDemos.carriers',
   'researchDemos.get',
   'researchDemos.inspect',
@@ -161,6 +172,10 @@ const GENERATED_SOURCE_OMISSIONS = [
   'researchExecutionProfiles.resolve',
   'researchExecutionProfiles.save',
   'researchRuns.inspect',
+  'resourceRecording.getState',
+  'resourceRecording.onChanged',
+  'resourceRecording.start',
+  'resourceRecording.stop',
   'sessions.sendFlushResponse',
   'settings.exportCustomServerTemplate',
   'settings.exportSkill',
@@ -221,6 +236,7 @@ const GENERATED_SOURCE_OMISSIONS = [
   'window.onInterfaceScaleShortcut',
   'window.onShowWindowFind',
   'window.onWindowFindAppearance',
+  'window.openConnectMobile',
   'window.sendCloseConfirmResponse',
   'window.setZoomFactor',
   'window.showTitleBarMenu',
@@ -255,7 +271,7 @@ const WEB_UNAVAILABLE_CHANNELS = [
 
 const REMOTE_LOCAL_ONLY_CHANNELS: GroupedInventory = {
   'pdf-structure': ['read-cached', 'parse', 'cancel', 'read-thumbnail', 'clear-cache'],
-  'local-models': ['get-snapshot', 'install', 'cancel', 'remove'],
+  'local-models': ['get-snapshot', 'install', 'cancel', 'remove', 'set-ocr-languages'],
   artifacts: ['open-file'],
   cli: ['install', 'uninstall'],
   compute: [
@@ -283,7 +299,13 @@ const REMOTE_LOCAL_ONLY_CHANNELS: GroupedInventory = {
   'notebook-env': ['cancel', 'provision', 'repair'],
   notebook: ['export-ipynb', 'export-ipynb-all'],
   'remote-access': ['probe'],
-  sessions: ['export-package', 'import-package', 'package-operation', 'use-case-catalog'],
+  sessions: [
+    'export-package',
+    'import-package',
+    'package-operation',
+    'use-case-catalog',
+    'use-case-introduction'
+  ],
   runtime: [
     'pick-interpreter',
     'register-interpreter',
@@ -321,6 +343,7 @@ const REMOTE_LOCAL_ONLY_CHANNELS: GroupedInventory = {
     'install-notebook-network',
     'cancel-notebook-network-setup',
     'install-opencode',
+    'install-pi',
     'install-recommended-wsl-distro',
     'install-wsl-platform',
     'list-device-credentials',
@@ -362,6 +385,7 @@ const REMOTE_LOCAL_ONLY_CHANNELS: GroupedInventory = {
     'uninstall-codebuddy',
     'uninstall-codex',
     'uninstall-opencode',
+    'uninstall-pi',
     'update-classification',
     'update-custom-server',
     'update-device-credential',

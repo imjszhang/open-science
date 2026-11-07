@@ -47,6 +47,7 @@
     "src/main/delegation/opencode-runtime-preparation.integration.test.ts",
     "src/main/delegation/opencode-runtime-preparation.test.ts",
     "src/main/delegation/opencode-runtime-preparation.ts",
+    "src/main/delegation/pi-execution.ts",
     "src/main/delegation/production-composition.test.ts",
     "src/main/delegation/production-composition.ts",
     "src/main/delegation/production-framework-runtime.test.ts",
@@ -636,5 +637,5 @@
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],
   "fallbackCapability": "main_runtime",
-  "fullTestReason": "The main_delegation owner retains 38 explicit research consumer obligations beyond its reviewed source-derived edges, including managed-auxiliary-output.test.ts, managed-execution-collection.integration.test.ts, managed-execution-output.test.ts. 33 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes."
+  "fullTestReason": "The main_delegation owner retains 38 explicit research consumer obligations beyond its reviewed source-derived edges, including managed-auxiliary-output.test.ts, managed-execution-collection.integration.test.ts, managed-execution-output.test.ts. 33 consumer cones have opaque runtime access, so their process, IPC, filesystem or renderer effects cannot be proven independent. Retain full main_runtime validation until these research consumer boundaries are reviewed; preserve all existing contracts and platform lanes. Pi execution joins the delegated-work surface as a new owner beyond the reviewed delegation boundary; retain full CI validation until the expanded boundary is reviewed and reclassified."
 }

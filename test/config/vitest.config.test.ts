@@ -183,6 +183,7 @@ it.each([
                   'packages/durable-files',
                   'packages/compute',
                   'packages/providers',
+                  'packages/research-film',
                   ...literaturePackages.map((name) => `packages/${name}`)
                 ]
               : []
@@ -214,11 +215,13 @@ it.each([
         })),
         ...(hostOnly
           ? []
-          : ['resilient-download', 'durable-files', 'compute', 'providers'].map((name) => ({
-              name,
-              hookTimeout: 10000,
-              testTimeout: 60000
-            }))),
+          : ['resilient-download', 'durable-files', 'compute', 'providers', 'research-film'].map(
+              (name) => ({
+                name,
+                hookTimeout: 10000,
+                testTimeout: 60000
+              })
+            )),
         ...(hostOnly
           ? []
           : literaturePackages.map((name) => ({
@@ -310,6 +313,7 @@ it('serializes migration and Session package round trips after other schema-usin
   expect(VITEST_DATABASE_TEST_GLOBS).toEqual([
     'scripts/database-migration-ledger-smoke.test.ts',
     'src/main/database/migration-service.test.ts',
+    'src/main/database/literature-doi-identity-migration.test.ts',
     'src/main/storage/provenance-migration-validation.test.ts',
     'src/main/session-package/service.test.ts',
     'src/main/session-package/literature.test.ts',

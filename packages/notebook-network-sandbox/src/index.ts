@@ -181,6 +181,14 @@ class NotebookNetworkSandbox {
         try {
           const allowed = await command.onNetworkAccessRequest({
             host: request.host,
+            ...(request.protocol ? { protocol: request.protocol } : {}),
+            ...(request.addresses
+              ? {
+                  addresses: request.addresses,
+                  reason: request.reason,
+                  policyAllowed: request.policyAllowed
+                }
+              : {}),
             purpose: request.purpose,
             ...(request.canResume ? { canResume: request.canResume } : {}),
             ...(request.port === undefined ? {} : { port: request.port }),
@@ -548,6 +556,7 @@ export {
   validateLocalService,
   validateLocalServiceLocation
 } from '../runtime/src/platform/local-service.js'
+export { mapWsl2Path } from '../runtime/src/platform/wsl2-isolation.js'
 // Shared transport accepts an already validated numeric destination, preserving DNS pinning.
 export {
   tunnelThroughProxy,
@@ -573,4 +582,9 @@ export type {
   NotebookTrustBundle
 } from './types.js'
 
-export { reviewPrivateDestination } from '../runtime/src/gateway/address-policy.js'
+export {
+  formatNetworkHostname,
+  normalizeRequestedHost,
+  reviewPrivateDestination,
+  validPrivateDestination
+} from '../runtime/src/gateway/address-policy.js'
