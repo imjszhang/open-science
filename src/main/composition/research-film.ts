@@ -197,10 +197,24 @@ export async function composeResearchFilm({
         throw new Error(
           'Set up the selected agent runtime in Settings before generating a research film.'
         )
-      if (!readiness.activeProviderReady)
+      const providerReadiness = readiness.providerReadiness
+      if (providerReadiness.status === 'missing')
+        throw new Error('Select a model in Settings before generating a research film.')
+      // The onboarding gate also requires a matching historical validation record. Generation
+      // only blocks known unavailability; the inference runtime owns the actual provider route.
+      if (providerReadiness.status === 'not_ready' && providerReadiness.reason) {
+        if (providerReadiness.reason === 'credential_invalid')
+          throw new Error(
+            'The selected provider credentials are unavailable. Check them in Settings.'
+          )
+        if (providerReadiness.reason === 'model-not-found')
+          throw new Error('The selected model is unavailable. Select another model in Settings.')
+        if (providerReadiness.reason === 'incompatible')
+          throw new Error("This provider isn't compatible with the active agent framework.")
         throw new Error(
           'Check the selected model and credentials in Settings before generating a research film.'
         )
+      }
       const snapshot = await settingsService.getSettingsView()
       const provider = snapshot.providers.find((entry) => entry.id === snapshot.activeProviderId)
       if (!provider) throw new Error('The selected research film provider is unavailable.')
@@ -218,7 +232,13 @@ export async function composeResearchFilm({
           'The selected model input limit cannot fit the research film instructions. Select a model with a larger input limit.'
         )
     },
-    loadSession: (projectId, sessionId) => sessionRepository.loadSession(projectId, sessionId),
+    loadSession: async (projectId, sessionId) => {
+      // Status probes must leave damaged authority available for diagnostics and recovery.
+      const result = await sessionRepository.loadSessionWithDiagnostics(projectId, sessionId, {
+        mode: 'read-only'
+      })
+      return result.status === 'found' ? result.session : undefined
+    },
     generate: researchVideoGenerate,
     engineDirectory: researchVideoEngineDirectory,
     ...createResearchFilmAuthor(inferResearchVideo)

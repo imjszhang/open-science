@@ -510,7 +510,13 @@ async function startDesktop(): Promise<void> {
     process.platform === 'win32' ? { light: trayLightWindows, dark: trayDarkWindows } : undefined
 
   startupDiagnostics?.phase('load-native-shell')
-  const { createMainWindow, configureMainWindow, isMainWindow } = await import('./windows')
+  const {
+    createMainWindow,
+    configureMainWindow,
+    isMainWindow,
+    isConnectMobileWindow,
+    openConnectMobileWindow
+  } = await import('./windows')
   const { applyInterfaceScaleShortcut, installWindowShortcuts } = await import('./window-shortcuts')
   const { registerWindowZoomIpcHandler, registerWindowCloseIpcHandler } =
     await import('./window-ipc')
@@ -531,7 +537,15 @@ async function startDesktop(): Promise<void> {
     notifyRendererSessionPersistenceFlushAborted,
     rendererSessionPersistenceFlushBlocksShutdown
   } = await import('./session-persistence/renderer-flush')
-  const { installSystemLifecycleAdapters } = await import('./system-lifecycle-adapters')
+  const { installSystemLifecycleAdapters, installResourceActivityRelay } =
+    await import('./system-lifecycle-adapters')
+  const resourceActivityRelay = installResourceActivityRelay({
+    app,
+    powerMonitor,
+    hasFocusedWindow: () => BrowserWindow.getAllWindows().some((window) => window.isFocused()),
+    send: (state) => client?.resourceActivity?.(state)
+  })
+  app.once('will-quit', () => resourceActivityRelay.dispose())
   if (process.platform === 'darwin')
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -556,6 +570,7 @@ async function startDesktop(): Promise<void> {
   registerWindowsTitleBarIpc({ isMainWindow })
   registerWindowCloseIpcHandler()
   registerWindowFindIpcHandlers()
+  ipcMainHandle('window:open-connect-mobile', () => openConnectMobileWindow())
   startupDiagnostics?.phase('native-shell-configured')
   let requestSystemShutdown = (): void => app.quit()
   const system = installSystemLifecycleAdapters({
@@ -571,6 +586,10 @@ async function startDesktop(): Promise<void> {
   const isApplicationWindow = (sender: WebContents): boolean => {
     const window = BrowserWindow.fromWebContents(sender)
     return Boolean(window && isMainWindow(window))
+  }
+  const isApplicationCommandWindow = (sender: WebContents): boolean => {
+    const window = BrowserWindow.fromWebContents(sender)
+    return Boolean(window && (isMainWindow(window) || isConnectMobileWindow(window)))
   }
   let getMainWindow = (): BrowserWindow | undefined => undefined
   let isMainWindowHidden = (): boolean => false
@@ -732,7 +751,7 @@ async function startDesktop(): Promise<void> {
         },
         release: (id) => attached.release(id)
       },
-      isApplicationWindow
+      isApplicationCommandWindow
     )
   }
   const publishStartup = (next: DatabaseStartupState): void => {
@@ -1142,6 +1161,7 @@ async function startDesktop(): Promise<void> {
           recovery?.disconnect(attached)
       }
     })
+    attached.resourceActivity?.(resourceActivityRelay.state())
     return attached
   }
   let repairAuthorization: Awaited<ReturnType<typeof readServiceLifetime>>

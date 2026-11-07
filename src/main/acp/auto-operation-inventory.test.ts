@@ -163,17 +163,20 @@ describe('Auto operation completeness against real tool registrations', () => {
         // Strict inputs, allow-once disposition and owner-checked source access are unchanged.
         'artifacts/mcp-server.ts':
           'f44800f59957041e1004ce93a039e47a3c491f958fe429ef5b3fa49ae472b2f0',
+        // Reviewed: Inbox input descriptions and file-validation errors explain correction/retry.
+        // Accepted inputs, pre-save validation, trusted origin and allow-once disposition are unchanged.
         'literature/library-mcp-server.ts':
-          'f6eddd996e4651c56586435e7c0845a437dd7d3b8c18dfe0ff634eb0e8bbefd6',
+          'b50bd708d22d75792dc680915d1b78ea7f8a61b005289497969e21bc62d2b4f8',
         // Reviewed: linked-PDF reading order is resolved automatically from logical structure
         // or layout, with OCR guidance and coverage presentation. Strict inputs, mounted-server checks and
         // single-use authorization are unchanged.
         'literature/mcp-server.ts':
           '7d285b27718e63d53e028b873f6391da842f44acb118fd2c10b80963be5a71eb',
-        // Reviewed: foreground Shell nonzero exits now set the MCP error flag after execution.
-        // Input schemas, RPC dispatch, authorization and Auto operation dispositions are unchanged.
+        // Reviewed: the runtime descriptions explain default selection, and failed foreground
+        // Shell executions set the MCP error flag. Network recovery requires a trusted block record;
+        // it cannot add trust settings or replay code. Auto dispositions are unchanged.
         'notebook/mcp-server.ts':
-          '1743f9b94d61ae3905f80bfadfca9e49f4e003323d2a915cfc372ca85cd79998',
+          '71e92e3d69280a0a725023e7093eb152377cee3343a11bdd15f03b044229f22d',
         // Reviewed: generate_plan sends progress notifications while awaiting review; the handler
         // call, its result and the Plan operation dispositions are unchanged.
         'session-plan/plan-mcp-server.ts':
@@ -185,7 +188,7 @@ describe('Auto operation completeness against real tool registrations', () => {
         ask_user_question: 'eaf58cc178cc28d01fd208393f67dc394f374b4dd80f822158942db8a3c48afb',
         background_run: '4198921bb3f61261431524f7e57c92d8713bfe5db49c360a30b66b3cc4e027fd',
         manage_environments: '15d33c6e75c14aaddad62bc062f714238ae7c87ab08976d77efd1f77e8641675',
-        request_network_access: '6b5a49d73cc704691da193510764101bc5577b48bb7c0fa8bf99f1b29b500f95'
+        request_network_access: '019beadbad4627d5ad4dc2c1bfbf5cc3f777ecf5382df20291952cadbba3eeaf'
       },
       sharedContracts: {
         activityDeclaration: '1739b6cfadd2912aa53f4d11bf69d908da37d5f822476a998b928e9de7ddffdc',
