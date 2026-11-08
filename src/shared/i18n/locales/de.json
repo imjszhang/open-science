@@ -1259,7 +1259,6 @@
     "Could not submit this approval. Try again.": "Diese Freigabe konnte nicht übermittelt werden. Versuchen Sie es erneut.",
     "Could not stop background processes before updating. Please try again.": "Hintergrundprozesse konnten vor der Aktualisierung nicht gestoppt werden. Bitte versuchen Sie es erneut.",
     "Could not switch to this folder.": "Zu diesem Ordner konnte nicht gewechselt werden.",
-    "Could not switch to {{name}}": "Konnte nicht zu {{name}} wechseln",
     "Could not test the provider connection.": "Die Verbindung zum Anbieter konnte nicht getestet werden.",
     "Could not delete the provider.": "Der Anbieter konnte nicht gelöscht werden.",
     "Could not refresh models from the vendor.": "Die Modelle des Anbieters konnten nicht aktualisiert werden.",
@@ -8051,6 +8050,16 @@
     "Configure unsafe network exceptions in the local desktop app.": "Konfigurieren Sie Ausnahmen für unsichere Netzwerke in der lokalen Desktop-App.",
     "No trusted unsafe networks.": "Keine vertrauenswürdigen unsicheren Netzwerke.",
     "Review unsafe network access": "Unsicheren Netzwerkzugriff prüfen",
-    "Add network exception": "Netzwerkausnahme hinzufügen"
+    "Add network exception": "Netzwerkausnahme hinzufügen",
+    "Built-in experimental agent. Uses your API account and managed tools.": "Integrierter experimenteller Agent. Verwendet Ihr API-Konto und verwaltete Tools.",
+    "Check the interrupted tool result": "Ergebnis des unterbrochenen Tool-Aufrufs prüfen",
+    "The tool may have changed files or an external service. Check its actual result before continuing. Export diagnostics to identify the call, then start a new conversation with the verified state. This conversation will not repeat the uncertain operation.": "Das Tool hat möglicherweise Dateien oder einen externen Dienst geändert. Prüfen Sie das tatsächliche Ergebnis, bevor Sie fortfahren. Exportieren Sie die Diagnosedaten, um den Aufruf zu identifizieren, und beginnen Sie dann eine neue Konversation mit dem bestätigten Stand. Diese Konversation wiederholt den Vorgang mit ungewissem Ergebnis nicht.",
+    "Read tool result": "Toolergebnis lesen",
+    "Shutdown notebook": "Notebook herunterfahren",
+    "Notebook shut down.": "Notebook wurde heruntergefahren.",
+    "Inspect packages": "Pakete prüfen",
+    "Captured at": "Erfasst am",
+    "Manage environments": "Umgebungen verwalten",
+    "Action": "Aktion"
   }
 }

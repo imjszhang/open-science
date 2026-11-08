@@ -1373,7 +1373,6 @@
     "Secure storage is unavailable. This job's command, paths, and output may be stored without encryption.": "安全存储不可用。此作业的命令、路径和输出可能会以未加密形式保存。",
     "Could not stop background processes before updating. Please try again.": "更新前无法停止后台进程。请重试。",
     "Could not switch to this folder.": "无法切换到该文件夹。",
-    "Could not switch to {{name}}": "无法切换到 {{name}}",
     "Could not test the provider connection.": "无法测试模型服务商连接。",
     "Could not delete the provider.": "无法删除模型服务商。",
     "Could not refresh models from the vendor.": "无法刷新模型服务商的模型。",
@@ -7885,6 +7884,16 @@
     "Configure unsafe network exceptions in the local desktop app.": "请在本地桌面应用中配置不安全网络例外。",
     "No trusted unsafe networks.": "暂无受信任的不安全网络。",
     "Review unsafe network access": "审核不安全网络访问",
-    "Add network exception": "添加网络例外"
+    "Add network exception": "添加网络例外",
+    "Built-in experimental agent. Uses your API account and managed tools.": "内置实验性智能体。使用您的 API 账户和受管工具。",
+    "Check the interrupted tool result": "核对中断的工具调用结果",
+    "The tool may have changed files or an external service. Check its actual result before continuing. Export diagnostics to identify the call, then start a new conversation with the verified state. This conversation will not repeat the uncertain operation.": "工具可能已更改文件或外部服务。请先核对实际结果。导出诊断信息以确定具体调用，然后在新会话中说明已核实的状态。本会话不会重复执行结果不确定的操作。",
+    "Read tool result": "读取工具结果",
+    "Shutdown notebook": "关闭 Notebook",
+    "Notebook shut down.": "Notebook 已关闭。",
+    "Inspect packages": "检查软件包",
+    "Captured at": "采集时间",
+    "Manage environments": "管理运行环境",
+    "Action": "操作"
   }
 }
