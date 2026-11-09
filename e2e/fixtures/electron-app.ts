@@ -408,12 +408,16 @@ type ElectronApp = {
   restoreDelegatedHandoffCleanup: (childName: string) => Promise<void>
   emitPreviewContextMenuAtCssPoint: (point: { x: number; y: number }) => Promise<void>
   showMainWindow: () => Promise<void>
-  restart: (options?: { resourceProfilePhase?: string }) => Promise<Page>
+  restart: (options?: {
+    resourceProfilePhase?: string
+    gracefulTimeoutMs?: number
+  }) => Promise<Page>
   restartAfterCrash: (options?: { force?: boolean }) => Promise<Page>
   restartWithCorruptHistoricalSessionFile: (projectId: string) => Promise<Page>
   restartWithSessionFixture: (
     session: PersistedChatSession,
-    notebookRuns?: NotebookRunRecord[]
+    notebookRuns?: NotebookRunRecord[],
+    ...additionalSessions: PersistedChatSession[]
   ) => Promise<Page>
   sabotageDelegatedHandoffCleanup: (childName: string) => Promise<void>
   recordResourceTiming: (name: string, durationMs: number) => void
@@ -1822,8 +1826,10 @@ class ElectronAppHarness implements ElectronApp {
     return this.page
   }
 
-  async restart(options: { resourceProfilePhase?: string } = {}): Promise<Page> {
-    await this.close()
+  async restart(
+    options: { resourceProfilePhase?: string; gracefulTimeoutMs?: number } = {}
+  ): Promise<Page> {
+    await this.closeForCleanup(true, options.gracefulTimeoutMs)
     if (options.resourceProfilePhase) {
       if (!this.resourceProfiler) throw new Error('Runtime resource profiling is not active.')
       this.resourceProfiler.markPhase(options.resourceProfilePhase)
@@ -1876,21 +1882,27 @@ class ElectronAppHarness implements ElectronApp {
 
   async restartWithSessionFixture(
     session: PersistedChatSession,
-    notebookRuns: NotebookRunRecord[] = []
+    notebookRuns: NotebookRunRecord[] = [],
+    ...additionalSessions: PersistedChatSession[]
   ): Promise<Page> {
-    if (![session.projectId, session.id].every((id) => /^[a-zA-Z0-9_-]+$/.test(id))) {
-      throw new Error('Invalid E2E Session fixture identity.')
+    const sessions = [session, ...additionalSessions]
+    for (const fixture of sessions) {
+      if (![fixture.projectId, fixture.id].every((id) => /^[a-zA-Z0-9_-]+$/.test(id))) {
+        throw new Error('Invalid E2E Session fixture identity.')
+      }
     }
     const dataRoot = notebookRuns.length
       ? await this.page.evaluate(async () => (await window.api.storage.getInfo()).dataRoot)
       : undefined
     await this.close()
-    const directory = join(this.roots.storageRoot, 'sessions', session.projectId)
-    await mkdir(directory, { recursive: true })
-    await writeFile(
-      join(directory, `${session.id}.json`),
-      JSON.stringify(createSessionFile(session))
-    )
+    for (const fixture of sessions) {
+      const directory = join(this.roots.storageRoot, 'sessions', fixture.projectId)
+      await mkdir(directory, { recursive: true })
+      await writeFile(
+        join(directory, `${fixture.id}.json`),
+        JSON.stringify(createSessionFile(fixture))
+      )
+    }
     if (dataRoot && notebookRuns.length) {
       if (session.packageOrigin)
         await mkdir(
@@ -2114,7 +2126,10 @@ class ElectronAppHarness implements ElectronApp {
     await this.closeForCleanup(true)
   }
 
-  private async closeForCleanup(requireGraceful = false): Promise<void> {
+  private async closeForCleanup(
+    requireGraceful = false,
+    gracefulTimeoutMs = CLEANUP_GRACEFUL_TIMEOUT_MS
+  ): Promise<void> {
     if (!this.application) return
 
     const application = this.application
@@ -2151,7 +2166,13 @@ class ElectronAppHarness implements ElectronApp {
                       throw error
                     windowId = await readWindowId()
                   }
-                  await installRestartPersistenceRetry(application, windowId, 5_000)
+                  await installRestartPersistenceRetry(
+                    application,
+                    windowId,
+                    gracefulTimeoutMs === CLEANUP_GRACEFUL_TIMEOUT_MS
+                      ? 5_000
+                      : gracefulTimeoutMs / 2
+                  )
                 }
                 await application.close()
               },
@@ -2162,7 +2183,7 @@ class ElectronAppHarness implements ElectronApp {
               }
             },
             {
-              gracefulTimeoutMs: CLEANUP_GRACEFUL_TIMEOUT_MS,
+              gracefulTimeoutMs,
               forcedTimeoutMs: CLEANUP_FORCED_TIMEOUT_MS,
               requireGraceful
             }

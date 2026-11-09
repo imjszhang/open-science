@@ -1,4 +1,5 @@
 import { createLogger } from '@aipoch/diagnostics/node'
+import type { analyzeNotebookSourceFileAccess } from '@aipoch/notebook-analysis'
 import { observeResourceProcess, recordResourceEvent } from '../resource-diagnostics/recorder'
 import { resourceActivity } from '../resource-diagnostics/activity'
 import { resolveExternalRLibrary } from '@aipoch/environment'
@@ -272,6 +273,8 @@ export type NotebookKernelExecutorOptions = {
   // Process-ownership boundary injections keep post-exit identity/reaping tests deterministic.
   registerOwnedProcessGroup?: typeof trackOwnedPosixProcessTree
   terminateTree?: typeof terminateProcessTree
+  // Lets the application move large source file-access analysis off the main event loop.
+  analyzeSourceFileAccess?: typeof analyzeNotebookSourceFileAccess
 }
 
 // One in-flight request awaiting a matching loop response line.
@@ -574,6 +577,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
   private readonly registerOwnedProcessGroup: typeof trackOwnedPosixProcessTree
   private readonly canTrackPosixProcesses: boolean
   private readonly terminateTree: typeof terminateProcessTree
+  private readonly analyzeSourceFileAccess?: typeof analyzeNotebookSourceFileAccess
 
   constructor(options: NotebookKernelExecutorOptions = {}) {
     this.pythonLoopPath = options.pythonLoopPath ?? defaultPythonLoopPath()
@@ -592,6 +596,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
     this.processSandbox = options.processSandbox
     this.processLifecycle = options.processLifecycle
     this.laneKey = options.laneKey
+    this.analyzeSourceFileAccess = options.analyzeSourceFileAccess
     this.registerOwnedProcessGroup = options.registerOwnedProcessGroup ?? trackOwnedPosixProcessTree
     this.canTrackPosixProcesses =
       process.platform !== 'win32' || options.registerOwnedProcessGroup !== undefined
@@ -672,20 +677,23 @@ class NotebookKernelExecutor implements NotebookExecutor {
         }
       }
       const replBindings = kind === 'repl' ? await prepareReplCellBindings(request.code) : undefined
-      workingFileObservation = await startWorkingFileObservation({
-        ...request,
-        ...(kind === 'repl'
-          ? {
-              sourceFileAccessContext: {
-                staticStrings: [],
-                staticCollections: [],
-                localFileWrappers: [],
-                ...request.sourceFileAccessContext,
-                replPersistentBindings: true
+      workingFileObservation = await startWorkingFileObservation(
+        {
+          ...request,
+          ...(kind === 'repl'
+            ? {
+                sourceFileAccessContext: {
+                  staticStrings: [],
+                  staticCollections: [],
+                  localFileWrappers: [],
+                  ...request.sourceFileAccessContext,
+                  replPersistentBindings: true
+                }
               }
-            }
-          : {})
-      })
+            : {})
+        },
+        { analyzeSourceFileAccess: this.analyzeSourceFileAccess }
+      )
       // sendRequest installs proc.pending synchronously. Revalidate immediately before that handoff:
       // an involuntary drop while ensureProc was finishing must settle this execute() locally rather
       // than dispatching to a stale child whose guarded exit handler can no longer reject the run.
@@ -1142,7 +1150,12 @@ class NotebookKernelExecutor implements NotebookExecutor {
       loopPath = this.replLoopPath
       // Node otherwise realpaths the main module before loading it. A Windows AppContainer can read
       // the explicitly granted script but cannot enumerate its drive root or unrelated ancestors.
-      args = [...(this.platform === 'win32' ? ['--preserve-symlinks-main'] : []), loopPath]
+      // The sandbox opts into env proxies; keep that runtime advisory out of cell output.
+      args = [
+        '--disable-warning=UNDICI-EHPA',
+        ...(this.platform === 'win32' ? ['--preserve-symlinks-main'] : []),
+        loopPath
+      ]
     } else {
       // Data kernel (python/r). The loop SCRIPT is chosen by kind; the INTERPRETER is either resolved
       // by the Runtime Registry (a managed env bin, or an external/overlay interpreter for BYO) or,
@@ -1425,14 +1438,17 @@ class NotebookKernelExecutor implements NotebookExecutor {
           processKey: kind === 'repl' ? 'repl' : `${kind}:${env}`,
           kernelEpochId
         },
-        ownerToken
+        ownerToken,
+        sandboxed?.processTreeProof
       )
     }
     const kernelExecutable = sandboxed?.executable ?? invocation.executable
     const kernelArgs = sandboxed?.args ?? invocation.args
     const spawnExecutable = ownershipIntent ? process.execPath : kernelExecutable
+    // This Node host inherits the proxy opt-in even for Python/R, and shares the cell's stderr.
     const spawnArgs = ownershipIntent
       ? [
+          '--disable-warning=UNDICI-EHPA',
           this.processHostPath,
           ownershipIntent.path,
           ownershipIntent.record.receiptId,

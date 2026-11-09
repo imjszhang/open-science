@@ -1,5 +1,6 @@
 import { parsePdfStructureResult, type PdfStructureResult } from '@aipoch/pdf-structure/result'
-import { OPS, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
+import { OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import type { PdfTranslationExtraction } from './extraction.js'
 import { isPdfTranslationCaption } from './layout.js'
 import { createPdfTranslationSource, type PdfTranslationFragment } from './source.js'
@@ -532,9 +533,12 @@ export async function applyCachedPdfFigureSources({
         if (!graphicAnchors.has(pageNumber)) {
           current()
           const page = await document.getPage(pageNumber)
-          const { images, vectors } = await graphicRegions(page, OPS, signal)
-          graphicAnchors.set(pageNumber, [...images, ...vectors])
-          page.cleanup()
+          try {
+            const { images, vectors } = await graphicRegions(page, OPS, signal)
+            graphicAnchors.set(pageNumber, [...images, ...vectors])
+          } finally {
+            page.cleanup()
+          }
           current()
         }
         const anchors = graphicAnchors.get(pageNumber) ?? []
