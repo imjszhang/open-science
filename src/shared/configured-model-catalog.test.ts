@@ -31,6 +31,34 @@ const provider = (
 })
 
 describe('configured model catalog', () => {
+  it('uses native recovery evidence only for its tested framework in model selectors', () => {
+    const recovered = provider('gateway', ['model'], {
+      apiEndpoints: ['messages'],
+      lastValidationFailure: {
+        at: 10,
+        category: 'model-not-found',
+        target: { model: 'model', endpoint: 'messages' }
+      },
+      lastValidatedAt: 20,
+      lastValidatedTarget: {
+        model: 'model',
+        endpoint: 'messages',
+        frameworkId: 'claude-code',
+        route: 'claude-anthropic'
+      }
+    })
+    const catalog = (
+      frameworkId: 'claude-code' | 'opencode'
+    ): ReturnType<typeof buildConfiguredModelCatalog> =>
+      buildConfiguredModelCatalog({
+        providers: [recovered],
+        frameworkId,
+        frameworkEndpoints: ['messages']
+      })
+    expect(catalog('claude-code')).toMatchObject([{ model: 'model', selectable: true }])
+    expect(catalog('opencode')).toEqual([])
+  })
+
   it.each([
     { type: 'codex-shared', codexAuthMode: undefined },
     { type: 'codex-isolated', codexAuthMode: 'imported' },
@@ -144,7 +172,7 @@ describe('configured model catalog', () => {
         })
       ],
       frameworkId: 'opencode',
-      frameworkEndpoints: ['messages', 'chat-completions']
+      frameworkEndpoints: ['chat-completions', 'messages']
     })
 
     expect(
@@ -162,7 +190,7 @@ describe('configured model catalog', () => {
 
   it.each([
     { frameworkId: 'claude-code', frameworkEndpoints: ['messages'] },
-    { frameworkId: 'opencode', frameworkEndpoints: ['messages', 'chat-completions'] },
+    { frameworkId: 'opencode', frameworkEndpoints: ['chat-completions', 'messages'] },
     { frameworkId: 'codex', frameworkEndpoints: ['responses'] }
   ] as const)('offers the new Ark vision models to $frameworkId', (framework) => {
     const models = [

@@ -34,6 +34,7 @@ import {
   isCodexSubscriptionProvider,
   isProviderUsableByFramework,
   isXaiSubscriptionProvider,
+  DEFAULT_ENDPOINT_ORDER,
   preferredEndpoint,
   providerEndpoints,
   requiresChatCompletionsBridge,
@@ -91,6 +92,10 @@ type ProviderAccountsModuleOptions = {
   ) => Promise<string>
   resolveCodexProxyEnvironment: () => Promise<SystemProxyEnvironment | undefined>
   runClaudeSubscriptionProbe: (
+    provider: ResolvedProvider,
+    settings: StoredSettings
+  ) => Promise<ValidateProviderResult>
+  runAcpValidation?: (
     provider: ResolvedProvider,
     settings: StoredSettings
   ) => Promise<ValidateProviderResult>
@@ -239,7 +244,11 @@ class ProviderAccountsModule {
       settings,
       {
         ...provider,
-        ...buildProviderValidationPatch(provider, result, { model, endpoint: 'responses' })
+        ...buildProviderValidationPatch(
+          provider,
+          result,
+          result.testedTarget ?? { model, endpoint: 'responses' }
+        )
       },
       true
     )
@@ -627,8 +636,8 @@ class ProviderAccountsModule {
     }
     if (request.draft) {
       assertProviderDraftLimits(request.draft)
-      if (request.draft.type === 'custom' && request.draft.baseUrl?.trim()) {
-        const baseUrlError = getCustomProviderBaseUrlError(request.draft.baseUrl.trim())
+      if (request.draft.type === 'custom') {
+        const baseUrlError = getCustomProviderBaseUrlError(request.draft.baseUrl?.trim() ?? '')
         if (baseUrlError) throw new Error(baseUrlError)
       }
     }
@@ -662,15 +671,11 @@ class ProviderAccountsModule {
     )
     return {
       ...result,
-      testedTarget: {
+      testedTarget: result.testedTarget ?? {
         model: provider.model,
         endpoint: preferredEndpoint(
           provider.apiEndpoints ?? ['messages'],
-          this.validationFrameworkEndpoints(provider, settings) ?? [
-            'messages',
-            'chat-completions',
-            'responses'
-          ]
+          this.validationFrameworkEndpoints(provider, settings) ?? DEFAULT_ENDPOINT_ORDER
         )
       }
     }
@@ -687,7 +692,7 @@ class ProviderAccountsModule {
       : !incompatibility &&
           framework.id === 'codebuddy' &&
           requiresChatCompletionsBridge(provider, framework)
-        ? providerEndpoints(provider)
+        ? DEFAULT_ENDPOINT_ORDER
         : incompatibility || framework.id === 'codex'
           ? undefined
           : framework.supportedApiTypes
@@ -748,7 +753,7 @@ class ProviderAccountsModule {
       resolved.provider,
       settings
     )
-    const probeResult =
+    let probeResult =
       xaiAuthResult ??
       authResult ??
       (await validateProviderTarget(validationProvider, {
@@ -759,6 +764,34 @@ class ProviderAccountsModule {
           requiresNativeResponsesCompatibility(resolved.provider, framework),
         frameworkEndpoints: validationFrameworkEndpoints
       }))
+    // HTTP is the fast path. Every failed request gets one native attempt, without interpreting
+    // upstream status codes or messages. Subscription authentication keeps its existing owner.
+    if (
+      !probeResult.ok &&
+      !incompatibility &&
+      !authResult &&
+      !xaiAuthResult &&
+      (validationProvider.type === 'custom' || validationProvider.type === 'official') &&
+      this.options.runAcpValidation
+    ) {
+      const native = await this.options.runAcpValidation(validationProvider, settings)
+      probeResult = native.ok
+        ? {
+            ...native,
+            testedTarget: {
+              ...native.testedTarget,
+              model: validationProvider.model,
+              endpoint: preferredEndpoint(
+                validationProvider.apiEndpoints ?? ['messages'],
+                validationFrameworkEndpoints ?? DEFAULT_ENDPOINT_ORDER
+              )
+            }
+          }
+        : {
+            ...probeResult,
+            message: `HTTP: ${probeResult.message ?? probeResult.category}${probeResult.status ? ` (${probeResult.status})` : ''}; ACP: ${native.message ?? native.category}`
+          }
+    }
     const result = incompatibility
       ? {
           ...probeResult,
@@ -768,6 +801,9 @@ class ProviderAccountsModule {
           ...(probeResult.ok ? { message: incompatibility } : {})
         }
       : probeResult
+
+    if ((await this.repository.getSettings()).agentFrameworkId !== settings.agentFrameworkId)
+      return { ...result, applied: false }
 
     if (
       resolved.storedId &&
@@ -813,7 +849,7 @@ class ProviderAccountsModule {
             model: resolved.provider.model,
             endpoint: preferredEndpoint(
               resolved.provider.apiEndpoints ?? ['messages'],
-              validationFrameworkEndpoints ?? ['messages', 'chat-completions', 'responses']
+              validationFrameworkEndpoints ?? DEFAULT_ENDPOINT_ORDER
             )
           })
     const validationPatch = buildProviderValidationPatch(stored, result, validationTarget)
