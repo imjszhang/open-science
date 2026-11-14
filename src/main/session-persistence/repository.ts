@@ -830,9 +830,11 @@ class SessionRepository {
     }
   }
 
-  private async listProjectionSummaries(): Promise<SessionSummary[]> {
+  private async listProjectionSummaries(signal?: AbortSignal): Promise<SessionSummary[]> {
     const queuedAt = performance.now()
     return this.operationScheduler.runGlobal(async () => {
+      // A caller cancelled while queued behind global work: skip the read instead of running it.
+      signal?.throwIfAborted()
       const startedAt = performance.now()
       const summaries = await this.projection!.list()
       try {
@@ -850,11 +852,11 @@ class SessionRepository {
     })
   }
 
-  async loadSessionSummaries(): Promise<SessionSummary[]> {
+  async loadSessionSummaries(signal?: AbortSignal): Promise<SessionSummary[]> {
     if (!this.projection || !(await this.projection.isReady())) {
       throw new Error('Session projection is not ready.')
     }
-    return this.listProjectionSummaries()
+    return this.listProjectionSummaries(signal)
   }
 
   async loadSessionUsageProjection(): Promise<SessionUsageProjection> {
@@ -1013,6 +1015,7 @@ class SessionRepository {
     let isComplete =
       directories.isComplete && rootBefore !== undefined && deletionBefore !== undefined
     const owners = new Map<string, string>()
+    const memberships = new Map<string, Set<string>>()
     if (deletionBefore !== 'missing') {
       try {
         if ((await this.dependencies.readDirectoryEntries(this.deletedSessionsDir)).length > 0)
@@ -1038,7 +1041,9 @@ class SessionRepository {
         )
           isComplete = false
         if ((await this.getProjectSessionDeletionState(projectId)) !== 'live') isComplete = false
-        for (const name of new Set([...files.names, ...files.quarantinedPrimaryFileNames])) {
+        const membership = new Set([...files.names, ...files.quarantinedPrimaryFileNames])
+        memberships.set(path, membership)
+        for (const name of membership) {
           const id = assertSafeSegment(name.slice(0, -'.json'.length))
           if (owners.has(id) && owners.get(id) !== projectId) isComplete = false
           owners.set(id, projectId)
@@ -1047,6 +1052,36 @@ class SessionRepository {
         if (before !== (await this.catalogDirectoryStamp(path))) isComplete = false
       } catch {
         isComplete = false
+      }
+    }
+    // Directory timestamps can miss rapid membership changes on Windows.
+    if (isComplete) {
+      const current = await this.listDirectoryNames(this.sessionsDir, {
+        missingIsIncomplete: rootBefore !== 'missing'
+      })
+      const original = new Set(directories.names)
+      isComplete =
+        current.isComplete &&
+        current.names.length === original.size &&
+        current.names.every((name) => original.has(name))
+      for (const [path, membership] of memberships) {
+        const files = await this.listSessionFileNames(path, { missingIsIncomplete: true })
+        const current = new Set([...files.names, ...files.quarantinedPrimaryFileNames])
+        isComplete &&=
+          files.isComplete &&
+          !files.hasRecoveryEvidence &&
+          current.size === membership.size &&
+          [...current].every((name) => membership.has(name))
+      }
+      if (deletionBefore === 'missing') {
+        isComplete &&= (await this.catalogDirectoryStamp(this.deletedSessionsDir)) === 'missing'
+      } else {
+        try {
+          if ((await this.dependencies.readDirectoryEntries(this.deletedSessionsDir)).length > 0)
+            isComplete = false
+        } catch {
+          isComplete = false
+        }
       }
     }
     if (
